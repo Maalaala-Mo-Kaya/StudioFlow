@@ -1,0 +1,584 @@
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { pb } from '../../db/pocketbase';
+import { useToast } from '../../context/ToastContext';
+import type {
+  Organization, Level, Course, Package, AddOn,
+  Registration, MasterListItem, StaffUser, StaffRole,
+  FramingStatus, PhotoStatus,
+} from '../../types';
+import { parseRosterCsv, exportRegistrationsToCsv } from '../../utils/csv';
+import { PROTECTED_SYSTEM_USERNAMES } from '../../constants/studio';
+
+export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students';
+
+export function useAdminData() {
+  const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState<AdminTab>('metrics');
+
+  // Master Data
+  const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [levels, setLevels] = useState<Level[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [packages, setPackages] = useState<Package[]>([]);
+  const [addOns, setAddOns] = useState<AddOn[]>([]);
+  const [masterList, setMasterList] = useState<MasterListItem[]>([]);
+  const [staffAccounts, setStaffAccounts] = useState<StaffUser[]>([]);
+
+  // Form States
+  const [newOrgName, setNewOrgName] = useState('');
+  const [newOrgCode, setNewOrgCode] = useState('');
+
+  const [newPkgCode, setNewPkgCode] = useState('');
+  const [newPkgName, setNewPkgName] = useState('');
+  const [newPkgAmount, setNewPkgAmount] = useState<number>(1000);
+  const [newPkgInclusions, setNewPkgInclusions] = useState('');
+
+  // Roster CSV Upload State
+  const [csvText, setCsvText] = useState('');
+  const [rosterOrgId, setRosterOrgId] = useState('');
+
+  // New Staff Account State
+  const [staffUsername, setStaffUsername] = useState('');
+  const [staffPassword, setStaffPassword] = useState('');
+  const [staffName, setStaffName] = useState('');
+  const [staffRole, setStaffRole] = useState<StaffRole>('cashier');
+
+  const loadAllData = useCallback(async () => {
+    try {
+      const [regsRes, orgsRes, levelsRes, coursesRes, pkgsRes, addonsRes, rosterRes, usersRes] =
+        await Promise.all([
+          pb.collection('registrations').getFullList<Registration>({
+            sort: '-created',
+            expand: 'organization,level,course,package',
+            requestKey: null,
+          }),
+          pb.collection('organizations').getFullList<Organization>({ requestKey: null }),
+          pb.collection('levels').getFullList<Level>({ requestKey: null }),
+          pb.collection('courses').getFullList<Course>({ requestKey: null }),
+          pb.collection('packages').getFullList<Package>({ requestKey: null }),
+          pb.collection('add_ons').getFullList<AddOn>({ requestKey: null }),
+          pb.collection('master_lists').getFullList<MasterListItem>({ requestKey: null }),
+          pb.collection('users').getFullList<StaffUser>({ requestKey: null }).catch(() => []),
+        ]);
+
+      setRegistrations(regsRes);
+      setOrganizations(orgsRes);
+      setLevels(levelsRes);
+      setCourses(coursesRes);
+      setPackages(pkgsRes);
+      setAddOns(addonsRes);
+      setMasterList(rosterRes);
+      setStaffAccounts(usersRes);
+      if (orgsRes.length > 0 && !rosterOrgId) setRosterOrgId(orgsRes[0].id);
+    } catch (err) {
+      if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
+      console.error('Failed to load admin data:', err);
+    }
+  }, [rosterOrgId]);
+
+  useEffect(() => {
+    loadAllData();
+    pb.collection('registrations').subscribe('*', () => {
+      loadAllData();
+    });
+    return () => {
+      pb.collection('registrations').unsubscribe('*');
+    };
+  }, [loadAllData]);
+
+  // Metrics Calculations
+  const metrics = useMemo(() => {
+    const totalRegistrations = registrations.length;
+    const totalPaidShooting = registrations.filter((r) => r.status !== 'pending_payment').length;
+    const totalCompleted = registrations.filter(
+      (r) => r.status === 'done_shooting' || r.status === 'completed'
+    ).length;
+    const totalCollections = registrations.reduce((sum, r) => sum + (r.paid_amount || 0), 0);
+    const totalOutstandingBalances = registrations.reduce((sum, r) => sum + (r.balance || 0), 0);
+
+    return {
+      totalRegistrations,
+      totalPaidShooting,
+      totalCompleted,
+      totalCollections,
+      totalOutstandingBalances,
+    };
+  }, [registrations]);
+
+  // Add Organization
+  const handleAddOrg = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newOrgName.trim()) return;
+    try {
+      await pb.collection('organizations').create({
+        name: newOrgName.trim(),
+        code: newOrgCode.trim().toUpperCase(),
+        is_active: true,
+      });
+      setNewOrgName('');
+      setNewOrgCode('');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to add organization:', err);
+    }
+  };
+
+  // Add Package
+  const handleAddPackage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPkgName.trim() || !newPkgCode.trim()) return;
+    try {
+      const inclusions = newPkgInclusions
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      await pb.collection('packages').create({
+        code: newPkgCode.trim().toUpperCase(),
+        name: newPkgName.trim(),
+        amount: Number(newPkgAmount),
+        inclusions: JSON.stringify(inclusions),
+        is_active: true,
+      });
+
+      setNewPkgCode('');
+      setNewPkgName('');
+      setNewPkgInclusions('');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to add package:', err);
+    }
+  };
+
+  // Import Roster
+  const handleImportRoster = async () => {
+    const rows = parseRosterCsv(csvText);
+    if (rows.length === 0) return;
+
+    let imported = 0;
+    for (const item of rows) {
+      try {
+        await pb.collection('master_lists').create({
+          organization: rosterOrgId,
+          full_name: item.full_name,
+          student_id: item.student_id,
+          section: item.section,
+          email: item.email,
+          mobile_number: item.mobile_number,
+        });
+        imported++;
+      } catch {
+        // Continue with remaining rows if one fails
+      }
+    }
+
+    toast.success(`Successfully imported ${imported} roster records!`);
+    setCsvText('');
+    loadAllData();
+  };
+
+  // Create Staff Account
+  const handleCreateStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUsername = staffUsername.trim().toLowerCase().replace(/[^a-z0-9._]/g, '');
+
+    if (!cleanUsername || cleanUsername.length < 3) {
+      toast.error('Username must be at least 3 characters and contain only letters, numbers, or dots.');
+      return;
+    }
+
+    if (!staffPassword || staffPassword.length < 8) {
+      toast.error('Password must be at least 8 characters long.');
+      return;
+    }
+
+    // Pre-check for duplicate username
+    if (staffAccounts.some((a) => a.username.toLowerCase() === cleanUsername)) {
+      toast.error(`Username "${cleanUsername}" is already in use by an active staff account.`);
+      return;
+    }
+
+    try {
+      await pb.collection('users').create({
+        username: cleanUsername,
+        email: `${cleanUsername}@hilightstudio.com`,
+        password: staffPassword,
+        passwordConfirm: staffPassword,
+        name: staffName.trim() || cleanUsername,
+        role: staffRole,
+      });
+
+      setStaffUsername('');
+      setStaffPassword('');
+      setStaffName('');
+      toast.success(`Provisioned ${staffRole.toUpperCase()} account "${cleanUsername}"!`);
+      loadAllData();
+    } catch (err: unknown) {
+      console.error('Failed to create staff account:', err);
+      let errorMsg = 'Failed to create staff account.';
+      if (typeof err === 'object' && err !== null) {
+        const anyErr = err as {
+          response?: { data?: Record<string, { message?: string }> };
+          message?: string;
+        };
+        if (anyErr.response?.data && Object.keys(anyErr.response.data).length > 0) {
+          const details = Object.entries(anyErr.response.data)
+            .map(([field, errObj]) => `${field}: ${errObj?.message || JSON.stringify(errObj)}`)
+            .join('; ');
+          errorMsg = `Validation failed — ${details}`;
+        } else if (anyErr.message) {
+          errorMsg = anyErr.message;
+        }
+      }
+      toast.error(errorMsg);
+    }
+  };
+
+  const handleDeleteStaff = async (id: string, username: string) => {
+    if ((PROTECTED_SYSTEM_USERNAMES as readonly string[]).includes(username)) {
+      toast.error('Default system role accounts cannot be deleted.');
+      return;
+    }
+    try {
+      await pb.collection('users').delete(id);
+      toast.success(`Staff user @${username} deleted.`);
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to delete staff:', err);
+      toast.error('Failed to delete staff user.');
+    }
+  };
+
+  const handleUpdateFramingStatus = async (id: string, framingStatus: FramingStatus) => {
+    try {
+      await pb.collection('registrations').update(id, {
+        framing_status: framingStatus,
+      });
+      toast.success('Framing status updated.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to update framing status:', err);
+      toast.error('Failed to update framing status.');
+    }
+  };
+
+  const handleUpdatePhotoStatus = async (id: string, photoStatus: PhotoStatus) => {
+    try {
+      await pb.collection('registrations').update(id, {
+        photo_status: photoStatus,
+      });
+      toast.success('Photo production status updated.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to update photo status:', err);
+      toast.error('Failed to update photo status.');
+    }
+  };
+
+  // --- Organization & Course Mutations (T018, T019) ---
+  const handleUpdateOrg = async (id: string, name: string, code: string) => {
+    try {
+      await pb.collection('organizations').update(id, {
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+      });
+      toast.success('Organization updated.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to update organization:', err);
+      toast.error('Failed to update organization.');
+    }
+  };
+
+  const handleToggleOrgActive = async (id: string, current: boolean) => {
+    try {
+      await pb.collection('organizations').update(id, { is_active: !current });
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to toggle organization status:', err);
+    }
+  };
+
+  const handleDeleteOrg = async (id: string) => {
+    try {
+      await pb.collection('organizations').delete(id);
+      toast.success('Organization deleted.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to delete organization:', err);
+      toast.error('Failed to delete organization.');
+    }
+  };
+
+  const handleAddCourse = async (name: string, code: string, levelId: string) => {
+    if (!name.trim() || !levelId) return;
+    try {
+      await pb.collection('courses').create({
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        level: levelId,
+      });
+      toast.success(`Course ${code} created.`);
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to add course:', err);
+      toast.error('Failed to add course.');
+    }
+  };
+
+  const handleUpdateCourse = async (id: string, name: string, code: string, levelId: string) => {
+    try {
+      await pb.collection('courses').update(id, {
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        level: levelId,
+      });
+      toast.success('Course updated.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to update course:', err);
+      toast.error('Failed to update course.');
+    }
+  };
+
+  const handleDeleteCourse = async (id: string) => {
+    try {
+      await pb.collection('courses').delete(id);
+      toast.success('Course deleted.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to delete course:', err);
+      toast.error('Failed to delete course.');
+    }
+  };
+
+  // --- Package & Add-on Mutations (T020) ---
+  const handleUpdatePackage = async (
+    id: string,
+    data: { name: string; code: string; amount: number; inclusions: string[] }
+  ) => {
+    try {
+      await pb.collection('packages').update(id, {
+        name: data.name.trim(),
+        code: data.code.trim().toUpperCase(),
+        amount: Number(data.amount),
+        inclusions: JSON.stringify(data.inclusions),
+      });
+      toast.success(`Package ${data.code} updated.`);
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to update package:', err);
+      toast.error('Failed to update package.');
+    }
+  };
+
+  const handleTogglePackageActive = async (id: string, current: boolean) => {
+    try {
+      await pb.collection('packages').update(id, { is_active: !current });
+      toast.success(`Package ${!current ? 'activated' : 'deactivated'}.`);
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to toggle package:', err);
+      toast.error('Failed to toggle package status.');
+    }
+  };
+
+  const handleDeletePackage = async (id: string) => {
+    try {
+      await pb.collection('packages').delete(id);
+      toast.success('Package deleted.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to delete package:', err);
+      toast.error('Failed to delete package.');
+    }
+  };
+
+  const handleAddAddOn = async (name: string, code: string, amount: number) => {
+    if (!name.trim()) return;
+    try {
+      await pb.collection('add_ons').create({
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        amount: Number(amount),
+        is_active: true,
+      });
+      toast.success(`Add-on ${name} added.`);
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to add add-on:', err);
+      toast.error('Failed to add add-on.');
+    }
+  };
+
+  const handleUpdateAddOn = async (
+    id: string,
+    name: string,
+    code: string,
+    amount: number
+  ) => {
+    try {
+      await pb.collection('add_ons').update(id, {
+        name: name.trim(),
+        code: code.trim().toUpperCase(),
+        amount: Number(amount),
+      });
+      toast.success(`Add-on ${name} updated.`);
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to update add-on:', err);
+      toast.error('Failed to update add-on.');
+    }
+  };
+
+  const handleToggleAddOnActive = async (id: string, current: boolean) => {
+    try {
+      await pb.collection('add_ons').update(id, { is_active: !current });
+      toast.success(`Add-on ${!current ? 'activated' : 'deactivated'}.`);
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to toggle add-on:', err);
+      toast.error('Failed to toggle add-on status.');
+    }
+  };
+
+  const handleDeleteAddOn = async (id: string) => {
+    try {
+      await pb.collection('add_ons').delete(id);
+      toast.success('Add-on deleted.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to delete add-on:', err);
+      toast.error('Failed to delete add-on.');
+    }
+  };
+
+  // --- Master Roster Mutations (T021, T022) ---
+  const handleDeleteMasterListItem = async (id: string) => {
+    try {
+      await pb.collection('master_lists').delete(id);
+      toast.success('Roster item deleted.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to delete roster item:', err);
+      toast.error('Failed to delete roster item.');
+    }
+  };
+
+  const handleClearMasterList = async (orgId: string) => {
+    try {
+      const items = await pb.collection('master_lists').getFullList({
+        filter: pb.filter('organization = {:orgId}', { orgId }),
+        requestKey: null,
+      });
+      for (const item of items) {
+        await pb.collection('master_lists').delete(item.id);
+      }
+      toast.success('Organization master list cleared.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to clear master list:', err);
+      toast.error('Failed to clear master list.');
+    }
+  };
+
+  // --- Student Registration Mutations (T028) ---
+  const handleUpdateRegistration = async (id: string, data: Partial<Registration>) => {
+    try {
+      await pb.collection('registrations').update(id, data);
+      toast.success('Student registration updated.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to update registration:', err);
+      toast.error('Failed to update registration: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
+  };
+
+  const handleDeleteRegistration = async (id: string) => {
+    try {
+      await pb.collection('registrations').delete(id);
+      toast.success('Registration cancelled and deleted.');
+      loadAllData();
+    } catch (err) {
+      console.error('Failed to delete registration:', err);
+      toast.error('Failed to delete registration.');
+    }
+  };
+
+  const exportCsv = useCallback(() => {
+    exportRegistrationsToCsv(registrations);
+  }, [registrations]);
+
+  return {
+    activeTab,
+    setActiveTab,
+    registrations,
+    organizations,
+    levels,
+    courses,
+    packages,
+    addOns,
+    masterList,
+    staffAccounts,
+    metrics,
+    // Add Org Form
+    newOrgName,
+    setNewOrgName,
+    newOrgCode,
+    setNewOrgCode,
+    handleAddOrg,
+    // Add Pkg Form
+    newPkgCode,
+    setNewPkgCode,
+    newPkgName,
+    setNewPkgName,
+    newPkgAmount,
+    setNewPkgAmount,
+    newPkgInclusions,
+    setNewPkgInclusions,
+    handleAddPackage,
+    // Roster Ingestion
+    csvText,
+    setCsvText,
+    rosterOrgId,
+    setRosterOrgId,
+    handleImportRoster,
+    // Staff Management
+    staffUsername,
+    setStaffUsername,
+    staffPassword,
+    setStaffPassword,
+    staffName,
+    setStaffName,
+    staffRole,
+    setStaffRole,
+    handleCreateStaff,
+    handleDeleteStaff,
+    handleUpdateFramingStatus,
+    handleUpdatePhotoStatus,
+    // School & Course Mutations
+    handleUpdateOrg,
+    handleToggleOrgActive,
+    handleDeleteOrg,
+    handleAddCourse,
+    handleUpdateCourse,
+    handleDeleteCourse,
+    // Package & Add-on Mutations
+    handleUpdatePackage,
+    handleTogglePackageActive,
+    handleDeletePackage,
+    handleAddAddOn,
+    handleUpdateAddOn,
+    handleToggleAddOnActive,
+    handleDeleteAddOn,
+    // Master List Mutations
+    handleDeleteMasterListItem,
+    handleClearMasterList,
+    // Student Registration Mutations
+    handleUpdateRegistration,
+    handleDeleteRegistration,
+    // Report Export
+    exportCsv,
+  };
+}
