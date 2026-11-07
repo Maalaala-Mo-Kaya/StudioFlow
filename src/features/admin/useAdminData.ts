@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import type {
-  Organization, Level, Course, SchoolCourse, Package, AddOn,
+  Organization, Level, Course, SchoolCourse, AssignSchoolCourse, Package, AddOn,
   Registration, MasterListItem, StaffUser, StaffRole,
   FramingStatus, PhotoStatus,
 } from '../../types';
@@ -21,6 +21,7 @@ export function useAdminData() {
   const [levels, setLevels] = useState<Level[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [schoolCourses, setSchoolCourses] = useState<SchoolCourse[]>([]);
+  const [courseCatalogStatus, setCourseCatalogStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [packages, setPackages] = useState<Package[]>([]);
   const [addOns, setAddOns] = useState<AddOn[]>([]);
   const [masterList, setMasterList] = useState<MasterListItem[]>([]);
@@ -69,6 +70,7 @@ export function useAdminData() {
       setLevels(levelsRes);
       setCourses(coursesRes);
       setSchoolCourses(schoolCoursesRes);
+      setCourseCatalogStatus('ready');
       setPackages(pkgsRes);
       setAddOns(addonsRes);
       setMasterList(rosterRes);
@@ -76,6 +78,7 @@ export function useAdminData() {
       if (orgsRes.length > 0 && !rosterOrgId) setRosterOrgId(orgsRes[0].id);
     } catch (err) {
       if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
+      setCourseCatalogStatus((status) => status === 'ready' ? status : 'error');
       console.error('Failed to load admin data:', err);
     }
   }, [rosterOrgId]);
@@ -314,10 +317,10 @@ export function useAdminData() {
     }
   };
 
-  const handleAddCourse = async (schoolId: string, levelId: string, name: string, code: string) => {
+  const handleAddCourse = async (assignment: AssignSchoolCourse) => {
     await pb.send('/api/studioflow/school-courses', {
       method: 'POST',
-      body: { schoolId, levelId, name, code },
+      body: assignment,
     });
     await loadAllData();
   };
@@ -500,6 +503,7 @@ export function useAdminData() {
     levels,
     courses,
     schoolCourses,
+    courseCatalogStatus,
     packages,
     addOns,
     masterList,

@@ -1,14 +1,18 @@
 import React, { useState } from 'react';
 import { Edit3, Trash2, Building, GraduationCap } from 'lucide-react';
-import type { Organization, Level, Course, SchoolCourse } from '../../../types';
+import type { Organization, Level, Course, SchoolCourse, AssignSchoolCourse } from '../../../types';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
+import { CourseAutocomplete } from './CourseAutocomplete';
+
+const catalogKey = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
 
 interface AdminOrgsTabProps {
   organizations: Organization[];
   levels: Level[];
   courses: Course[];
   schoolCourses: SchoolCourse[];
+  courseCatalogStatus: 'loading' | 'ready' | 'error';
   newOrgName: string;
   onNewOrgNameChange: (val: string) => void;
   newOrgCode: string;
@@ -17,7 +21,7 @@ interface AdminOrgsTabProps {
   onUpdateOrg: (id: string, name: string, code: string) => Promise<void>;
   onToggleOrgActive: (id: string, current: boolean) => Promise<void>;
   onDeleteOrg: (id: string) => Promise<void>;
-  onAddCourse: (schoolId: string, levelId: string, name: string, code: string) => Promise<void>;
+  onAddCourse: (assignment: AssignSchoolCourse) => Promise<void>;
   onUpdateCourse: (id: string, name: string, code: string) => Promise<void>;
   onRemoveCourse: (assignmentId: string) => Promise<void>;
 }
@@ -27,6 +31,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
   levels,
   courses,
   schoolCourses,
+  courseCatalogStatus,
   newOrgName,
   onNewOrgNameChange,
   newOrgCode,
@@ -46,7 +51,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
   // Offer existing level names as templates for schools that have not set them up yet.
   const levelOptions = [...schoolLevels];
   for (const level of levels) {
-    if (!levelOptions.some((option) => option.name.toLowerCase() === level.name.toLowerCase())) {
+    if (!levelOptions.some((option) => catalogKey(option.name) === catalogKey(level.name))) {
       levelOptions.push(level);
     }
   }
@@ -64,10 +69,22 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
   // Course Form State
   const [newCourseName, setNewCourseName] = useState('');
   const [newCourseCode, setNewCourseCode] = useState('');
+  const [selectedCourseId, setSelectedCourseId] = useState<string>();
   const [preferredLevelId, setPreferredLevelId] = useState('');
   const [addingCourse, setAddingCourse] = useState(false);
-  const selectedLevelId = levelOptions.find((level) => level.id === preferredLevelId)?.id
-    ?? levelOptions[0]?.id ?? '';
+  const selectedLevel = levelOptions.find((level) => level.id === preferredLevelId) ?? levelOptions[0];
+  const selectedLevelId = selectedLevel?.id ?? '';
+  const levelNamesById = new Map(levels.map((level) => [level.id, catalogKey(level.name)]));
+  const chosenLevelName = catalogKey(selectedLevel?.name ?? '');
+  const assignedCourseIds = new Set<string>();
+  const eligibleCourseIds = new Set<string>();
+  for (const assignment of schoolCourses) {
+    assignedCourseIds.add(assignment.course_id);
+    if (levelNamesById.get(assignment.level) === chosenLevelName) {
+      eligibleCourseIds.add(assignment.course_id);
+    }
+  }
+  const searchableCourses = courses.filter((course) => !assignedCourseIds.has(course.id) || eligibleCourseIds.has(course.id));
 
   // Editing Course State
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
@@ -121,15 +138,33 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
     }
   };
 
+  const selectCourse = (course: Course) => {
+    setNewCourseName(course.name);
+    setNewCourseCode(course.code ?? '');
+    setSelectedCourseId(course.id);
+  };
+
   const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSchool || !selectedLevelId || addingCourse || (!newCourseName.trim() && !newCourseCode.trim())) return;
+    if (!selectedSchool || !selectedLevelId || addingCourse) return;
+    const name = newCourseName.trim();
+    const code = newCourseCode.trim();
+    if (!name || (!code && !selectedCourseId)) {
+      toast.error('Enter a course name and code, or select an existing course.');
+      return;
+    }
+    if (selectedCourseId && !searchableCourses.some((course) => course.id === selectedCourseId)
+      && !assignedCourses.some(({ course }) => course.id === selectedCourseId)) {
+      toast.error('This course is not available for the selected academic level.');
+      return;
+    }
     setAddingCourse(true);
     try {
-      await onAddCourse(selectedSchool.id, selectedLevelId, newCourseName, newCourseCode);
+      await onAddCourse({ schoolId: selectedSchool.id, levelId: selectedLevelId, name, code, courseId: selectedCourseId });
       toast.success(`Course assigned to "${selectedSchool.name}".`);
       setNewCourseName('');
       setNewCourseCode('');
+      setSelectedCourseId(undefined);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to add course');
     } finally {
@@ -373,35 +408,36 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label htmlFor="new-course-name" className="block text-[10px] font-black uppercase mb-1">
-                      Course Name
-                    </label>
-                    <input
-                      id="new-course-name"
-                      type="text"
-                      placeholder="Bachelor of Science in Nursing"
-                      value={newCourseName}
-                      onChange={(e) => setNewCourseName(e.target.value)}
-                      className="w-full p-2 bg-white border border-[#0A0A0A] font-semibold"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="new-course-code" className="block text-[10px] font-black uppercase mb-1">
-                      Course Code
-                    </label>
-                    <input
-                      id="new-course-code"
-                      type="text"
-                      placeholder="BSN"
-                      value={newCourseCode}
-                      onChange={(e) => setNewCourseCode(e.target.value)}
-                      className="w-full p-2 bg-white border border-[#0A0A0A] uppercase font-bold"
-                    />
-                  </div>
+                <div className="relative grid grid-cols-2 gap-2">
+                  <CourseAutocomplete
+                    field="name"
+                    value={newCourseName}
+                    courses={searchableCourses}
+                    status={courseCatalogStatus}
+                    onChange={(value) => {
+                      setSelectedCourseId(undefined);
+                      setNewCourseName(value);
+                    }}
+                    onSelect={selectCourse}
+                  />
+                  <CourseAutocomplete
+                    field="code"
+                    value={newCourseCode}
+                    courses={searchableCourses}
+                    status={courseCatalogStatus}
+                    onChange={(value) => {
+                      setSelectedCourseId(undefined);
+                      setNewCourseCode(value);
+                    }}
+                    onSelect={selectCourse}
+                  />
                 </div>
-                <p className="text-[10px] text-neutral-600">Enter an existing course code to reuse it. New courses require a name.</p>
+                <p className="text-[10px] text-neutral-600" role="status">
+                  {courseCatalogStatus === 'loading' ? 'Loading course catalog…'
+                    : courseCatalogStatus === 'error' ? 'Could not load the course catalog. Refresh to try again.'
+                    : selectedCourseId ? 'Existing course selected.'
+                    : 'Search by course name or code, or enter both to add a new course.'}
+                </p>
 
                 <button
                   type="submit"

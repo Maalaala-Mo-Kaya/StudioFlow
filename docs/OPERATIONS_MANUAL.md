@@ -59,7 +59,7 @@ StudioFlow V2 operates exclusively over an isolated Local Area Network (LAN). No
 ## 4. Standard Operational Procedures
 
 ### A. Administration & Configuration
-* **Schools & Degree Courses**: Navigate to `#/admin` → **"Schools & Courses"**. Select a school card to see its programs by academic level. Enter an existing course code to assign the shared program, or enter a name to create a new one. Editing the course changes it for every school that offers it. Removing it only removes it from the selected school.
+* **Schools & Degree Courses**: Navigate to `#/admin` → **"Schools & Courses"**. Select a school card and academic level, then search by course name or code. Pick a suggestion to assign the shared program, or enter both a name and code to create a new one. Editing the course changes it for every school that offers it. Removing it only removes it from the selected school.
 * **Packages & Add-ons**: Navigate to `#/admin` → **"Packages"**. Define package codes, amounts, and multi-line inclusions. Create ala-carte add-ons (extra 8R frame, hair and makeup, additional wallets).
 * **Master Roster Ingestion**: Navigate to `#/admin` → **"Master Roster"**. Select target organization and paste batch CSV lines. The real-time validator previews valid rows and flags format errors before commit.
 * **Student Info Management**: Navigate to `#/admin` → **"Students"**. Search and correct any typos in student names, student IDs, section, or package assignments.

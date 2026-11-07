@@ -57,6 +57,14 @@ export interface Course {
   code?: string;
 }
 
+export interface AssignSchoolCourse {
+  schoolId: string;
+  levelId: string;
+  courseId?: string;
+  name: string;
+  code: string;
+}
+
 export interface SchoolCourse {
   id: string;
   school_id: string;

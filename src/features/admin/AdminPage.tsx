@@ -49,6 +49,7 @@ export const AdminPage: React.FC = () => {
               levels={admin.levels}
               courses={admin.courses}
               schoolCourses={admin.schoolCourses}
+              courseCatalogStatus={admin.courseCatalogStatus}
               newOrgName={admin.newOrgName}
               onNewOrgNameChange={admin.setNewOrgName}
               newOrgCode={admin.newOrgCode}
