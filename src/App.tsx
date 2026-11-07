@@ -71,7 +71,7 @@ export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
-        <div className="min-h-dvh bg-[#F8F7F4] flex flex-col font-sans text-[#0A0A0A]">
+        <div className="group/app-shell min-h-dvh bg-[#F8F7F4] flex flex-col font-sans text-[#0A0A0A]">
         <Navbar currentTab={currentTab} onSelectTab={handleSelectTab} queueCount={queueCount} />
 
         <main className="flex-1">
@@ -103,7 +103,7 @@ export default function App() {
           )}
         </main>
 
-        <footer className="no-print bg-[#0A0A0A] text-neutral-400 border-t-2 border-[#C9A227] py-6 mt-12 text-xs">
+        <footer className="no-print group-has-[[data-student-overall]]/app-shell:hidden bg-[#0A0A0A] text-neutral-400 border-t-2 border-[#C9A227] py-6 mt-12 text-xs">
           <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left font-mono">
             <div>
               <strong className="text-[#C9A227] uppercase tracking-wider">Hi-Light Studio</strong> •

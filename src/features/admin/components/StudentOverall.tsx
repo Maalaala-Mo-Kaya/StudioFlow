@@ -4,7 +4,7 @@ import { pb } from '../../../db/pocketbase';
 import type { Course, Level, Organization, Package, PaymentRecord, Registration } from '../../../types';
 import { sumAddOnAmounts } from '../../../utils/registrationAddOns';
 import {
-  amountColumns, buildOverallRows, displayReportDate, overallAmount, reportPackageFor, reportPackages, summarizeOverallRows,
+  amountColumns, buildOverallRows, displayReportDate, overallAmount, reportPackages, summarizeOverallRows,
 } from '../studentOverallData';
 import type { OverallLevel, OverallRow, PackageColumn, PackageMapping } from '../studentOverallData';
 import { StudentDirectoryFilters } from './StudentDirectoryFilters';
@@ -61,7 +61,7 @@ function readMapping(): PackageMapping {
       return Object.fromEntries(Object.entries(value).filter(([, id]) => id === '' || reportPackages.some((pkg) => pkg.id === id)));
     }
   } catch {
-    // The catalog can still be mapped for this session.
+    // Fall back to the catalog when no saved mapping can be read.
   }
   return {};
 }
@@ -125,16 +125,7 @@ function reportCell(row: OverallRow, id: Column) {
   switch (id) {
     case 'date': case 'studio': return '—';
     case 'course': return <div className="min-w-24 max-w-52">{row.course || row.courseCode || '—'}</div>;
-    case 'name': return (
-      <details className="min-w-32">
-        <summary className="cursor-pointer font-bold">{row.name}</summary>
-        <div className="mt-1 space-y-1 whitespace-normal text-[11px] text-neutral-600">
-          <div>JO № {row.jobOrder || '—'} · Queue {row.queue || '—'}</div>
-          {row.school && <div>{row.school}</div>}
-          <div>Billed {money(row.due)} · Received {money(row.total)}</div>
-        </div>
-      </details>
-    );
+    case 'name': return <div className="min-w-32 font-bold">{row.name}</div>;
     case 'packageCode': return row.packageName ? (
       <div className="min-w-28 max-w-48 whitespace-normal">
         <div className="font-bold">{row.packageCode || row.packageName}</div>
@@ -164,7 +155,7 @@ function reportCell(row: OverallRow, id: Column) {
 
 export function StudentOverall({ title, level, registrations, organizations, levels, courses, packages }: StudentOverallProps) {
   const { ledger, retry } = usePaymentLedger();
-  const [mapping, setMapping] = useState(readMapping);
+  const [mapping] = useState(readMapping);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState(emptyFilters);
   const [columnOverrides, setColumnOverrides] = useState<Partial<Record<Column, boolean>>>({});
@@ -227,19 +218,8 @@ export function StudentOverall({ title, level, registrations, organizations, lev
 
   const totals = summarizeOverallRows(shownRows);
 
-  function updateMapping(pkg: Package, value: string) {
-    const column = reportPackages.find(({ id }) => id === value)?.id ?? '';
-    const next = { ...mapping, [pkg.id]: column };
-    setMapping(next);
-    try {
-      localStorage.setItem(mappingKey, JSON.stringify(next));
-    } catch {
-      // Keep the current session mapping.
-    }
-  }
-
   return (
-    <div className="min-w-0 space-y-5 font-mono text-xs">
+    <div data-student-overall className="min-w-0 space-y-5 font-mono text-xs">
       <StudentDirectoryFilters
         query={query}
         onQueryChange={setQuery}
@@ -267,7 +247,7 @@ export function StudentOverall({ title, level, registrations, organizations, lev
             <h3 className="font-black uppercase tracking-wider">{title}</h3>
             {ledger.status === 'ready' && <span className="text-neutral-600">Showing {shownRows.length} of {rows.length} students</span>}
           </div>
-          {ledger.status === 'ready' && (
+          {ledger.status === 'ready' && shownRows.length > 0 && (
             <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
                 ['Students', totals.count],
@@ -281,28 +261,6 @@ export function StudentOverall({ title, level, registrations, organizations, lev
                 </div>
               ))}
             </dl>
-          )}
-          <p className="text-neutral-600">Package columns show catalog prices. Billed and outstanding amounts follow the saved registrations and payments. Open a name for the job order and queue.</p>
-          {!!packages.length && (
-            <details>
-              <summary className="cursor-pointer font-bold">Map catalog packages to report columns</summary>
-              <p className="my-2 text-neutral-600">Mappings apply to both reports in this browser.</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {packages.map((pkg) => (
-                  <label key={pkg.id} className="grid min-w-0 gap-1">
-                    <span>{pkg.name} ({pkg.code || pkg.id}) · {peso.format(pkg.amount)} <span className="text-neutral-500">[{pkg.id}]</span></span>
-                    <select
-                      value={reportPackageFor(pkg, mapping) ?? ''}
-                      onChange={(event) => updateMapping(pkg, event.target.value)}
-                      className="w-full min-w-0 border border-neutral-300 bg-[#F8F7F4] p-1.5"
-                    >
-                      <option value="">Use catalog column</option>
-                      {reportPackages.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-                    </select>
-                  </label>
-                ))}
-              </div>
-            </details>
           )}
         </div>
 
@@ -339,6 +297,13 @@ export function StudentOverall({ title, level, registrations, organizations, lev
                 </tr>
               </thead>
               <tbody>
+                {shownRows.length === 0 && (
+                  <tr>
+                    {visibleColumns.map(({ id }) => (
+                      <td key={id} className={`px-2.5 py-2 text-neutral-500 ${isMonetary(id) ? 'text-right' : ''}`}>—</td>
+                    ))}
+                  </tr>
+                )}
                 {shownRows.map((row) => (
                   <tr key={row.id} className="even:bg-[#F8F7F4] hover:bg-[#F7F2E0]">
                     {visibleColumns.map(({ id }) => (
@@ -348,9 +313,8 @@ export function StudentOverall({ title, level, registrations, organizations, lev
                     ))}
                   </tr>
                 ))}
-                {!shownRows.length && <tr><td colSpan={visibleColumns.length} className="p-6 text-neutral-600">No students match the current view and filters.</td></tr>}
               </tbody>
-              <tfoot className="bg-[#F7F2E0] font-bold">
+              <tfoot hidden={shownRows.length === 0} className="bg-[#F7F2E0] font-bold">
                 <tr>
                   {visibleColumns.map(({ id }, index) => (
                     <td key={id} className="border-t-2 border-[#0A0A0A] px-2.5 py-2 whitespace-nowrap">
