@@ -38,6 +38,7 @@ export const AdminPage: React.FC = () => {
               organizations={admin.organizations}
               registrations={admin.registrations}
               packages={admin.packages}
+              payments={admin.payments}
               onExportCsv={admin.exportCsv}
             />
           )}

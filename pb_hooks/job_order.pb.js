@@ -106,6 +106,7 @@ onRecordCreate((e) => {
   const amount = e.record.getFloat("amount");
   const paymentType = e.record.getString("payment_type");
   const paymentMethod = e.record.getString("payment_method");
+  if (!e.record.getString("status")) e.record.set("status", "completed");
 
   if (!regId) throw new BadRequestError("A job order is required.");
   const reg = e.app.findRecordById("registrations", regId);
@@ -218,6 +219,33 @@ onRecordCreate((e) => {
   }
 
   return res;
+}, "payments");
+
+// Keep the job-order totals synchronized when an administrator voids or refunds
+// an existing transaction. The payment row remains in place for the audit trail.
+onRecordUpdate((e) => {
+  const status = e.record.getString("status") || "completed";
+  if (!["completed", "voided", "refunded"].includes(status)) {
+    throw new BadRequestError("Invalid payment transaction status.");
+  }
+  const result = e.next();
+  const regId = e.record.getString("registration");
+  if (!regId) return result;
+
+  const reg = e.app.findRecordById("registrations", regId);
+  const records = e.app.findRecordsByFilter("payments", "registration = {:registration}", "created", 0, 0, {
+    registration: regId,
+  });
+  const paid = records.reduce((sum, payment) => {
+    const paymentStatus = payment.getString("status") || "completed";
+    return paymentStatus === "completed" ? sum + Math.round(payment.getFloat("amount") * 100) : sum;
+  }, 0) / 100;
+  const balance = Math.max(0, (reg.getFloat("total_amount") || 0) - paid);
+  reg.set("paid_amount", paid);
+  reg.set("balance", balance);
+  reg.set("payment_status", paid <= 0 ? "unpaid" : balance <= 0 ? "fully_paid" : "downpayment");
+  e.app.save(reg);
+  return result;
 }, "payments");
 
 /**

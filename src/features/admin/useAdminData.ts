@@ -4,7 +4,7 @@ import { useToast } from '../../context/ToastContext';
 import type {
   Organization, Level, Course, SchoolCourse, AssignSchoolCourse, Package, AddOn,
   Registration, MasterListItem, StaffUser, StaffRole,
-  FramingStatus, PhotoStatus,
+  FramingStatus, PhotoStatus, PaymentRecord,
 } from '../../types';
 import { parseRosterCsv, exportRegistrationsToCsv } from '../../utils/csv';
 import { PROTECTED_SYSTEM_USERNAMES } from '../../constants/studio';
@@ -26,6 +26,7 @@ export function useAdminData() {
   const [addOns, setAddOns] = useState<AddOn[]>([]);
   const [masterList, setMasterList] = useState<MasterListItem[]>([]);
   const [staffAccounts, setStaffAccounts] = useState<StaffUser[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
 
   // Form States
   const [newOrgName, setNewOrgName] = useState('');
@@ -48,7 +49,7 @@ export function useAdminData() {
 
   const loadAllData = useCallback(async () => {
     try {
-      const [regsRes, orgsRes, levelsRes, coursesRes, schoolCoursesRes, pkgsRes, addonsRes, rosterRes, usersRes] =
+      const [regsRes, orgsRes, levelsRes, coursesRes, schoolCoursesRes, pkgsRes, addonsRes, rosterRes, usersRes, paymentsRes] =
         await Promise.all([
           pb.collection('registrations').getFullList<Registration>({
             sort: '-created',
@@ -63,6 +64,7 @@ export function useAdminData() {
           pb.collection('add_ons').getFullList<AddOn>({ requestKey: null }),
           pb.collection('master_lists').getFullList<MasterListItem>({ requestKey: null }),
           pb.collection('users').getFullList<StaffUser>({ requestKey: null }).catch(() => []),
+          pb.collection('payments').getFullList<PaymentRecord>({ sort: 'created', requestKey: null }),
         ]);
 
       setRegistrations(regsRes);
@@ -75,6 +77,7 @@ export function useAdminData() {
       setAddOns(addonsRes);
       setMasterList(rosterRes);
       setStaffAccounts(usersRes);
+      setPayments(paymentsRes);
       if (orgsRes.length > 0 && !rosterOrgId) setRosterOrgId(orgsRes[0].id);
     } catch (err) {
       if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
@@ -91,9 +94,13 @@ export function useAdminData() {
     pb.collection('packages').subscribe('*', () => {
       loadAllData();
     }).catch((error) => console.error('Could not subscribe to package updates:', error));
+    pb.collection('payments').subscribe('*', () => {
+      loadAllData();
+    }).catch((error) => console.error('Could not subscribe to payment updates:', error));
     return () => {
       pb.collection('registrations').unsubscribe('*');
       pb.collection('packages').unsubscribe('*');
+      pb.collection('payments').unsubscribe('*');
     };
   }, [loadAllData]);
 
@@ -104,8 +111,10 @@ export function useAdminData() {
     const totalCompleted = registrations.filter(
       (r) => r.status === 'done_shooting' || r.status === 'completed'
     ).length;
-    const totalCollections = registrations.reduce((sum, r) => sum + (r.paid_amount || 0), 0);
-    const totalOutstandingBalances = registrations.reduce((sum, r) => sum + (r.balance || 0), 0);
+    const totalCollections = payments.reduce((sum, payment) =>
+      payment.status === 'voided' || payment.status === 'refunded' ? sum : sum + payment.amount, 0);
+    const totalOutstandingBalances = Math.max(0,
+      registrations.reduce((sum, r) => sum + (r.total_amount || 0), 0) - totalCollections);
 
     return {
       totalRegistrations,
@@ -114,7 +123,7 @@ export function useAdminData() {
       totalCollections,
       totalOutstandingBalances,
     };
-  }, [registrations]);
+  }, [registrations, payments]);
 
   // Add Organization
   const handleAddOrg = async (e: React.FormEvent) => {
@@ -512,6 +521,7 @@ export function useAdminData() {
     addOns,
     masterList,
     staffAccounts,
+    payments,
     metrics,
     // Add Org Form
     newOrgName,

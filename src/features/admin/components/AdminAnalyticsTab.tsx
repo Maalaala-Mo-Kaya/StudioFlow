@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { Fragment, useState, useMemo } from 'react';
 import {
   DollarSign,
   Users,
@@ -8,9 +8,21 @@ import {
   ShieldCheck,
   Building,
   Package as PackageIcon,
+  ChevronDown,
+  ChevronRight,
+  Printer,
 } from 'lucide-react';
-import type { Organization, Registration, Package } from '../../../types';
+import type { Organization, Registration, Package, PaymentRecord } from '../../../types';
 import { formatCurrency, formatClientName } from '../../../utils/formatters';
+import { PrintReceiptModal } from '../../cashier/components/PrintReceiptModal';
+
+const transactionDate = new Intl.DateTimeFormat('en-PH', {
+  timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short',
+});
+const collectionModeLabels: Record<PaymentRecord['payment_type'], string> = {
+  initial: '50% Downpayment', full: 'Full Settlement', additional: 'Additional Payment',
+  balance_settlement: 'Full Settlement',
+};
 
 interface AdminAnalyticsTabProps {
   metrics: {
@@ -23,6 +35,7 @@ interface AdminAnalyticsTabProps {
   organizations: Organization[];
   registrations: Registration[];
   packages: Package[];
+  payments: PaymentRecord[];
   onExportCsv: () => void;
 }
 
@@ -31,11 +44,38 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   organizations,
   registrations,
   packages,
+  payments,
   onExportCsv,
 }) => {
   const [filterSchool, setFilterSchool] = useState<string>('all');
   const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [receiptRegistration, setReceiptRegistration] = useState<Registration | null>(null);
+
+  const paymentsByRegistration = useMemo(() => {
+    const grouped = new Map<string, PaymentRecord[]>();
+    for (const payment of payments) {
+      const records = grouped.get(payment.registration) ?? [];
+      records.push(payment);
+      grouped.set(payment.registration, records);
+    }
+    for (const records of grouped.values()) {
+      records.sort((a, b) => Date.parse(a.created.replace(' ', 'T')) - Date.parse(b.created.replace(' ', 'T')) || a.id.localeCompare(b.id));
+    }
+    return grouped;
+  }, [payments]);
+  const ledgerRows = useMemo(() => registrations.map((registration) => {
+    const transactions = paymentsByRegistration.get(registration.id) ?? [];
+    const collected = transactions.reduce((sum, payment) =>
+      payment.status === 'voided' || payment.status === 'refunded' ? sum : sum + payment.amount, 0);
+    return {
+      registration,
+      transactions,
+      collected,
+      balance: Math.max(0, (registration.total_amount || 0) - collected),
+    };
+  }), [registrations, paymentsByRegistration]);
 
   // Total Invoiced / Gross Billed
   const totalGrossBilled = useMemo(
@@ -54,8 +94,9 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
     return organizations.map((org) => {
       const orgRegs = registrations.filter((r) => r.organization === org.id);
       const billed = orgRegs.reduce((sum, r) => sum + (r.total_amount || 0), 0);
-      const collected = orgRegs.reduce((sum, r) => sum + (r.paid_amount || 0), 0);
-      const balance = orgRegs.reduce((sum, r) => sum + (r.balance || 0), 0);
+      const orgRows = ledgerRows.filter(({ registration }) => registration.organization === org.id);
+      const collected = orgRows.reduce((sum, row) => sum + row.collected, 0);
+      const balance = orgRows.reduce((sum, row) => sum + row.balance, 0);
       return {
         id: org.id,
         code: org.code || 'ORG',
@@ -66,14 +107,15 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         balance,
       };
     });
-  }, [organizations, registrations]);
+  }, [organizations, registrations, ledgerRows]);
 
   // Breakdown by Package
   const packageBreakdown = useMemo(() => {
     return packages.map((pkg) => {
       const pkgRegs = registrations.filter((r) => r.package === pkg.id);
       const billed = pkgRegs.reduce((sum, r) => sum + (r.total_amount || 0), 0);
-      const collected = pkgRegs.reduce((sum, r) => sum + (r.paid_amount || 0), 0);
+      const collected = ledgerRows.filter(({ registration }) => registration.package === pkg.id)
+        .reduce((sum, row) => sum + row.collected, 0);
       return {
         id: pkg.id,
         code: pkg.code,
@@ -83,17 +125,17 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         collected,
       };
     });
-  }, [packages, registrations]);
+  }, [packages, registrations, ledgerRows]);
 
   // Filtered Financial Ledger
   const filteredLedger = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return registrations.filter((r) => {
+    return ledgerRows.filter(({ registration: r, collected, balance }) => {
       if (filterSchool !== 'all' && r.organization !== filterSchool) return false;
       if (filterPaymentStatus !== 'all') {
-        if (filterPaymentStatus === 'fully_paid' && r.balance > 0) return false;
-        if (filterPaymentStatus === 'unpaid' && (r.paid_amount || 0) > 0) return false;
-        if (filterPaymentStatus === 'has_balance' && r.balance <= 0) return false;
+        if (filterPaymentStatus === 'fully_paid' && balance > 0) return false;
+        if (filterPaymentStatus === 'unpaid' && collected > 0) return false;
+        if (filterPaymentStatus === 'has_balance' && balance <= 0) return false;
       }
       if (q) {
         const fullName = `${r.given_name} ${r.family_name}`.toLowerCase();
@@ -103,7 +145,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       }
       return true;
     });
-  }, [registrations, filterSchool, filterPaymentStatus, searchQuery]);
+  }, [ledgerRows, filterSchool, filterPaymentStatus, searchQuery]);
 
   return (
     <div className="space-y-6 animate-enter">
@@ -312,27 +354,48 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredLedger.slice(0, 50).map((r) => (
-                  <tr key={r.id} className="hover:bg-[#F8F7F4] transition-colors">
-                    <td className="py-2 px-3 font-black text-red-600">{r.job_order_no}</td>
+                filteredLedger.slice(0, 50).map(({ registration: r, transactions, collected, balance }) => {
+                  const expanded = expandedRows.has(r.id);
+                  let runningTotal = 0;
+                  const history = transactions.map((payment) => {
+                    if (payment.status !== 'voided' && payment.status !== 'refunded') runningTotal += payment.amount;
+                    return { payment, runningTotal, remaining: Math.max(0, r.total_amount - runningTotal) };
+                  });
+                  const toggle = () => setExpandedRows((current) => {
+                    const next = new Set(current);
+                    if (next.has(r.id)) next.delete(r.id); else next.add(r.id);
+                    return next;
+                  });
+                  return (
+                  <Fragment key={r.id}>
+                  <tr
+                    onClick={toggle}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') toggle(); }}
+                    tabIndex={0}
+                    aria-expanded={expanded}
+                    className="cursor-pointer hover:bg-[#F8F7F4] transition-colors focus:bg-[#F7F2E0] focus:outline-none"
+                  >
+                    <td className="py-2 px-3 font-black text-red-600">
+                      <span className="inline-flex items-center gap-1">{expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}{r.job_order_no}</span>
+                    </td>
                     <td className="py-2 px-3 font-bold text-[#0A0A0A] uppercase">{formatClientName(r)}</td>
                     <td className="py-2 px-3 text-neutral-600">{r.expand?.organization?.code || 'ORG'}</td>
                     <td className="py-2 px-3">{r.expand?.package?.code || 'PKG'}</td>
                     <td className="py-2 px-3 text-right font-bold">{formatCurrency(r.total_amount)}</td>
-                    <td className="py-2 px-3 text-right text-emerald-700 font-bold">{formatCurrency(r.paid_amount || 0)}</td>
+                    <td className="py-2 px-3 text-right text-emerald-700 font-bold">{formatCurrency(collected)}</td>
                     <td className="py-2 px-3 text-right font-black">
-                      {r.balance > 0 ? (
-                        <span className="text-red-600">{formatCurrency(r.balance)}</span>
+                      {balance > 0 ? (
+                        <span className="text-red-600">{formatCurrency(balance)}</span>
                       ) : (
                         <span className="text-emerald-700">₱0.00</span>
                       )}
                     </td>
                     <td className="py-2 px-3 text-center">
-                      {r.balance <= 0 ? (
+                      {balance <= 0 ? (
                         <span className="px-2 py-0.5 text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-400 uppercase">
-                          SETTLED
+                          FULLY PAID
                         </span>
-                      ) : (r.paid_amount || 0) > 0 ? (
+                      ) : collected > 0 ? (
                         <span className="px-2 py-0.5 text-[9px] font-black bg-amber-100 text-amber-800 border border-amber-400 uppercase">
                           PARTIAL
                         </span>
@@ -343,12 +406,68 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                       )}
                     </td>
                   </tr>
-                ))
+                  {expanded && (
+                    <tr>
+                      <td colSpan={8} className="border-y-2 border-[#C9A227] bg-[#F8F7F4] p-3">
+                        <div className="mb-2 text-[10px] font-black uppercase tracking-wider">Payment Transaction History</div>
+                        {history.length === 0 ? (
+                          <div className="border border-neutral-300 bg-white p-4 text-center text-neutral-500">No payment transactions recorded.</div>
+                        ) : (
+                          <div className="overflow-x-auto border border-[#0A0A0A] bg-white">
+                            <table className="min-w-[1200px] w-full text-[10px]">
+                              <thead className="bg-[#0A0A0A] text-[#C9A227] uppercase">
+                                <tr>
+                                  {['Date & Time', 'Receipt №', 'Collection Mode', 'Payment Method', 'Amount Paid', 'Running Total', 'Remaining Balance', 'Cashier', 'Reference / Remarks', 'Status', 'Actions'].map((label) => (
+                                    <th key={label} className="whitespace-nowrap px-2 py-2 text-left">{label}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-neutral-200">
+                                {history.map(({ payment, runningTotal: running, remaining }) => (
+                                  <tr key={payment.id}>
+                                    <td className="whitespace-nowrap px-2 py-2">{transactionDate.format(new Date(payment.created.replace(' ', 'T')))}</td>
+                                    <td className="whitespace-nowrap px-2 py-2 font-bold">{payment.receipt_no || payment.id}</td>
+                                    <td className="whitespace-nowrap px-2 py-2">{collectionModeLabels[payment.payment_type] || payment.payment_type}</td>
+                                    <td className="whitespace-nowrap px-2 py-2 uppercase">{payment.payment_method}</td>
+                                    <td className="whitespace-nowrap px-2 py-2 text-right font-bold">{formatCurrency(payment.amount, { exact: true })}</td>
+                                    <td className="whitespace-nowrap px-2 py-2 text-right">{formatCurrency(running, { exact: true })}</td>
+                                    <td className="whitespace-nowrap px-2 py-2 text-right">{formatCurrency(remaining, { exact: true })}</td>
+                                    <td className="whitespace-nowrap px-2 py-2">{payment.cashier_name || '—'}</td>
+                                    <td className="max-w-52 px-2 py-2">{payment.remarks || '—'}</td>
+                                    <td className="whitespace-nowrap px-2 py-2 font-bold uppercase">{payment.status || 'completed'}</td>
+                                    <td className="px-2 py-2">
+                                      <button
+                                        type="button"
+                                        onClick={(event) => { event.stopPropagation(); setReceiptRegistration(r); }}
+                                        className="inline-flex items-center gap-1 whitespace-nowrap border border-[#0A0A0A] bg-[#C9A227] px-2 py-1 font-black uppercase"
+                                      >
+                                        <Printer className="size-3" /> Reprint
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
+      {receiptRegistration && (
+        <PrintReceiptModal
+          registration={receiptRegistration}
+          cashierName="Administrator"
+          onClose={() => setReceiptRegistration(null)}
+        />
+      )}
     </div>
   );
 };

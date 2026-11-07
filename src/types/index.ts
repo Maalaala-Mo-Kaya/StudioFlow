@@ -167,5 +167,6 @@ export interface PaymentRecord {
   cashier_name?: string;
   receipt_no?: string;
   remarks?: string;
+  status?: 'completed' | 'voided' | 'refunded';
   created: string;
 }
