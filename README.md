@@ -87,6 +87,7 @@ If developing or modifying frontend components:
 .\pocketbase.exe serve --http="127.0.0.1:8090"
 
 # Terminal 2: Start Frontend with HMR
+npm i
 npm run dev
 ```
 
@@ -108,7 +109,7 @@ StudioFlow includes pre-built batch scripts to simplify studio operations:
 
 ---
 
-## Station Guide
+## Station Guide (Needs Update for Chooser)
 
 | Station | Route | Default Users | Key Responsibilities |
 | :--- | :--- | :--- | :--- |
@@ -119,7 +120,7 @@ StudioFlow includes pre-built batch scripts to simplify studio operations:
 
 ---
 
-## Studio LAN Setup
+## Studio LAN Setup (Needs Update)
 
 Run StudioFlow across all studio tablets, laptops, and PCs using a single Wi-Fi router (no internet required):
 
