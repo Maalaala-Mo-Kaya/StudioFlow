@@ -3,6 +3,8 @@ import { UploadCloud, CheckCircle2, AlertCircle, Trash2, Search } from 'lucide-r
 import type { Organization, MasterListItem } from '../../../types';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
+import { DataTable } from '../../../components/common/DataTable';
+import type { DataTableColumn } from '../../../components/common/DataTable';
 
 interface AdminRosterTabProps {
   organizations: Organization[];
@@ -51,9 +53,10 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean)
-      .map((line) => {
+      .map((line, index) => {
         const parts = line.split(/[,\t]/).map((p) => p.trim());
         return {
+          id: index,
           name: parts[0] || '',
           studentId: parts[1] || '',
           section: parts[2] || '',
@@ -65,6 +68,12 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
   }, [csvText]);
 
   const validRowCount = parsedPreview.filter((r) => r.isValid).length;
+  const previewColumns: DataTableColumn<typeof parsedPreview[number]>[] = [
+    { id: 'name', header: 'Name', sortable: true, accessor: (row) => row.name, cellClassName: 'font-bold' },
+    { id: 'studentId', header: 'ID', sortable: true, accessor: (row) => row.studentId },
+    { id: 'section', header: 'Sec', sortable: true, accessor: (row) => row.section },
+    { id: 'status', header: 'Status', sortable: true, accessor: (row) => row.isValid, cell: (row) => row.isValid ? '✓' : 'Invalid' },
+  ];
 
   const orgMasterList = useMemo(() => {
     return masterList.filter((item) => {
@@ -179,28 +188,17 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
                 </span>
               </div>
 
-              <div className="max-h-[140px] overflow-y-auto border border-neutral-200 bg-white">
-                <table className="w-full text-left text-[11px]">
-                  <thead className="bg-[#0A0A0A] text-[#C9A227] text-[9px] uppercase">
-                    <tr>
-                      <th className="p-1.5">Name</th>
-                      <th className="p-1.5">ID</th>
-                      <th className="p-1.5">Sec</th>
-                      <th className="p-1.5">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-100">
-                    {parsedPreview.slice(0, 10).map((row, i) => (
-                      <tr key={i} className={row.isValid ? '' : 'bg-red-50 text-red-700'}>
-                        <td className="p-1.5 font-bold">{row.name || '—'}</td>
-                        <td className="p-1.5">{row.studentId || '—'}</td>
-                        <td className="p-1.5">{row.section || '—'}</td>
-                        <td className="p-1.5">{row.isValid ? '✓' : 'Invalid'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                label="Roster import preview"
+                rows={parsedPreview}
+                columns={previewColumns}
+                getRowId={(row) => row.id}
+                defaultSort={{ column: 'name', direction: 'ascending' }}
+                viewportClassName="max-h-[140px]"
+                className="border! border-neutral-200! shadow-none!"
+                headerClassName="uppercase"
+                rowClassName={(row) => row.isValid ? '' : 'bg-red-50 text-red-700'}
+              />
             </div>
           )}
 

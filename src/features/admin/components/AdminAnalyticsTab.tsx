@@ -1,4 +1,4 @@
-import React, { Fragment, useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   DollarSign,
   Users,
@@ -8,13 +8,13 @@ import {
   ShieldCheck,
   Building,
   Package as PackageIcon,
-  ChevronDown,
-  ChevronRight,
   Printer,
 } from 'lucide-react';
 import type { Organization, Registration, Package, PaymentRecord } from '../../../types';
 import { formatCurrency, formatClientName } from '../../../utils/formatters';
 import { PrintReceiptModal } from '../../cashier/components/PrintReceiptModal';
+import { DataTable } from '../../../components/common/DataTable';
+import type { DataTableColumn } from '../../../components/common/DataTable';
 
 const transactionDate = new Intl.DateTimeFormat('en-PH', {
   timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short',
@@ -50,7 +50,6 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   const [filterSchool, setFilterSchool] = useState<string>('all');
   const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [receiptRegistration, setReceiptRegistration] = useState<Registration | null>(null);
 
   const paymentsByRegistration = useMemo(() => {
@@ -146,6 +145,84 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       return true;
     });
   }, [ledgerRows, filterSchool, filterPaymentStatus, searchQuery]);
+
+  type LedgerRow = typeof ledgerRows[number];
+  const ledgerColumns: DataTableColumn<LedgerRow>[] = [
+    { id: 'job', header: 'JO №', sortable: true, accessor: ({ registration }) => registration.job_order_no, cellClassName: 'font-black text-red-600' },
+    { id: 'name', header: 'Student Name', sortable: true, accessor: ({ registration }) => `${registration.family_name} ${registration.given_name}`,
+      cell: ({ registration }) => formatClientName(registration), cellClassName: 'font-bold uppercase' },
+    { id: 'school', header: 'School', sortable: true, accessor: ({ registration }) => registration.expand?.organization?.code || registration.expand?.organization?.name,
+      cell: ({ registration }) => registration.expand?.organization?.code || 'ORG', cellClassName: 'text-neutral-600' },
+    { id: 'package', header: 'Package', sortable: true, accessor: ({ registration }) => registration.expand?.package?.code,
+      cell: ({ registration }) => registration.expand?.package?.code || 'PKG' },
+    { id: 'billed', header: 'Billed', sortable: true, accessor: ({ registration }) => registration.total_amount, align: 'right',
+      cell: ({ registration }) => formatCurrency(registration.total_amount), cellClassName: 'font-bold' },
+    { id: 'collected', header: 'Collected', sortable: true, accessor: ({ collected }) => collected, align: 'right',
+      cell: ({ collected }) => formatCurrency(collected), cellClassName: 'font-bold text-emerald-700' },
+    { id: 'balance', header: 'Balance', sortable: true, accessor: ({ balance }) => balance, align: 'right', cellClassName: 'font-black',
+      cell: ({ balance }) => balance > 0 ? <span className="text-red-600">{formatCurrency(balance)}</span> : <span className="text-emerald-700">₱0.00</span> },
+    { id: 'status', header: 'Settlement Status', sortable: true, align: 'center',
+      accessor: ({ balance, collected }) => balance <= 0 ? 2 : collected > 0 ? 1 : 0,
+      cell: ({ balance, collected }) => (
+        <span className={`whitespace-nowrap px-2 py-0.5 text-[9px] font-black uppercase ${balance <= 0
+          ? 'border border-emerald-400 bg-emerald-100 text-emerald-800'
+          : collected > 0 ? 'border border-amber-400 bg-amber-100 text-amber-800' : 'bg-neutral-200 text-neutral-700'}`}>
+          {balance <= 0 ? 'Fully paid' : collected > 0 ? 'Partial' : 'Unpaid'}
+        </span>
+      ),
+    },
+  ];
+
+  function renderHistory({ registration, transactions }: LedgerRow) {
+    let runningTotal = 0;
+    // Balances follow transaction chronology even when the display is sorted by another column.
+    const history = transactions.map((payment) => {
+      if (payment.status !== 'voided' && payment.status !== 'refunded') runningTotal += payment.amount;
+      return { payment, runningTotal, remaining: Math.max(0, registration.total_amount - runningTotal) };
+    });
+    const columns: DataTableColumn<typeof history[number]>[] = [
+      { id: 'date', header: 'Date & Time', sortable: true, accessor: ({ payment }) => new Date(payment.created.replace(' ', 'T')),
+        cell: ({ payment }) => {
+          const date = new Date(payment.created.replace(' ', 'T'));
+          return Number.isFinite(date.getTime()) ? transactionDate.format(date) : '—';
+        } },
+      { id: 'receipt', header: 'Receipt №', sortable: true, accessor: ({ payment }) => payment.receipt_no || payment.id, cellClassName: 'font-bold' },
+      { id: 'mode', header: 'Collection Mode', sortable: true, accessor: ({ payment }) => collectionModeLabels[payment.payment_type] || payment.payment_type },
+      { id: 'method', header: 'Payment Method', sortable: true, accessor: ({ payment }) => payment.payment_method, cellClassName: 'uppercase' },
+      { id: 'amount', header: 'Amount Paid', sortable: true, accessor: ({ payment }) => payment.amount, align: 'right', cellClassName: 'font-bold',
+        cell: ({ payment }) => formatCurrency(payment.amount, { exact: true }) },
+      { id: 'running', header: 'Running Total', sortable: true, accessor: ({ runningTotal }) => runningTotal, align: 'right',
+        cell: ({ runningTotal }) => formatCurrency(runningTotal, { exact: true }) },
+      { id: 'remaining', header: 'Remaining Balance', sortable: true, accessor: ({ remaining }) => remaining, align: 'right',
+        cell: ({ remaining }) => formatCurrency(remaining, { exact: true }) },
+      { id: 'cashier', header: 'Cashier', sortable: true, accessor: ({ payment }) => payment.cashier_name },
+      { id: 'remarks', header: 'Reference / Remarks', sortable: true, accessor: ({ payment }) => payment.remarks, cellClassName: 'max-w-52 whitespace-normal' },
+      { id: 'status', header: 'Status', sortable: true, accessor: ({ payment }) => payment.status || 'completed', cellClassName: 'font-bold uppercase' },
+      { id: 'actions', header: 'Actions', cell: () => (
+        <button type="button" onClick={() => setReceiptRegistration(registration)}
+          className="inline-flex items-center gap-1 border border-[#0A0A0A] bg-[#C9A227] px-2 py-1 font-black uppercase">
+          <Printer className="size-3" /> Reprint
+        </button>
+      ) },
+    ];
+    return (
+      <>
+        <div className="mb-2 text-[10px] font-black uppercase tracking-wider">Payment Transaction History</div>
+        <DataTable
+          label={`Payment history for JO № ${registration.job_order_no}`}
+          rows={history}
+          columns={columns}
+          getRowId={({ payment }) => payment.id}
+          defaultSort={{ column: 'date', direction: 'ascending' }}
+          pagination={false}
+          emptyMessage="No payment transactions recorded."
+          className="border! shadow-none!"
+          tableClassName="whitespace-nowrap text-[10px]!"
+          headerClassName="uppercase"
+        />
+      </>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-enter">
@@ -290,177 +367,62 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       </div>
 
       {/* Financial Ledger & Audit Trail */}
-      <div className="bg-white border-2 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b-2 border-[#0A0A0A]">
-          <div>
-            <h3 className="font-black text-xs uppercase tracking-wider text-[#0A0A0A]">
-              Financial Settlement &amp; Ledger
-            </h3>
-            <p className="font-mono text-[11px] text-neutral-500">
-              Showing {filteredLedger.length} of {registrations.length} participant accounts
-            </p>
-          </div>
+      <DataTable
+        label="Financial Settlement & Ledger"
+        rows={filteredLedger}
+        columns={ledgerColumns}
+        getRowId={({ registration }) => registration.id}
+        defaultSort={{ column: 'job', direction: 'ascending' }}
+        viewportClassName="h-[600px]"
+        tableClassName="font-mono"
+        headerClassName="uppercase tracking-wider"
+        filtered={Boolean(searchQuery.trim()) || filterSchool !== 'all' || filterPaymentStatus !== 'all'}
+        emptyMessage="No participant accounts yet."
+        filteredEmptyMessage="No records match the selected ledger filters."
+        renderExpanded={renderHistory}
+        toolbar={(
+          <div className="flex flex-wrap items-center justify-between gap-3 p-5">
+            <div>
+              <h3 className="font-black text-xs uppercase tracking-wider text-[#0A0A0A]">
+                Financial Settlement &amp; Ledger
+              </h3>
+              <p className="font-mono text-[11px] text-neutral-500">
+                Showing {filteredLedger.length} of {registrations.length} participant accounts
+              </p>
+            </div>
 
-          <div className="flex flex-wrap gap-2 items-center text-xs font-mono">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search student or JO №..."
-              className="p-1.5 bg-[#F8F7F4] border border-[#0A0A0A] font-mono text-xs"
-            />
-            <select
-              value={filterSchool}
-              onChange={(e) => setFilterSchool(e.target.value)}
-              className="p-1.5 bg-[#F8F7F4] border border-[#0A0A0A] font-mono text-xs uppercase"
-            >
-              <option value="all">All Schools</option>
-              {organizations.map((org) => (
-                <option key={org.id} value={org.id}>{org.code || org.name}</option>
-              ))}
-            </select>
-            <select
-              value={filterPaymentStatus}
-              onChange={(e) => setFilterPaymentStatus(e.target.value)}
-              className="p-1.5 bg-[#F8F7F4] border border-[#0A0A0A] font-mono text-xs uppercase"
-            >
-              <option value="all">All Balances</option>
-              <option value="has_balance">With Outstanding Balance</option>
-              <option value="fully_paid">Fully Paid</option>
-              <option value="unpaid">Unpaid</option>
-            </select>
+            <div className="flex flex-wrap gap-2 items-center text-xs font-mono">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search student or JO №..."
+                className="p-1.5 bg-[#F8F7F4] border border-[#0A0A0A] font-mono text-xs"
+              />
+              <select
+                value={filterSchool}
+                onChange={(e) => setFilterSchool(e.target.value)}
+                className="p-1.5 bg-[#F8F7F4] border border-[#0A0A0A] font-mono text-xs uppercase"
+              >
+                <option value="all">All Schools</option>
+                {organizations.map((org) => (
+                  <option key={org.id} value={org.id}>{org.code || org.name}</option>
+                ))}
+              </select>
+              <select
+                value={filterPaymentStatus}
+                onChange={(e) => setFilterPaymentStatus(e.target.value)}
+                className="p-1.5 bg-[#F8F7F4] border border-[#0A0A0A] font-mono text-xs uppercase"
+              >
+                <option value="all">All Balances</option>
+                <option value="has_balance">With Outstanding Balance</option>
+                <option value="fully_paid">Fully Paid</option>
+                <option value="unpaid">Unpaid</option>
+              </select>
+            </div>
           </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse font-mono">
-            <thead>
-              <tr className="bg-[#0A0A0A] text-[#C9A227] text-[10px] uppercase font-black tracking-wider">
-                <th className="py-2.5 px-3">JO №</th>
-                <th className="py-2.5 px-3">Student Name</th>
-                <th className="py-2.5 px-3">School</th>
-                <th className="py-2.5 px-3">Package</th>
-                <th className="py-2.5 px-3 text-right">Billed</th>
-                <th className="py-2.5 px-3 text-right">Collected</th>
-                <th className="py-2.5 px-3 text-right">Balance</th>
-                <th className="py-2.5 px-3 text-center">Settlement Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-200">
-              {filteredLedger.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="py-8 text-center text-neutral-400">
-                    No records match the selected ledger filters.
-                  </td>
-                </tr>
-              ) : (
-                filteredLedger.slice(0, 50).map(({ registration: r, transactions, collected, balance }) => {
-                  const expanded = expandedRows.has(r.id);
-                  let runningTotal = 0;
-                  const history = transactions.map((payment) => {
-                    if (payment.status !== 'voided' && payment.status !== 'refunded') runningTotal += payment.amount;
-                    return { payment, runningTotal, remaining: Math.max(0, r.total_amount - runningTotal) };
-                  });
-                  const toggle = () => setExpandedRows((current) => {
-                    const next = new Set(current);
-                    if (next.has(r.id)) next.delete(r.id); else next.add(r.id);
-                    return next;
-                  });
-                  return (
-                  <Fragment key={r.id}>
-                  <tr
-                    onClick={toggle}
-                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') toggle(); }}
-                    tabIndex={0}
-                    aria-expanded={expanded}
-                    className="cursor-pointer hover:bg-[#F8F7F4] transition-colors focus:bg-[#F7F2E0] focus:outline-none"
-                  >
-                    <td className="py-2 px-3 font-black text-red-600">
-                      <span className="inline-flex items-center gap-1">{expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}{r.job_order_no}</span>
-                    </td>
-                    <td className="py-2 px-3 font-bold text-[#0A0A0A] uppercase">{formatClientName(r)}</td>
-                    <td className="py-2 px-3 text-neutral-600">{r.expand?.organization?.code || 'ORG'}</td>
-                    <td className="py-2 px-3">{r.expand?.package?.code || 'PKG'}</td>
-                    <td className="py-2 px-3 text-right font-bold">{formatCurrency(r.total_amount)}</td>
-                    <td className="py-2 px-3 text-right text-emerald-700 font-bold">{formatCurrency(collected)}</td>
-                    <td className="py-2 px-3 text-right font-black">
-                      {balance > 0 ? (
-                        <span className="text-red-600">{formatCurrency(balance)}</span>
-                      ) : (
-                        <span className="text-emerald-700">₱0.00</span>
-                      )}
-                    </td>
-                    <td className="py-2 px-3 text-center">
-                      {balance <= 0 ? (
-                        <span className="px-2 py-0.5 text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-400 uppercase">
-                          FULLY PAID
-                        </span>
-                      ) : collected > 0 ? (
-                        <span className="px-2 py-0.5 text-[9px] font-black bg-amber-100 text-amber-800 border border-amber-400 uppercase">
-                          PARTIAL
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 text-[9px] font-black bg-neutral-200 text-neutral-700 uppercase">
-                          UNPAID
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                  {expanded && (
-                    <tr>
-                      <td colSpan={8} className="border-y-2 border-[#C9A227] bg-[#F8F7F4] p-3">
-                        <div className="mb-2 text-[10px] font-black uppercase tracking-wider">Payment Transaction History</div>
-                        {history.length === 0 ? (
-                          <div className="border border-neutral-300 bg-white p-4 text-center text-neutral-500">No payment transactions recorded.</div>
-                        ) : (
-                          <div className="overflow-x-auto border border-[#0A0A0A] bg-white">
-                            <table className="min-w-[1200px] w-full text-[10px]">
-                              <thead className="bg-[#0A0A0A] text-[#C9A227] uppercase">
-                                <tr>
-                                  {['Date & Time', 'Receipt №', 'Collection Mode', 'Payment Method', 'Amount Paid', 'Running Total', 'Remaining Balance', 'Cashier', 'Reference / Remarks', 'Status', 'Actions'].map((label) => (
-                                    <th key={label} className="whitespace-nowrap px-2 py-2 text-left">{label}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-neutral-200">
-                                {history.map(({ payment, runningTotal: running, remaining }) => (
-                                  <tr key={payment.id}>
-                                    <td className="whitespace-nowrap px-2 py-2">{transactionDate.format(new Date(payment.created.replace(' ', 'T')))}</td>
-                                    <td className="whitespace-nowrap px-2 py-2 font-bold">{payment.receipt_no || payment.id}</td>
-                                    <td className="whitespace-nowrap px-2 py-2">{collectionModeLabels[payment.payment_type] || payment.payment_type}</td>
-                                    <td className="whitespace-nowrap px-2 py-2 uppercase">{payment.payment_method}</td>
-                                    <td className="whitespace-nowrap px-2 py-2 text-right font-bold">{formatCurrency(payment.amount, { exact: true })}</td>
-                                    <td className="whitespace-nowrap px-2 py-2 text-right">{formatCurrency(running, { exact: true })}</td>
-                                    <td className="whitespace-nowrap px-2 py-2 text-right">{formatCurrency(remaining, { exact: true })}</td>
-                                    <td className="whitespace-nowrap px-2 py-2">{payment.cashier_name || '—'}</td>
-                                    <td className="max-w-52 px-2 py-2">{payment.remarks || '—'}</td>
-                                    <td className="whitespace-nowrap px-2 py-2 font-bold uppercase">{payment.status || 'completed'}</td>
-                                    <td className="px-2 py-2">
-                                      <button
-                                        type="button"
-                                        onClick={(event) => { event.stopPropagation(); setReceiptRegistration(r); }}
-                                        className="inline-flex items-center gap-1 whitespace-nowrap border border-[#0A0A0A] bg-[#C9A227] px-2 py-1 font-black uppercase"
-                                      >
-                                        <Printer className="size-3" /> Reprint
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                  </Fragment>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        )}
+      />
       {receiptRegistration && (
         <PrintReceiptModal
           registration={receiptRegistration}

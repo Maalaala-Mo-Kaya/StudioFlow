@@ -176,6 +176,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               max={(balanceCentavos / 100).toFixed(2)}
               step="1"
               value={amountPaid}
+              placeholder={paymentType === 'additional' ? 'Payment amount is required.' : undefined}
               readOnly={paymentType !== 'additional'}
               onKeyDown={(e) => {
                 if (['-', '+', '.', ',', 'e', 'E'].includes(e.key)) e.preventDefault();

@@ -145,7 +145,7 @@ export function buildOverallRows({ registrations, payments, organizations, level
       addOns,
       poses,
       ...money,
-      financial: money.fullyPaid ? 'fully_paid' : money.total > 0 ? 'partially_paid' : 'unpaid',
+      financial: money.fullyPaid ? 'fully_paid' as const : money.total > 0 ? 'partially_paid' as const : 'unpaid' as const,
     }];
   });
 }

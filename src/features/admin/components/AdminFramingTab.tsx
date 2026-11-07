@@ -3,6 +3,8 @@ import { Frame, Copy, Check, Filter } from 'lucide-react';
 import type { Registration, FramingStatus } from '../../../types';
 import { formatClientName, formatCurrency } from '../../../utils/formatters';
 import { getDeterministicFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
+import { DataTable } from '../../../components/common/DataTable';
+import type { DataTableColumn } from '../../../components/common/DataTable';
 
 interface AdminFramingTabProps {
   registrations: Registration[];
@@ -90,6 +92,101 @@ export const AdminFramingTab: React.FC<AdminFramingTabProps> = ({
     });
     return frames.length > 0 ? frames : ['Standard Framing'];
   };
+  const columns: DataTableColumn<Registration>[] = [
+    {
+      id: 'job', header: 'JO № & Queue', sortable: true, accessor: (reg) => reg.job_order_no,
+      cellClassName: 'font-mono',
+      cell: (reg) => (
+        <>
+          <div className="font-black text-red-600">{reg.job_order_no}</div>
+          <div className="text-[10px] text-neutral-500 font-bold">Q-{reg.queue_number}</div>
+        </>
+      ),
+    },
+    {
+      id: 'name', header: 'Student Name', sortable: true,
+      accessor: (reg) => `${reg.family_name} ${reg.given_name}`,
+      cell: formatClientName,
+      cellClassName: 'font-black uppercase text-[#0A0A0A]',
+    },
+    {
+      id: 'school', header: 'School & Course', sortable: true, accessor: (reg) => `${reg.expand?.organization?.name || ''} ${reg.expand?.course?.code || ''}`,
+      cell: (reg) => (
+        <>
+          <div className="font-bold text-[#0A0A0A]">{reg.expand?.organization?.code || reg.expand?.organization?.name}</div>
+          <div className="text-[11px] text-neutral-500">{reg.expand?.course?.code || 'Course'}</div>
+        </>
+      ),
+    },
+    {
+      id: 'frame', header: 'Frame Specification', sortable: true, accessor: (reg) => getFrameDetails(reg).join(' '),
+      cell: (reg) => (
+        <div className="space-y-1">
+          {getFrameDetails(reg).map((f, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-1 px-2 py-0.5 font-mono text-[10px] font-bold bg-[#F7F2E0] border border-[#0A0A0A] text-[#0A0A0A]"
+            >
+              <Frame className="w-3 h-3 text-[#C9A227]" /> {f}
+            </span>
+          ))}
+        </div>
+      ),
+    },
+    {
+      id: 'payment', header: 'Payment', sortable: true, accessor: (reg) => reg.balance,
+      cellClassName: 'font-mono',
+      cell: (reg) => reg.balance > 0 ? (
+        <span className="text-red-600 font-black text-[11px]">
+          Bal: {formatCurrency(reg.balance)}
+        </span>
+      ) : (
+        <span className="text-emerald-700 font-black text-[11px]">
+          ✓ Paid ({formatCurrency(reg.total_amount)})
+        </span>
+      ),
+    },
+    {
+      id: 'status', header: 'Production Status', sortable: true, accessor: (reg) => reg.framing_status || 'pending_framing',
+      cell: (reg) => (
+        <select
+          value={reg.framing_status || 'pending_framing'}
+          onChange={(e) => onUpdateFramingStatus(reg.id, e.target.value as FramingStatus)}
+          className="p-1 font-mono text-xs font-bold uppercase bg-white border border-[#0A0A0A] focus:outline-hidden"
+        >
+          <option value="pending_framing">Pending Framing</option>
+          <option value="in_production">In Production</option>
+          <option value="framed">Framed</option>
+          <option value="ready_for_pickup">Ready for Pickup</option>
+          <option value="released">Released to Client</option>
+        </select>
+      ),
+    },
+    {
+      id: 'folder', header: 'Pictorial Folder', sortable: true, accessor: getDeterministicFolderPath,
+      align: 'right',
+      cell: (reg) => (
+        <button
+          type="button"
+          onClick={() => handleCopy(reg)}
+          title={getDeterministicFolderPath(reg)}
+          className="btn-tactile inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono font-bold uppercase bg-[#0A0A0A] text-[#C9A227] hover:bg-neutral-800 transition-colors cursor-pointer"
+        >
+          {copiedId === reg.id ? (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Copied</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3.5 h-3.5" />
+              <span>Copy Path</span>
+            </>
+          )}
+        </button>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-6 animate-enter-delay-2">
@@ -153,104 +250,19 @@ export const AdminFramingTab: React.FC<AdminFramingTabProps> = ({
       </div>
 
       {/* Framing Ledger Table */}
-      <div className="bg-white border-2 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="bg-[#0A0A0A] text-[#C9A227] font-mono text-[11px] uppercase font-black tracking-wider border-b-2 border-[#0A0A0A]">
-                <th className="py-3 px-4">JO № &amp; Queue</th>
-                <th className="py-3 px-4">Student Name</th>
-                <th className="py-3 px-4">School &amp; Course</th>
-                <th className="py-3 px-4">Frame Specification</th>
-                <th className="py-3 px-4">Payment</th>
-                <th className="py-3 px-4">Production Status</th>
-                <th className="py-3 px-4 text-right">Pictorial Folder</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-200">
-              {filteredList.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-neutral-400 font-mono">
-                    No framing orders match the selected filters.
-                  </td>
-                </tr>
-              ) : (
-                filteredList.map((reg) => (
-                  <tr key={reg.id} className="hover:bg-[#F8F7F4] transition-colors">
-                    <td className="py-3 px-4 font-mono">
-                      <div className="font-black text-red-600">{reg.job_order_no}</div>
-                      <div className="text-[10px] text-neutral-500 font-bold">Q-{reg.queue_number}</div>
-                    </td>
-                    <td className="py-3 px-4 font-black uppercase text-[#0A0A0A]">
-                      {formatClientName(reg)}
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="font-bold text-[#0A0A0A]">{reg.expand?.organization?.code || reg.expand?.organization?.name}</div>
-                      <div className="text-[11px] text-neutral-500">{reg.expand?.course?.code || 'Course'}</div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="space-y-1">
-                        {getFrameDetails(reg).map((f, i) => (
-                          <span
-                            key={i}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 font-mono text-[10px] font-bold bg-[#F7F2E0] border border-[#0A0A0A] text-[#0A0A0A]"
-                          >
-                            <Frame className="w-3 h-3 text-[#C9A227]" /> {f}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 font-mono">
-                      {reg.balance > 0 ? (
-                        <span className="text-red-600 font-black text-[11px]">
-                          Bal: {formatCurrency(reg.balance)}
-                        </span>
-                      ) : (
-                        <span className="text-emerald-700 font-black text-[11px]">
-                          ✓ Paid ({formatCurrency(reg.total_amount)})
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4">
-                      <select
-                        value={reg.framing_status || 'pending_framing'}
-                        onChange={(e) => onUpdateFramingStatus(reg.id, e.target.value as FramingStatus)}
-                        className="p-1 font-mono text-xs font-bold uppercase bg-white border border-[#0A0A0A] focus:outline-hidden"
-                      >
-                        <option value="pending_framing">Pending Framing</option>
-                        <option value="in_production">In Production</option>
-                        <option value="framed">Framed</option>
-                        <option value="ready_for_pickup">Ready for Pickup</option>
-                        <option value="released">Released to Client</option>
-                      </select>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleCopy(reg)}
-                        title={getDeterministicFolderPath(reg)}
-                        className="btn-tactile inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono font-bold uppercase bg-[#0A0A0A] text-[#C9A227] hover:bg-neutral-800 transition-colors cursor-pointer"
-                      >
-                        {copiedId === reg.id ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copy Path</span>
-                          </>
-                        )}
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable
+        label="Framing Ledger"
+        rows={filteredList}
+        columns={columns}
+        getRowId={(reg) => reg.id}
+        defaultSort={{ column: 'job', direction: 'ascending' }}
+        pagination={false}
+        viewportClassName="max-h-[600px]"
+        headerClassName="font-mono uppercase tracking-wider"
+        filtered={filterSchool !== 'all' || filterStatus !== 'all'}
+        emptyMessage="No framing orders available."
+        filteredEmptyMessage="No framing orders match the selected filters."
+      />
     </div>
   );
 };

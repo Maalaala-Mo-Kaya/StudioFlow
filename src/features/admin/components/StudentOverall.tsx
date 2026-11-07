@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
 import type { Course, Level, Organization, Package, PaymentRecord, Registration } from '../../../types';
 import { sumAddOnAmounts } from '../../../utils/registrationAddOns';
@@ -9,6 +8,8 @@ import {
 import type { OverallLevel, OverallRow, PackageColumn, PackageMapping } from '../studentOverallData';
 import { StudentDirectoryFilters } from './StudentDirectoryFilters';
 import { RegistrationAddOnsDropdown } from './RegistrationAddOnsDropdown';
+import { DataTable } from '../../../components/common/DataTable';
+import type { DataTableColumn } from '../../../components/common/DataTable';
 
 const leadingColumns = [
   { id: 'date', label: 'Date of Pictorial' },
@@ -168,7 +169,6 @@ export function StudentOverall({ title, level, registrations, organizations, lev
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState(emptyFilters);
   const [columnOverrides, setColumnOverrides] = useState<Partial<Record<Column, boolean>>>({});
-  const [sort, setSort] = useState<{ column: Column; ascending: boolean }>({ column: 'name', ascending: true });
 
   const allRows = useMemo(() => ledger.status === 'ready'
     ? buildOverallRows({ registrations, payments: ledger.records, organizations, levels, courses, packages, mapping })
@@ -188,7 +188,6 @@ export function StudentOverall({ title, level, registrations, organizations, lev
   const visibleColumns = selectedColumns.length ? selectedColumns : columns.filter(defaultVisible);
   const visible = visibleColumns.map(({ id }) => id);
   const isMonetary = (id: Column) => financialColumns.has(id) || packageColumnIds.has(id);
-  const sortColumn = columns.some(({ id }) => id === sort.column) ? sort.column : 'name';
 
   const options = useMemo(() => {
     const byId = (values: { id: string; label: string }[]) => [...new Map(values.filter(({ id }) => id).map((item) => [item.id, item])).values()]
@@ -209,16 +208,19 @@ export function StudentOverall({ title, level, registrations, organizations, lev
       return filterSections.every(({ key }) => !filters[key].length || filters[key].includes(keys[key]))
         && (!term || [row.name, row.givenFirstName, row.jobOrder, row.course, row.courseCode, row.school, row.schoolCode]
           .some((value) => value?.toLowerCase().includes(term)));
-    }).sort((a, b) => {
-      const left = sortValue(a, sortColumn);
-      const right = sortValue(b, sortColumn);
-      if (left === null || right === null) return Number(left === null) - Number(right === null);
-      const order = typeof left === 'number' && typeof right === 'number' ? left - right : compareText.compare(String(left), String(right));
-      return sort.ascending ? order : -order;
     });
-  }, [filters, query, rows, sort, sortColumn]);
+  }, [filters, query, rows]);
 
   const totals = summarizeOverallRows(shownRows);
+  const tableColumns: DataTableColumn<OverallRow, Column>[] = columns.map((column) => ({
+    id: column.id, header: column.label, description: 'description' in column ? column.description : undefined,
+    sortable: column.id !== 'date' && column.id !== 'studio',
+    accessor: (row) => sortValue(row, column.id),
+    cell: (row) => reportCell(row, column.id),
+    align: isMonetary(column.id) ? 'right' : 'left',
+    headerClassName: 'p-2.5',
+    cellClassName: `px-2.5 align-top ${isMonetary(column.id) ? 'whitespace-nowrap' : ''}`,
+  }));
 
   return (
     <div data-student-overall className="min-w-0 space-y-5 font-mono text-xs">
@@ -243,83 +245,47 @@ export function StudentOverall({ title, level, registrations, organizations, lev
         onResetColumns={() => setColumnOverrides({})}
       />
 
-      <div className="min-w-0 border-2 border-[#0A0A0A] bg-white shadow-[6px_6px_0px_#0A0A0A]">
-        {ledger.status !== 'ready' ? (
-          <div role="status" className="p-4 text-neutral-600">
-            {ledger.status === 'loading' ? 'Loading payment records…' : (
-              <>Payment records could not be loaded. <button type="button" onClick={retry} className="font-bold underline">Retry</button></>
-            )}
-          </div>
-        ) : (
-          <div role="region" aria-label={`${title} table`} tabIndex={0} className="max-h-[65dvh] overflow-auto">
-            <table className="w-full border-separate border-spacing-0 text-left tabular-nums">
-              <thead className="sticky top-0 z-10 bg-[#0A0A0A] text-[#C9A227]">
-                <tr>
-                  {visibleColumns.map((column) => {
-                    const { id, label } = column;
-                    const sorted = sortColumn === id;
-                    const Icon = sorted ? sort.ascending ? ArrowUp : ArrowDown : ArrowUpDown;
-                    return (
-                      <th key={id} scope="col" aria-sort={sorted ? sort.ascending ? 'ascending' : 'descending' : undefined} className={`p-2.5 align-top text-[11px] ${isMonetary(id) ? 'text-right' : ''}`}>
-                        {id === 'date' || id === 'studio' ? <span className="whitespace-nowrap">{label}</span> : (
-                          <button
-                            type="button"
-                            onClick={() => setSort({ column: id, ascending: !sorted || !sort.ascending })}
-                            className={`inline-flex cursor-pointer items-center gap-1 font-bold ${isMonetary(id) ? 'justify-end' : ''}`}
-                          >
-                            {label}<Icon className="size-3 shrink-0" aria-hidden="true" />
-                          </button>
-                        )}
-                        {'description' in column && <span className="mt-1 block whitespace-nowrap font-normal text-white">{column.description}</span>}
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {shownRows.length === 0 && (
-                  <tr>
-                    {visibleColumns.map(({ id }) => (
-                      <td key={id} className={`px-2.5 py-2 text-neutral-500 ${isMonetary(id) ? 'text-right' : ''}`}>—</td>
-                    ))}
-                  </tr>
-                )}
-                {shownRows.map((row) => (
-                  <tr key={row.id} className="even:bg-[#F8F7F4] hover:bg-[#F7F2E0]">
-                    {visibleColumns.map(({ id }) => (
-                      <td key={id} className={`border-b border-neutral-200 px-2.5 py-2 align-top ${isMonetary(id) ? 'whitespace-nowrap text-right' : ''}`}>
-                        {reportCell(row, id)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot hidden={shownRows.length === 0} className="bg-[#F7F2E0] font-bold">
-                <tr>
-                  {visibleColumns.map(({ id }, index) => (
-                    <td key={id} className="border-t-2 border-[#0A0A0A] px-2.5 py-2 whitespace-nowrap">
-                      {index === 0 && <span className="mr-2">TOTAL AMOUNT</span>}
-                      {isMonetary(id) && (
-                        <span className="block text-right">
-                          {money(totals.amounts[id as keyof typeof totals.amounts] ?? (id === 'poses' ? null : 0))}
-                        </span>
-                      )}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  {visibleColumns.map(({ id }, index) => (
-                    <td key={id} className="border-t border-[#C9A227] px-2.5 py-2 whitespace-nowrap">
-                      {index === 0 && <span className="mr-2">NO. STUDENTS · {totals.count}</span>}
-                      {packageColumnIds.has(id) && <span className="block text-right">{totals.packageCounts[id as keyof typeof totals.packageCounts] ?? 0}</span>}
-                    </td>
-                  ))}
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
-      </div>
+      <DataTable
+        label={title}
+        rows={shownRows}
+        columns={tableColumns}
+        visibleColumnIds={visible}
+        getRowId={(row) => row.id}
+        defaultSort={{ column: 'name', direction: 'ascending' }}
+        viewportClassName="h-[600px]"
+        tableClassName="tabular-nums"
+        rowClassName={() => 'even:bg-[#F8F7F4] hover:bg-[#F7F2E0]'}
+        loading={ledger.status === 'loading'}
+        loadingMessage="Loading payment records…"
+        filtered={ledger.status === 'ready' && (Boolean(query.trim()) || Object.values(filters).some((values) => values.length > 0))}
+        emptyMessage={ledger.status === 'error'
+          ? <>Payment records could not be loaded. <button type="button" onClick={retry} className="font-bold underline">Retry</button></>
+          : 'No students available.'}
+        footer={shownRows.length ? (visibleColumns) => (
+          <>
+            <tr>
+              {visibleColumns.map(({ id }, index) => (
+                <td key={id} className="bg-[#F7F2E0] font-bold border-t-2 border-[#0A0A0A] px-2.5 py-2 whitespace-nowrap">
+                  {index === 0 && <span className="mr-2">TOTAL AMOUNT</span>}
+                  {isMonetary(id) && (
+                    <span className="block text-right">
+                      {money(totals.amounts[id as keyof typeof totals.amounts] ?? (id === 'poses' ? null : 0))}
+                    </span>
+                  )}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              {visibleColumns.map(({ id }, index) => (
+                <td key={id} className="bg-[#F7F2E0] font-bold border-t border-[#C9A227] px-2.5 py-2 whitespace-nowrap">
+                  {index === 0 && <span className="mr-2">NO. STUDENTS · {totals.count}</span>}
+                  {packageColumnIds.has(id) && <span className="block text-right">{totals.packageCounts[id as keyof typeof totals.packageCounts] ?? 0}</span>}
+                </td>
+              ))}
+            </tr>
+          </>
+        ) : undefined}
+      />
     </div>
   );
 }

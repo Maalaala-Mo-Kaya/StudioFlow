@@ -11,6 +11,8 @@ import { useToast } from '../../../context/ToastContext';
 import { StudentDirectoryFilters } from './StudentDirectoryFilters';
 import { StudentOverall } from './StudentOverall';
 import { RegistrationAddOnsDropdown } from './RegistrationAddOnsDropdown';
+import { DataTable } from '../../../components/common/DataTable';
+import type { DataTableColumn } from '../../../components/common/DataTable';
 
 const filterSections = [
   { key: 'school', title: 'Schools & Organizations' },
@@ -102,7 +104,6 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<StudentFilters>(emptyFilters);
   const [visibleColumnIds, setVisibleColumnIds] = useState(readColumnPreferences);
-  const visibleColumns = columns.filter(({ id }) => visibleColumnIds.includes(id));
   const [editingStudent, setEditingStudent] = useState<Registration | null>(null);
 
   useEffect(() => {
@@ -202,6 +203,98 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
     });
   }, [registrations, searchQuery, filters, levelNames]);
 
+  const cells = {
+    student: (reg: Registration) => <>
+      <div className="font-bold text-[#0A0A0A]">{formatClientName(reg)}</div>
+      <div className="text-[10px] text-neutral-500 font-mono">
+        {reg.student_id ? `ID: ${reg.student_id}` : 'No ID recorded'}
+      </div>
+    </>,
+    school: (reg: Registration) => <>
+      <div className="font-semibold text-neutral-800">
+        {reg.expand?.organization?.code || reg.expand?.organization?.name || 'School'}
+      </div>
+      <div className="text-[10px] text-neutral-500">
+        {reg.expand?.course?.code || reg.course || 'Degree'}
+      </div>
+    </>,
+    contact: (reg: Registration) => <>
+      <div className="font-bold">{reg.section || '—'}</div>
+      <div className="text-[10px] text-neutral-500 font-mono">{reg.mobile_number}</div>
+    </>,
+    package: (reg: Registration) => {
+      const addOns = getRegistrationAddOns(reg.add_ons);
+      return (
+        <div className="min-w-28">
+          <div className="font-bold text-[#0A0A0A]">
+            {reg.expand?.package?.name || reg.expand?.package?.code || '—'}
+          </div>
+          <div className="text-[10px] text-neutral-600">
+            {reg.expand?.package?.name && reg.expand.package.code ? `${reg.expand.package.code} · ` : ''}
+            Billed {formatCurrency(reg.total_amount, { exact: true })}
+          </div>
+          {addOns.length > 0 && (
+            <RegistrationAddOnsDropdown
+              addOns={addOns}
+              formatAmount={(amount) => formatCurrency(amount, { exact: true })}
+              className="mt-1"
+            />
+          )}
+        </div>
+      );
+    },
+    balance: (reg: Registration) => reg.balance > 0 ? (
+        <span className="text-red-600 font-black">{formatCurrency(reg.balance)}</span>
+      ) : (
+        <span className="text-emerald-700">✓ Settled</span>
+      ),
+    status: (reg: Registration) => <RegistrationStatusBadge status={reg.status} />,
+    actions: (reg: Registration) => (
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={() => generateSignedYellowFormPdf(reg, { copyType: 'customer', autoDownload: true })}
+          title="Download Signed PDF Yellow Form (T041)"
+          className="btn-tactile inline-flex items-center gap-1 px-2 py-1 bg-[#F8F7F4] text-[#0A0A0A] hover:bg-[#C9A227] hover:text-[#0A0A0A] border border-neutral-300 text-[10px] font-bold uppercase cursor-pointer"
+        >
+          <FileDown className="w-3 h-3 text-[#C9A227]" />
+          <span>PDF</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditingStudent(reg)}
+          title="Edit Student Information"
+          className="btn-tactile inline-flex items-center gap-1 px-2 py-1 bg-[#0A0A0A] text-[#C9A227] hover:bg-neutral-800 text-[10px] font-bold uppercase cursor-pointer"
+        >
+          <Edit3 className="w-3 h-3" />
+          <span>Edit</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => promptDeleteStudent(reg)}
+          title="Cancel/Delete Registration"
+          className="btn-tactile p-1 text-red-600 hover:bg-red-50 border border-neutral-300 hover:border-red-600 cursor-pointer"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    ),
+  };
+  const accessors = {
+    student: (reg: Registration) => `${reg.family_name} ${reg.given_name}`,
+    school: (reg: Registration) => `${reg.expand?.organization?.name || ''} ${reg.expand?.course?.code || ''}`,
+    contact: (reg: Registration) => `${reg.section || ''} ${reg.mobile_number || ''}`,
+    package: (reg: Registration) => reg.expand?.package?.name || reg.expand?.package?.code,
+    balance: (reg: Registration) => reg.balance,
+    status: (reg: Registration) => reg.status,
+  };
+  const tableColumns: DataTableColumn<Registration, ColumnId>[] = columns.map(({ id, label, heading, cell }) => ({
+    id, header: label, headerClassName: heading, cellClassName: cell, cell: cells[id],
+    align: id === 'status' ? 'center' : id === 'actions' || id === 'balance' ? 'right' : 'left',
+    sortable: id !== 'actions',
+    accessor: id === 'actions' ? undefined : accessors[id],
+  }));
+
   return (
     <div className="space-y-6 animate-enter font-mono text-xs">
       <StudentDirectoryFilters
@@ -219,125 +312,32 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
       />
 
       {/* Student Roster Table */}
-      <div className="bg-white border-2 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] overflow-hidden">
-        <div className="p-4 border-b-2 border-[#0A0A0A] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-[#C9A227]" />
-            <h3 className="font-black text-xs uppercase tracking-wider text-[#0A0A0A]">
-              Student Registrations
-            </h3>
+      <DataTable
+        label="Student Registrations"
+        rows={filtered}
+        columns={tableColumns}
+        visibleColumnIds={visibleColumnIds}
+        getRowId={(reg) => reg.id}
+        defaultSort={{ column: 'student', direction: 'ascending' }}
+        viewportClassName="h-[600px]"
+        headerClassName="uppercase tracking-wider"
+        filtered={Boolean(searchQuery.trim()) || Object.values(filters).some((values) => values.length > 0)}
+        emptyMessage="No student registrations yet."
+        filteredEmptyMessage="No student registrations match the selected filters."
+        toolbar={(
+          <div className="p-4 border-b-2 border-[#0A0A0A] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-[#C9A227]" />
+              <h3 className="font-black text-xs uppercase tracking-wider text-[#0A0A0A]">
+                Student Registrations
+              </h3>
+            </div>
+            <span className="text-[11px] text-neutral-500 font-bold">
+              Showing {filtered.length} of {registrations.length} Students
+            </span>
           </div>
-          <span className="text-[11px] text-neutral-500 font-bold">
-            Showing {filtered.length} of {registrations.length} Students
-          </span>
-        </div>
-
-        <div role="region" aria-label="Student Registrations table" tabIndex={0} className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="bg-[#0A0A0A] text-[#C9A227] text-[10px] uppercase font-black tracking-wider border-b-2 border-[#0A0A0A]">
-                {visibleColumns.map(({ id, label, heading }) => (
-                  <th key={id} scope="col" className={`py-2.5 px-3 ${heading}`}>{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-200">
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={visibleColumns.length} className="py-12 text-center text-neutral-400 font-mono">
-                    No student registrations match the selected filters.
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((reg) => {
-                  const addOns = getRegistrationAddOns(reg.add_ons);
-                  const cells = {
-                    student: <>
-                      <div className="font-bold text-[#0A0A0A]">{formatClientName(reg)}</div>
-                      <div className="text-[10px] text-neutral-500 font-mono">
-                        {reg.student_id ? `ID: ${reg.student_id}` : 'No ID recorded'}
-                      </div>
-                    </>,
-                    school: <>
-                      <div className="font-semibold text-neutral-800">
-                        {reg.expand?.organization?.code || reg.expand?.organization?.name || 'School'}
-                      </div>
-                      <div className="text-[10px] text-neutral-500">
-                        {reg.expand?.course?.code || reg.course || 'Degree'}
-                      </div>
-                    </>,
-                    contact: <>
-                      <div className="font-bold">{reg.section || '—'}</div>
-                      <div className="text-[10px] text-neutral-500 font-mono">{reg.mobile_number}</div>
-                    </>,
-                    package: <>
-                      <div className="min-w-28">
-                        <div className="font-bold text-[#0A0A0A]">
-                          {reg.expand?.package?.name || reg.expand?.package?.code || '—'}
-                        </div>
-                        <div className="text-[10px] text-neutral-600">
-                          {reg.expand?.package?.name && reg.expand.package.code ? `${reg.expand.package.code} · ` : ''}
-                          Billed {formatCurrency(reg.total_amount, { exact: true })}
-                        </div>
-                        {addOns.length > 0 && (
-                          <RegistrationAddOnsDropdown
-                            addOns={addOns}
-                            formatAmount={(amount) => formatCurrency(amount, { exact: true })}
-                            className="mt-1"
-                          />
-                        )}
-                      </div>
-                    </>,
-                    balance: reg.balance > 0 ? (
-                        <span className="text-red-600 font-black">{formatCurrency(reg.balance)}</span>
-                      ) : (
-                        <span className="text-emerald-700">✓ Settled</span>
-                      ),
-                    status: <RegistrationStatusBadge status={reg.status} />,
-                    actions: (
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => generateSignedYellowFormPdf(reg, { copyType: 'customer', autoDownload: true })}
-                          title="Download Signed PDF Yellow Form (T041)"
-                          className="btn-tactile inline-flex items-center gap-1 px-2 py-1 bg-[#F8F7F4] text-[#0A0A0A] hover:bg-[#C9A227] hover:text-[#0A0A0A] border border-neutral-300 text-[10px] font-bold uppercase cursor-pointer"
-                        >
-                          <FileDown className="w-3 h-3 text-[#C9A227]" />
-                          <span>PDF</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingStudent(reg)}
-                          title="Edit Student Information"
-                          className="btn-tactile inline-flex items-center gap-1 px-2 py-1 bg-[#0A0A0A] text-[#C9A227] hover:bg-neutral-800 text-[10px] font-bold uppercase cursor-pointer"
-                        >
-                          <Edit3 className="w-3 h-3" />
-                          <span>Edit</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => promptDeleteStudent(reg)}
-                          title="Cancel/Delete Registration"
-                          className="btn-tactile p-1 text-red-600 hover:bg-red-50 border border-neutral-300 hover:border-red-600 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ),
-                  };
-                  return (
-                    <tr key={reg.id} className="hover:bg-[#F8F7F4] transition-colors">
-                      {visibleColumns.map(({ id, cell }) => (
-                        <td key={id} className={`py-2.5 px-3 ${cell}`}>{cells[id]}</td>
-                      ))}
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        )}
+      />
 
       {/* Edit Modal */}
       {editingStudent && (

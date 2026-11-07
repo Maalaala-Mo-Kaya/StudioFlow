@@ -2,7 +2,6 @@ import React from 'react';
 import { useCashierState } from './useCashierState';
 import { CashierHeader } from './components/CashierHeader';
 import { CashierFilterBar } from './components/CashierFilterBar';
-import { CashierMobileCard } from './components/CashierMobileCard';
 import { CashierTable } from './components/CashierTable';
 import { PaymentModal } from './components/PaymentModal';
 import { PrintReceiptModal } from './components/PrintReceiptModal';
@@ -30,39 +29,14 @@ export const CashierPage: React.FC = () => {
         onSearchChange={cashier.setSearchQuery}
       />
 
-      {/* Content State */}
-      {cashier.loading ? (
-        <div className="bg-white border-2 border-[#0A0A0A] p-16 text-center font-mono text-neutral-500 text-xs uppercase tracking-widest">
-          Loading cashier ledger...
-        </div>
-      ) : cashier.filteredRegistrations.length === 0 ? (
-        <div className="bg-white border-2 border-[#0A0A0A] p-16 text-center font-mono text-neutral-500 text-xs uppercase tracking-widest">
-          No records matching current filter.
-        </div>
-      ) : (
-        <>
-          {/* MOBILE VIEW: Sharp Architectural Cards (< md) */}
-          <div className="grid grid-cols-1 gap-4 md:hidden animate-enter-delay-1">
-            {cashier.filteredRegistrations.map((reg) => (
-              <CashierMobileCard
-                key={reg.id}
-                registration={reg}
-                onOpenPayment={cashier.openPaymentModal}
-                onOpenPrint={(r) => cashier.openPrintModal(r, 'customer')}
-                onOpenRelease={cashier.openReleaseModal}
-              />
-            ))}
-          </div>
-
-          {/* DESKTOP VIEW: High-Contrast Ledger Table (>= md) */}
-          <CashierTable
-            registrations={cashier.filteredRegistrations}
-            onOpenPayment={cashier.openPaymentModal}
-            onOpenPrint={(r) => cashier.openPrintModal(r, 'customer')}
-            onOpenRelease={cashier.openReleaseModal}
-          />
-        </>
-      )}
+      <CashierTable
+        registrations={cashier.filteredRegistrations}
+        loading={cashier.loading}
+        filtered={Boolean(cashier.searchQuery.trim()) || cashier.registrations.length > 0}
+        onOpenPayment={cashier.openPaymentModal}
+        onOpenPrint={(reg) => cashier.openPrintModal(reg, 'customer')}
+        onOpenRelease={cashier.openReleaseModal}
+      />
 
       {/* PAYMENT COLLECTION MODAL */}
       {cashier.selectedReg && (
