@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   TrendingUp,
   Building,
@@ -37,6 +37,74 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
   schoolCount,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobileModal, setIsMobileModal] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches,
+  );
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 768px)');
+    const updateMobileMode = () => setIsMobileModal(mediaQuery.matches);
+
+    updateMobileMode();
+    mediaQuery.addEventListener('change', updateMobileMode);
+    return () => mediaQuery.removeEventListener('change', updateMobileMode);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileMenuOpen || !isMobileModal) return;
+
+    const originalOverflow = document.body.style.overflow;
+    const menuTrigger = menuTriggerRef.current;
+    document.body.style.overflow = 'hidden';
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobileMenuOpen(false);
+        return;
+      }
+
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+
+      const focusableElements = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.offsetParent !== null);
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      } else if (!dialogRef.current.contains(document.activeElement)) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+      menuTrigger?.focus();
+    };
+  }, [isMobileModal, mobileMenuOpen]);
 
   const navItems: NavItem[] = [
     {
@@ -104,8 +172,12 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
           </span>
         </div>
         <button
+          ref={menuTriggerRef}
           type="button"
           onClick={() => setMobileMenuOpen((prev) => !prev)}
+          aria-expanded={mobileMenuOpen}
+          aria-haspopup={isMobileModal ? 'dialog' : undefined}
+          aria-controls="admin-mobile-navigation"
           className="btn-tactile flex items-center gap-1.5 px-3 py-1.5 bg-[#0A0A0A] text-[#C9A227] text-[10px] font-black uppercase tracking-wider cursor-pointer"
         >
           {mobileMenuOpen ? (
@@ -123,19 +195,35 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
 
       {/* Mobile Collapsible Drawer */}
       {mobileMenuOpen && (
-        <div className="lg:hidden mb-4 bg-[#F8F7F4] border-2 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-2 font-mono text-xs animate-enter max-[768px]:animate-none max-[768px]:fixed max-[768px]:z-50 max-[768px]:top-6 max-[768px]:left-1/2 max-[768px]:-translate-x-1/2 max-[768px]:w-[calc(100vw-32px)] max-[768px]:max-w-[430px] max-[768px]:max-h-[calc(100dvh-48px)] max-[768px]:mb-0 max-[768px]:flex max-[768px]:flex-col">
-          <div className="hidden max-[768px]:flex sticky top-0 z-10 items-center justify-between gap-3 mb-2 p-2 bg-[#F8F7F4] border-b-2 border-[#0A0A0A]">
-            <span className="font-black uppercase tracking-wider text-[#0A0A0A]">Admin Sections</span>
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(false)}
-              aria-label="Close navigation menu"
-              className="btn-tactile shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-[#0A0A0A] text-[#C9A227] text-[10px] font-black uppercase tracking-wider cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Close</span>
-            </button>
-          </div>
+        <>
+          <div
+            aria-hidden="true"
+            className="hidden max-[768px]:block fixed inset-0 z-40 bg-[rgba(0,0,0,0.6)]"
+          />
+          <div
+            ref={dialogRef}
+            id="admin-mobile-navigation"
+            role={isMobileModal ? 'dialog' : undefined}
+            aria-modal={isMobileModal ? true : undefined}
+            aria-labelledby={isMobileModal ? 'admin-mobile-navigation-title' : undefined}
+            tabIndex={isMobileModal ? -1 : undefined}
+            className="lg:hidden mb-4 bg-[#F8F7F4] border-2 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-2 font-mono text-xs animate-enter max-[768px]:animate-none max-[768px]:fixed max-[768px]:z-50 max-[768px]:top-6 max-[768px]:left-1/2 max-[768px]:-translate-x-1/2 max-[768px]:w-[calc(100vw-32px)] max-[768px]:max-w-[430px] max-[768px]:max-h-[calc(100dvh-48px)] max-[768px]:mb-0 max-[768px]:flex max-[768px]:flex-col"
+          >
+            <div className="hidden max-[768px]:flex sticky top-0 z-10 items-center justify-between gap-3 mb-2 p-2 bg-[#F8F7F4] border-b-2 border-[#0A0A0A]">
+              <span id="admin-mobile-navigation-title" className="font-black uppercase tracking-wider text-[#0A0A0A]">
+                Admin Sections
+              </span>
+              <button
+                ref={closeButtonRef}
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close navigation menu"
+                className="btn-tactile shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-[#0A0A0A] text-[#C9A227] text-[10px] font-black uppercase tracking-wider cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Close</span>
+              </button>
+            </div>
 
           <div className="space-y-1.5 max-[768px]:overflow-y-auto max-[768px]:overscroll-contain max-[768px]:pr-1">
             {navItems.map((item) => {
@@ -169,7 +257,8 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
               );
             })}
           </div>
-        </div>
+          </div>
+        </>
       )}
 
       {/* Desktop Persistent Vertical Sidebar */}
