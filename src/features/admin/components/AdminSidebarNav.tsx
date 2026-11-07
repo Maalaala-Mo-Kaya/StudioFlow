@@ -96,10 +96,10 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
   return (
     <>
       {/* Mobile Top Header Dropdown / Toggle */}
-      <div className="lg:hidden mb-4 bg-white border-2 border-[#0A0A0A] shadow-[4px_4px_0px_#0A0A0A] p-2.5 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="lg:hidden mb-4 w-full bg-white border-2 border-[#0A0A0A] shadow-[4px_4px_0px_#0A0A0A] p-2.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <activeItem.icon className="w-4 h-4 text-[#C9A227]" />
-          <span className="font-mono text-xs font-black uppercase text-[#0A0A0A]">
+          <span className="font-mono text-xs font-black uppercase text-[#0A0A0A] truncate">
             {activeItem.label}
           </span>
         </div>
@@ -108,44 +108,67 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
           onClick={() => setMobileMenuOpen((prev) => !prev)}
           className="btn-tactile flex items-center gap-1.5 px-3 py-1.5 bg-[#0A0A0A] text-[#C9A227] text-[10px] font-black uppercase tracking-wider cursor-pointer"
         >
-          {mobileMenuOpen ? <X className="w-3.5 h-3.5" /> : <Menu className="w-3.5 h-3.5" />}
-          <span>{mobileMenuOpen ? 'Close Menu' : 'Sections'}</span>
+          {mobileMenuOpen ? (
+            <>
+              <X className="w-3.5 h-3.5 max-[768px]:hidden" />
+              <Menu className="hidden w-3.5 h-3.5 max-[768px]:block" />
+            </>
+          ) : (
+            <Menu className="w-3.5 h-3.5" />
+          )}
+          <span className="max-[768px]:hidden">{mobileMenuOpen ? 'Close Menu' : 'Sections'}</span>
+          <span className="hidden max-[768px]:inline">Sections</span>
         </button>
       </div>
 
       {/* Mobile Collapsible Drawer */}
       {mobileMenuOpen && (
-        <div className="lg:hidden mb-4 bg-[#F8F7F4] border-2 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-2 space-y-1.5 font-mono text-xs animate-enter">
-          {navItems.map((item) => {
-            const isSelected = activeTab === item.id;
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => handleSelect(item.id)}
-                className={`w-full min-h-[42px] px-3.5 py-2 flex items-center justify-between border text-left cursor-pointer transition-colors ${
-                  isSelected
-                    ? 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A] font-black'
-                    : 'bg-white text-neutral-800 border-neutral-300 hover:border-[#0A0A0A]'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="uppercase tracking-wider">{item.label}</span>
-                </div>
-                {item.badge !== undefined && (
-                  <span
-                    className={`text-[10px] font-mono px-1.5 py-0.5 ${
-                      isSelected ? 'bg-[#C9A227] text-[#0A0A0A] font-black' : 'bg-neutral-100 text-neutral-600'
-                    }`}
-                  >
-                    {item.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        <div className="lg:hidden mb-4 bg-[#F8F7F4] border-2 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-2 font-mono text-xs animate-enter max-[768px]:animate-none max-[768px]:fixed max-[768px]:z-50 max-[768px]:top-6 max-[768px]:left-1/2 max-[768px]:-translate-x-1/2 max-[768px]:w-[calc(100vw-32px)] max-[768px]:max-w-[430px] max-[768px]:max-h-[calc(100dvh-48px)] max-[768px]:mb-0 max-[768px]:flex max-[768px]:flex-col">
+          <div className="hidden max-[768px]:flex sticky top-0 z-10 items-center justify-between gap-3 mb-2 p-2 bg-[#F8F7F4] border-b-2 border-[#0A0A0A]">
+            <span className="font-black uppercase tracking-wider text-[#0A0A0A]">Admin Sections</span>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(false)}
+              aria-label="Close navigation menu"
+              className="btn-tactile shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-[#0A0A0A] text-[#C9A227] text-[10px] font-black uppercase tracking-wider cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Close</span>
+            </button>
+          </div>
+
+          <div className="space-y-1.5 max-[768px]:overflow-y-auto max-[768px]:overscroll-contain max-[768px]:pr-1">
+            {navItems.map((item) => {
+              const isSelected = activeTab === item.id;
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleSelect(item.id)}
+                  className={`w-full min-h-[42px] px-3.5 py-2 flex items-center justify-between border text-left cursor-pointer transition-colors ${
+                    isSelected
+                      ? 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A] font-black'
+                      : 'bg-white text-neutral-800 border-neutral-300 hover:border-[#0A0A0A]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Icon className="w-4 h-4 shrink-0" />
+                    <span className="uppercase tracking-wider">{item.label}</span>
+                  </div>
+                  {item.badge !== undefined && (
+                    <span
+                      className={`shrink-0 ml-2 text-[10px] font-mono px-1.5 py-0.5 ${
+                        isSelected ? 'bg-[#C9A227] text-[#0A0A0A] font-black' : 'bg-neutral-100 text-neutral-600'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
