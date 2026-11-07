@@ -108,6 +108,7 @@ export const AdminPage: React.FC = () => {
             <AdminStudentsTab
               registrations={admin.registrations}
               organizations={admin.organizations}
+              levels={admin.levels}
               courses={admin.courses}
               packages={admin.packages}
               onUpdateRegistration={admin.handleUpdateRegistration}

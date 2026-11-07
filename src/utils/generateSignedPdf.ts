@@ -9,6 +9,7 @@ import {
   formatShortDate,
   parsePackageInclusions,
 } from './formatters';
+import { getRegistrationAddOns } from './registrationAddOns';
 
 async function getBase64Image(registration: Registration): Promise<string | null> {
   if (registration.signatureDataUrl && registration.signatureDataUrl.startsWith('data:image')) {
@@ -48,7 +49,10 @@ function drawReceiptPage(
   const courseName = registration.expand?.course?.name || registration.course || 'N/A';
   const pkgName = registration.expand?.package?.name || registration.package || 'Selected Package';
   const pkgCode = registration.expand?.package?.code || 'PKG';
-  const pkgAmount = registration.expand?.package?.amount || registration.total_amount;
+  const pkgAmount = registration.expand?.package?.amount;
+  const addOns = getRegistrationAddOns(registration.add_ons);
+  // The PDF's built-in font does not include the Philippine peso glyph.
+  const pdfMoney = (value: number) => 'PHP ' + formatCurrency(value, { exact: true }).slice(1);
   const isFullPayment = registration.payment_status === 'fully_paid' || registration.balance === 0;
 
   const pageWidth = 210;
@@ -188,7 +192,7 @@ function drawReceiptPage(
   doc.setFontSize(8);
   doc.setTextColor(10, 10, 10);
   doc.text(`SELECTED PACKAGE: [${pkgCode}] ${pkgName.toUpperCase()}`, margin + 8, curY + 4.2);
-  doc.text(formatCurrency(pkgAmount), pageWidth - margin - 25, curY + 4.2);
+  doc.text(pkgAmount === undefined ? '-' : pdfMoney(pkgAmount), pageWidth - margin - 8, curY + 4.2, { align: 'right' });
 
   curY += 8;
   doc.setFont('helvetica', 'italic');
@@ -201,20 +205,24 @@ function drawReceiptPage(
   curY += splitInclusions.length * 3.5 + 2;
 
   // Add-ons list
-  if (Array.isArray(registration.add_ons) && registration.add_ons.length > 0) {
+  if (addOns.length > 0) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(10, 10, 10);
     doc.text('OPTIONAL ADD-ONS:', margin + 8, curY);
     curY += 4;
     doc.setFont('helvetica', 'normal');
-    registration.add_ons.forEach((item) => {
-      if (item && item.name) {
-        doc.text(`+ ${item.name}`, margin + 12, curY);
-        doc.text(formatCurrency(item.amount), pageWidth - margin - 25, curY);
-        curY += 4;
-      }
+    addOns.forEach((item) => {
+      const name = doc.splitTextToSize(`+ ${item.name}`, contentWidth - 55);
+      doc.text(name, margin + 12, curY);
+      doc.text(pdfMoney(item.amount), pageWidth - margin - 8, curY, { align: 'right' });
+      curY += name.length * 4;
     });
+  }
+  if (registration.other_fees) {
+    doc.text('OTHER FEES:', margin + 8, curY);
+    doc.text(pdfMoney(registration.other_fees), pageWidth - margin - 8, curY, { align: 'right' });
+    curY += 4;
   }
 
   // --- SECTION 3: AUDIT SUMMARY & FINANCIAL SETTLEMENT ---
@@ -242,22 +250,22 @@ function drawReceiptPage(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(10, 10, 10);
-  doc.text(formatCurrency(registration.total_amount), margin + 8, curY + 10.5);
+  doc.text(pdfMoney(registration.total_amount), margin + 8, curY + 10.5);
 
   doc.setTextColor(20, 120, 40);
-  doc.text(formatCurrency(registration.paid_amount || 0), margin + 8 + colW, curY + 10.5);
+  doc.text(pdfMoney(registration.paid_amount || 0), margin + 8 + colW, curY + 10.5);
 
   if ((registration.balance || 0) > 0) {
     doc.setTextColor(200, 20, 20);
-    doc.text(formatCurrency(registration.balance), margin + 8 + colW * 2, curY + 10.5);
+    doc.text(pdfMoney(registration.balance), margin + 8 + colW * 2, curY + 10.5);
   } else {
     doc.setTextColor(20, 120, 40);
-    doc.text('₱0.00 (PAID)', margin + 8 + colW * 2, curY + 10.5);
+    doc.text('PHP 0.00 (PAID)', margin + 8 + colW * 2, curY + 10.5);
   }
 
   doc.setFontSize(9);
   doc.setTextColor(10, 10, 10);
-  doc.text(isFullPayment ? 'FULLY SETTLED' : 'DOWNPAYMENT', margin + 8 + colW * 3, curY + 10);
+  doc.text(isFullPayment ? 'FULLY SETTLED' : registration.paid_amount > 0 ? 'DOWNPAYMENT' : 'UNPAID', margin + 8 + colW * 3, curY + 10);
 
   // --- SECTION 4: SIGNATURE & CASHIER AUTHORIZATION ---
   curY += 20;

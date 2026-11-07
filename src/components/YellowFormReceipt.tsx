@@ -8,6 +8,7 @@ import {
   formatQueueNumber,
   formatShortDate,
 } from '../utils/formatters';
+import { getRegistrationAddOns } from '../utils/registrationAddOns';
 
 interface YellowFormReceiptProps {
   registration: Registration;
@@ -24,7 +25,8 @@ export const YellowFormReceipt: React.FC<YellowFormReceiptProps> = ({
   const orgName = registration.expand?.organization?.name || 'School / Organization';
   const courseName = registration.expand?.course?.name || registration.course || 'N/A';
   const pkgCode = registration.expand?.package?.code || 'PKG-A';
-  const pkgAmount = registration.expand?.package?.amount || registration.total_amount;
+  const pkgAmount = registration.expand?.package?.amount;
+  const addOns = getRegistrationAddOns(registration.add_ons);
   const isFullPayment = registration.payment_status === 'fully_paid' || registration.balance === 0;
 
   const signatureUrl =
@@ -174,10 +176,10 @@ export const YellowFormReceipt: React.FC<YellowFormReceiptProps> = ({
           </div>
           <div className="border border-[#0A0A0A] p-2 bg-white/90">
             <span className="block text-[9px] font-mono uppercase font-bold text-neutral-500">
-              Amount
+              Package Amount
             </span>
             <span className="font-mono font-bold text-[#0A0A0A] text-sm">
-              {formatCurrency(pkgAmount, { exact: true })}
+              {pkgAmount === undefined ? '—' : formatCurrency(pkgAmount, { exact: true })}
             </span>
           </div>
           <div className="border border-[#0A0A0A] p-2 bg-white/90">
@@ -190,10 +192,28 @@ export const YellowFormReceipt: React.FC<YellowFormReceiptProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 text-xs">
+        {addOns.length > 0 && (
+          <div className="mt-2 border border-[#0A0A0A] bg-white/90 p-2 text-xs">
+            <h3 className="mb-1 text-[9px] font-mono font-bold uppercase text-neutral-500">Selected Add-ons</h3>
+            <ul className="space-y-1">
+              {addOns.map((item, index) => (
+                <li key={item.id ?? index} className="flex justify-between gap-3">
+                  <span>{item.name}</span>
+                  <span className="shrink-0 font-mono font-bold">{formatCurrency(item.amount, { exact: true })}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 text-xs">
+          <div className="border border-[#0A0A0A] p-2 bg-white/90">
+            <span className="block text-[9px] font-mono uppercase font-bold text-neutral-500">Total Billed</span>
+            <span className="font-mono font-black text-sm">{formatCurrency(registration.total_amount, { exact: true })}</span>
+          </div>
           <div className="border border-[#0A0A0A] p-2 bg-white/90">
             <span className="block text-[9px] font-mono uppercase font-bold text-neutral-500">
-              Initial Payment
+              Amount Paid
             </span>
             <span className="font-mono font-black text-emerald-700 text-sm">
               {formatCurrency(registration.paid_amount, { exact: true })}
@@ -213,7 +233,7 @@ export const YellowFormReceipt: React.FC<YellowFormReceiptProps> = ({
                 Full Payment
               </span>
               <span className="font-mono font-black text-[#0A0A0A] uppercase">
-                {isFullPayment ? 'SETTLED' : 'PARTIAL'}
+                {isFullPayment ? 'SETTLED' : registration.paid_amount > 0 ? 'PARTIAL' : 'UNPAID'}
               </span>
             </div>
             <div

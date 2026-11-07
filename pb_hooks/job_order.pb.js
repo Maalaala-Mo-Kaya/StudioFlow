@@ -2,7 +2,7 @@
 
 /**
  * PocketBase Hook: Auto-generate Job Order Numbers, daily FCFS Queue numbers,
- * calculate amounts, and automatically generate deterministic C:\StudioFlow_Photos
+ * and automatically generate deterministic C:\StudioFlow_Photos
  * directories (T042 / AC021) on registration and payment creation.
  * Compatible with PocketBase v0.23+ / 0.41.x hook middleware pattern (e.next()).
  */
@@ -60,33 +60,6 @@ onRecordCreate((e) => {
   if (!e.record.getString("payment_status")) {
     e.record.set("payment_status", "unpaid");
   }
-
-  // 4. Calculate total amount if package is set
-  const packageId = e.record.getString("package");
-  let packageAmount = 0;
-  if (packageId) {
-    try {
-      const pkg = e.app.findRecordById("packages", packageId);
-      if (pkg) packageAmount = pkg.getFloat("amount");
-    } catch (_) {}
-  }
-
-  const otherFees = e.record.getFloat("other_fees") || 0;
-  let addOnsTotal = 0;
-  const addOns = e.record.get("add_ons");
-  if (Array.isArray(addOns)) {
-    for (const item of addOns) {
-      if (item && typeof item.amount === "number") {
-        addOnsTotal += item.amount;
-      }
-    }
-  }
-
-  const total = packageAmount + otherFees + addOnsTotal;
-  e.record.set("total_amount", total);
-
-  const paid = e.record.getFloat("paid_amount") || 0;
-  e.record.set("balance", Math.max(0, total - paid));
 
   // Auto-create pictorial directory on Windows C: storage (T042)
   try {

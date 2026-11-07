@@ -229,7 +229,7 @@ export function useRegistrationForm() {
     try {
       const selectedAddOnObjects = selectedAddOns.map((id) => {
         const item = addOnsList.find((a) => a.id === id);
-        return { code: item?.code, name: item?.name || '', amount: item?.amount || 0 };
+        return { id, code: item?.code, name: item?.name || '', amount: item?.amount || 0 };
       });
 
       const formData = new FormData();
@@ -245,8 +245,6 @@ export function useRegistrationForm() {
       formData.append('email', email.trim());
       formData.append('package', selectedPackageId);
       formData.append('add_ons', JSON.stringify(selectedAddOnObjects));
-      formData.append('total_amount', String(totalAmount));
-      formData.append('balance', String(totalAmount));
       formData.append('paid_amount', '0');
       formData.append('payment_type', paymentType);
       formData.append('payment_status', 'unpaid');

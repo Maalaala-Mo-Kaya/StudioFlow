@@ -91,6 +91,14 @@ export interface AddOn {
   is_active?: boolean;
 }
 
+export interface RegistrationAddOn {
+  id?: string;
+  code?: string;
+  name: string;
+  amount: number;
+  quantity?: number;
+}
+
 export interface MasterListItem {
   id: string;
   organization?: string;
@@ -119,7 +127,7 @@ export interface Registration {
   mobile_number: string;
   email?: string;
   package: string;
-  add_ons?: Array<{ code?: string; name: string; amount: number }>;
+  add_ons?: RegistrationAddOn[];
   other_fees?: number;
   total_amount: number;
   paid_amount: number;

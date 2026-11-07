@@ -11,6 +11,7 @@ import type {
   PhotoStatus,
 } from '../../../types';
 import { formatCurrency } from '../../../utils/formatters';
+import { getRegistrationAddOns, sumAddOnAmounts } from '../../../utils/registrationAddOns';
 
 interface EditStudentModalProps {
   registration: Registration;
@@ -50,10 +51,11 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [notes, setNotes] = useState(reg.notes || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Recalculate package amount if changed
+  const addOns = getRegistrationAddOns(reg.add_ons);
   const selectedPkg = packages.find((p) => p.id === packageId);
-  const currentTotal = selectedPkg ? selectedPkg.amount : reg.total_amount;
-  const currentBalance = Math.max(0, currentTotal - (reg.paid_amount || 0));
+  const packageChanged = selectedPkg && packageId !== reg.package;
+  const currentTotal = packageChanged ? selectedPkg.amount + sumAddOnAmounts(addOns) + (reg.other_fees || 0) : reg.total_amount;
+  const currentBalance = packageChanged ? Math.max(0, currentTotal - (reg.paid_amount || 0)) : reg.balance;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,8 +72,6 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
         organization: organizationId,
         course: courseId,
         package: packageId,
-        total_amount: currentTotal,
-        balance: currentBalance,
         status,
         payment_status: paymentStatus,
         framing_status: framingStatus,
@@ -260,6 +260,19 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 </span>
               </div>
             </div>
+            {addOns.length > 0 && (
+              <div className="space-y-1 border-t border-neutral-200 pt-2">
+                <h4 className="font-black uppercase">Selected Add-ons</h4>
+                <ul className="space-y-1">
+                  {addOns.map((item, index) => (
+                    <li key={item.id ?? index} className="flex justify-between gap-3">
+                      <span>{item.name}</span>
+                      <span className="shrink-0">{formatCurrency(item.amount, { exact: true })}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
 
           {/* Row 5: Operational & Floor Statuses */}

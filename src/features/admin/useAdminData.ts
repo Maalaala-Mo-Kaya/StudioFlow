@@ -88,8 +88,12 @@ export function useAdminData() {
     pb.collection('registrations').subscribe('*', () => {
       loadAllData();
     });
+    pb.collection('packages').subscribe('*', () => {
+      loadAllData();
+    }).catch((error) => console.error('Could not subscribe to package updates:', error));
     return () => {
       pb.collection('registrations').unsubscribe('*');
+      pb.collection('packages').unsubscribe('*');
     };
   }, [loadAllData]);
 
