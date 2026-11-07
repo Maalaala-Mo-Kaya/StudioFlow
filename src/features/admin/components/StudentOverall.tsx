@@ -8,6 +8,7 @@ import {
 } from '../studentOverallData';
 import type { OverallLevel, OverallRow, PackageColumn, PackageMapping } from '../studentOverallData';
 import { StudentDirectoryFilters } from './StudentDirectoryFilters';
+import { RegistrationAddOnsDropdown } from './RegistrationAddOnsDropdown';
 
 const leadingColumns = [
   { id: 'date', label: 'Date of Pictorial' },
@@ -28,6 +29,18 @@ const trailingColumns = [
   { id: 'balance', label: 'Balance' },
 ] as const;
 type Column = typeof leadingColumns[number]['id'] | typeof trailingColumns[number]['id'] | PackageColumn;
+const defaultColumnIds = new Set<Column>([
+  'course',
+  'name',
+  'packageCode',
+  'addOns',
+  'fullyPaid',
+  'additionalPayment',
+  'downPayment',
+  'total',
+  'balancePayment',
+  'balance',
+]);
 const financialColumns = new Set<string>(amountColumns);
 const filterSections = [
   { key: 'school', title: 'Schools & Organizations' },
@@ -132,16 +145,12 @@ function reportCell(row: OverallRow, id: Column) {
         {row.packageCode && <div className="text-neutral-600">{row.packageName}</div>}
       </div>
     ) : '—';
-    case 'addOns': return row.addOns.length ? (
-      <ul className="min-w-40 max-w-64 space-y-1">
-        {row.addOns.map((item, index) => (
-          <li key={item.id ?? index} className="flex justify-between gap-2">
-            <span>{item.name || item.code || 'Add-on'}</span>
-            <span className="shrink-0 whitespace-nowrap">{peso.format(item.amount)}</span>
-          </li>
-        ))}
-      </ul>
-    ) : '—';
+    case 'addOns': return (
+      <RegistrationAddOnsDropdown
+        addOns={row.addOns}
+        formatAmount={(amount) => peso.format(amount)}
+      />
+    );
     case 'fullyPaid': return (
       <span className="inline-flex items-center gap-2">
         <input type="checkbox" checked={row.fullyPaid} disabled aria-label={`Full payment for ${row.name}`} className="accent-[#C9A227]" />
@@ -165,7 +174,6 @@ export function StudentOverall({ title, level, registrations, organizations, lev
     ? buildOverallRows({ registrations, payments: ledger.records, organizations, levels, courses, packages, mapping })
     : [], [registrations, ledger, organizations, levels, courses, packages, mapping]);
   const rows = useMemo(() => allRows.filter((row) => row.level === level), [allRows, level]);
-  const usedPackageColumns = new Set(rows.flatMap((row) => row.packageColumn ? [row.packageColumn] : []));
   const catalogColumns = [...new Map(rows.flatMap((row) => {
     const id = row.packageColumn;
     return id?.startsWith('catalog:')
@@ -175,13 +183,7 @@ export function StudentOverall({ title, level, registrations, organizations, lev
   const packageColumns = [...reportPackages, ...catalogColumns];
   const packageColumnIds = new Set<string>(packageColumns.map(({ id }) => id));
   const columns = [...leadingColumns, ...packageColumns, ...trailingColumns];
-  const availableOptionalColumns = new Set<Column>(usedPackageColumns);
-  if (rows.some((row) => row.poses !== null)) availableOptionalColumns.add('poses');
-  if (rows.some((row) => row.settledDate)) availableOptionalColumns.add('settledDate');
-  const defaultVisible = ({ id }: { id: Column }) => {
-    const optional = packageColumnIds.has(id) || id === 'date' || id === 'studio' || id === 'poses' || id === 'settledDate';
-    return !optional || availableOptionalColumns.has(id);
-  };
+  const defaultVisible = ({ id }: { id: Column }) => defaultColumnIds.has(id);
   const selectedColumns = columns.filter((column) => columnOverrides[column.id] ?? defaultVisible(column));
   const visibleColumns = selectedColumns.length ? selectedColumns : columns.filter(defaultVisible);
   const visible = visibleColumns.map(({ id }) => id);

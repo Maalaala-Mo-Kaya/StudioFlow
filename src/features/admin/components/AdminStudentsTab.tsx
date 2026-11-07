@@ -10,6 +10,7 @@ import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
 import { StudentDirectoryFilters } from './StudentDirectoryFilters';
 import { StudentOverall } from './StudentOverall';
+import { RegistrationAddOnsDropdown } from './RegistrationAddOnsDropdown';
 
 const filterSections = [
   { key: 'school', title: 'Schools & Organizations' },
@@ -279,16 +280,11 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
                           Billed {formatCurrency(reg.total_amount, { exact: true })}
                         </div>
                         {addOns.length > 0 && (
-                          <details className="mt-1">
-                            <summary className="cursor-pointer text-[10px] font-bold">
-                              {addOns.length} add-on{addOns.length === 1 ? '' : 's'}
-                            </summary>
-                            <ul className="mt-1 space-y-1 text-[10px] text-neutral-600">
-                              {addOns.map((item, index) => (
-                                <li key={item.id ?? index}>{item.name} · {formatCurrency(item.amount, { exact: true })}</li>
-                              ))}
-                            </ul>
-                          </details>
+                          <RegistrationAddOnsDropdown
+                            addOns={addOns}
+                            formatAmount={(amount) => formatCurrency(amount, { exact: true })}
+                            className="mt-1"
+                          />
                         )}
                       </div>
                     </>,
