@@ -159,8 +159,11 @@ export interface PaymentRecord {
   id: string;
   registration: string;
   amount: number;
-  payment_type: 'initial' | 'full' | 'balance_settlement';
+  payment_type: 'initial' | 'full' | 'additional' | 'balance_settlement';
   payment_method: 'cash' | 'gcash' | 'maya' | 'card';
+  cash_tendered?: number;
+  change_amount?: number;
+  cashier_id?: string;
   cashier_name?: string;
   receipt_no?: string;
   remarks?: string;

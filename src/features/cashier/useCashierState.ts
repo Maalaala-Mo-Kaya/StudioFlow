@@ -2,7 +2,11 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import type { Registration } from '../../types';
+import type { PaymentRecord, Registration } from '../../types';
+
+export type CollectionMode = 'full' | 'initial' | 'additional';
+const toCentavos = (amount: number) => Math.round(amount * 100);
+const fromCentavos = (amount: number) => amount / 100;
 
 export type CashierTab = 'pending' | 'paid' | 'balances';
 
@@ -16,8 +20,8 @@ export function useCashierState() {
 
   // Payment Processing Modal State
   const [selectedReg, setSelectedReg] = useState<Registration | null>(null);
-  const [paymentType, setPaymentType] = useState<'full' | 'initial' | 'balance_settlement'>('full');
-  const [amountPaid, setAmountPaid] = useState<number>(0);
+  const [paymentType, setPaymentType] = useState<CollectionMode>('full');
+  const [amountPaid, setAmountPaid] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'gcash' | 'maya' | 'card'>('cash');
   const [cashierName, setCashierName] = useState(user?.name || 'Mel (Cashier)');
   const [remarks, setRemarks] = useState('');
@@ -59,18 +63,37 @@ export function useCashierState() {
     };
   }, [fetchRegistrations]);
 
-  const openPaymentModal = useCallback((reg: Registration) => {
-    setSelectedReg(reg);
-    if (reg.status === 'pending_payment') {
-      setPaymentType(reg.payment_type === 'downpayment' ? 'initial' : 'full');
-      setAmountPaid(
-        reg.payment_type === 'downpayment' ? Math.round(reg.total_amount / 2) : reg.total_amount
-      );
-    } else {
-      setPaymentType('balance_settlement');
-      setAmountPaid(reg.balance);
+  const openPaymentModal = useCallback(async (reg: Registration) => {
+    try {
+      const [latest, payments] = await Promise.all([
+        pb.collection('registrations').getOne<Registration>(reg.id, {
+          expand: 'organization,level,course,package', requestKey: null,
+        }),
+        pb.collection('payments').getFullList<PaymentRecord>({
+          filter: pb.filter('registration = {:registration}', { registration: reg.id }), requestKey: null,
+        }),
+      ]);
+      const paidCentavos = payments.reduce((sum, payment) => sum + toCentavos(payment.amount), 0);
+      const totalCentavos = toCentavos(latest.total_amount || 0);
+      const balanceCentavos = Math.max(0, totalCentavos - paidCentavos);
+      const hydrated = {
+        ...latest,
+        paid_amount: fromCentavos(paidCentavos),
+        balance: fromCentavos(balanceCentavos),
+      };
+      const mode: CollectionMode = payments.length === 0 && latest.payment_type === 'downpayment' ? 'initial' : 'full';
+      const paymentCentavos = mode === 'initial'
+        ? Math.min(balanceCentavos, Math.round(totalCentavos / 200) * 100)
+        : balanceCentavos;
+      setSelectedReg(hydrated);
+      setPaymentType(mode);
+      setAmountPaid(String(fromCentavos(paymentCentavos)));
+      setRemarks('');
+    } catch (err) {
+      console.error('Failed to load current payment balance:', err);
+      toast.error('Could not load the latest payment balance. Please try again.');
     }
-  }, []);
+  }, [toast]);
 
   const closePaymentModal = useCallback(() => {
     setSelectedReg(null);
@@ -113,35 +136,29 @@ export function useCashierState() {
     e.preventDefault();
     if (!selectedReg) return;
 
-    if (amountPaid <= 0) {
+    if (isProcessing) return;
+    const amount = Number(amountPaid);
+    const amountCentavos = toCentavos(amount);
+    const balanceCentavos = toCentavos(selectedReg.balance);
+    const validMoney = /^\d+$/.test(amountPaid) && Number.isFinite(amount) && Number.isInteger(amount);
+    if (!validMoney || amountCentavos < 100 || amountCentavos > balanceCentavos) {
       toast.error('Please enter a valid payment amount.');
       return;
     }
-
     setIsProcessing(true);
     try {
+      const receiptNo = `REC-${crypto.randomUUID()}`;
       await pb.collection('payments').create({
         registration: selectedReg.id,
-        amount: Number(amountPaid),
+        amount: fromCentavos(amountCentavos),
         payment_type: paymentType,
         payment_method: paymentMethod,
         cashier_name: cashierName,
-        receipt_no: `REC-${Date.now().toString().slice(-6)}`,
+        cashier_id: user?.id || '',
+        cash_tendered: paymentMethod === 'cash' ? fromCentavos(amountCentavos) : 0,
+        change_amount: 0,
+        receipt_no: receiptNo,
         remarks: remarks.trim(),
-      }, { requestKey: null });
-
-      const currentPaid = selectedReg.paid_amount || 0;
-      const newPaid = currentPaid + Number(amountPaid);
-      const newBalance = Math.max(0, (selectedReg.total_amount || 0) - newPaid);
-      const newStatus = selectedReg.status === 'pending_payment' ? 'paid' : selectedReg.status;
-      const newPaymentStatus = newBalance <= 0 ? 'fully_paid' : 'downpayment';
-
-      // Explicitly update registration in PocketBase to guarantee immediate consistency
-      await pb.collection('registrations').update(selectedReg.id, {
-        paid_amount: newPaid,
-        balance: newBalance,
-        status: newStatus,
-        payment_status: newPaymentStatus,
       }, { requestKey: null });
 
       const updated = await pb.collection('registrations').getOne<Registration>(selectedReg.id, {

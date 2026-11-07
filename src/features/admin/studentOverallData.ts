@@ -56,9 +56,9 @@ function paymentBreakdown(records: PaymentRecord[], due: number) {
   for (const payment of chronological) {
     const amount = cents(payment.amount);
     if (!amount) continue;
-    const isSettlement = payment.payment_type === 'balance_settlement';
+    const isSettlement = payment.payment_type === 'full' || payment.payment_type === 'balance_settlement';
     if (isSettlement) balancePayment += amount;
-    else if (!receivedPayment) downPayment += amount;
+    else if (payment.payment_type === 'initial') downPayment += amount;
     else additionalPayment += amount;
 
     const before = total;

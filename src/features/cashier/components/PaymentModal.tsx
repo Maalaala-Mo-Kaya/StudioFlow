@@ -4,16 +4,17 @@ import { X } from 'lucide-react';
 import type { Registration } from '../../../types';
 import { PAYMENT_METHOD_OPTIONS } from '../../../constants/studio';
 import { formatClientName, formatCurrency, formatJobOrderNo, formatQueueNumber } from '../../../utils/formatters';
+import type { CollectionMode } from '../useCashierState';
 
 interface PaymentModalProps {
   registration: Registration;
   onClose: () => void;
   onSubmit: (e: React.FormEvent) => void;
   isProcessing: boolean;
-  paymentType: 'full' | 'initial' | 'balance_settlement';
-  onPaymentTypeChange: (type: 'full' | 'initial' | 'balance_settlement') => void;
-  amountPaid: number;
-  onAmountPaidChange: (amount: number) => void;
+  paymentType: CollectionMode;
+  onPaymentTypeChange: (type: CollectionMode) => void;
+  amountPaid: string;
+  onAmountPaidChange: (amount: string) => void;
   paymentMethod: 'cash' | 'gcash' | 'maya' | 'card';
   onPaymentMethodChange: (method: 'cash' | 'gcash' | 'maya' | 'card') => void;
   cashierName: string;
@@ -38,6 +39,27 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   remarks,
   onRemarksChange,
 }) => {
+  const moneyPattern = /^\d+$/;
+  const toCentavos = (amount: number) => Math.round(amount * 100);
+  const totalCentavos = toCentavos(selectedReg.total_amount || 0);
+  const balanceCentavos = toCentavos(selectedReg.balance || 0);
+  const amount = Number(amountPaid);
+  const amountCentavos = toCentavos(amount);
+  const amountError = !amountPaid ? 'Payment amount is required.'
+    : !moneyPattern.test(amountPaid) || !Number.isFinite(amount) ? 'Enter a positive whole-peso amount using digits only.'
+    : amountCentavos < 100 ? 'Minimum payment is ₱1.'
+    : amountCentavos > balanceCentavos ? 'Payment cannot exceed the remaining balance.'
+    : '';
+  const projectedBalance = Math.max(0, balanceCentavos - (amountError ? 0 : amountCentavos));
+  const canSubmit = !isProcessing && balanceCentavos > 0 && !amountError && cashierName.trim().length > 0;
+
+  const selectMode = (mode: CollectionMode) => {
+    onPaymentTypeChange(mode);
+    if (mode === 'full') onAmountPaidChange(String(balanceCentavos / 100));
+    if (mode === 'initial') onAmountPaidChange(String(Math.min(balanceCentavos, Math.round(totalCentavos / 200) * 100) / 100));
+    if (mode === 'additional') onAmountPaidChange('');
+  };
+
   return createPortal(
     <div
       role="dialog"
@@ -101,13 +123,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             <label className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
               Collection Mode
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <button
                 type="button"
-                onClick={() => {
-                  onPaymentTypeChange('full');
-                  onAmountPaidChange(selectedReg.balance);
-                }}
+                onClick={() => selectMode('full')}
+                disabled={balanceCentavos === 0}
                 className={`btn-tactile min-h-[42px] py-2 px-3 text-xs font-black uppercase tracking-wider border-2 cursor-pointer ${
                   paymentType === 'full'
                     ? 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A]'
@@ -119,17 +139,28 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
-                  onPaymentTypeChange('initial');
-                  onAmountPaidChange(Math.round(selectedReg.total_amount / 2));
-                }}
+                onClick={() => selectMode('initial')}
+                disabled={toCentavos(selectedReg.paid_amount || 0) > 0 || balanceCentavos === 0}
                 className={`btn-tactile min-h-[42px] py-2 px-3 text-xs font-black uppercase tracking-wider border-2 cursor-pointer ${
                   paymentType === 'initial'
                     ? 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A]'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:border-[#0A0A0A]'
+                    : 'bg-white text-neutral-700 border-neutral-300 hover:border-[#0A0A0A] disabled:cursor-not-allowed disabled:opacity-40'
                 }`}
               >
                 50% Downpayment
+              </button>
+
+              <button
+                type="button"
+                onClick={() => selectMode('additional')}
+                disabled={balanceCentavos === 0}
+                className={`btn-tactile min-h-[42px] py-2 px-3 text-xs font-black uppercase tracking-wider border-2 cursor-pointer ${
+                  paymentType === 'additional'
+                    ? 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A]'
+                    : 'bg-white text-neutral-700 border-neutral-300 hover:border-[#0A0A0A] disabled:cursor-not-allowed disabled:opacity-40'
+                }`}
+              >
+                Additional Payment
               </button>
             </div>
           </div>
@@ -137,20 +168,28 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           {/* Amount Input */}
           <div>
             <label className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
-              Cash / Amount Tendered (₱)
+              Payment Amount (₱)
             </label>
             <input
               type="number"
               min="1"
-              max={selectedReg.balance}
+              max={(balanceCentavos / 100).toFixed(2)}
+              step="1"
               value={amountPaid}
-              onChange={(e) => onAmountPaidChange(Number(e.target.value))}
-              className="w-full min-h-[48px] font-mono text-xl font-black px-4 py-2 border-2 border-[#0A0A0A] bg-[#F7F2E0] text-[#0A0A0A]"
+              readOnly={paymentType !== 'additional'}
+              onKeyDown={(e) => {
+                if (['-', '+', '.', ',', 'e', 'E'].includes(e.key)) e.preventDefault();
+              }}
+              onChange={(e) => {
+                if (/^\d*$/.test(e.target.value)) onAmountPaidChange(e.target.value);
+              }}
+              className="w-full min-h-[48px] font-mono text-xl font-black px-4 py-2 border-2 border-[#0A0A0A] bg-[#F7F2E0] text-[#0A0A0A] read-only:cursor-not-allowed read-only:opacity-80"
             />
+            {amountError && <span className="mt-1 block text-[11px] font-bold text-red-600">{amountError}</span>}
             <span className="font-mono text-[11px] font-bold text-neutral-600 mt-1 block">
               Remaining Balance After Payment:{' '}
               <strong className="text-red-600">
-                {formatCurrency(Math.max(0, selectedReg.balance - amountPaid))}
+                {formatCurrency(projectedBalance / 100, { exact: true })}
               </strong>
             </span>
           </div>
@@ -211,8 +250,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isProcessing}
-              className="btn-tactile w-2/3 min-h-[46px] py-2.5 bg-[#0A0A0A] text-[#C9A227] border border-[#0A0A0A] font-black text-xs uppercase tracking-widest cursor-pointer"
+              disabled={!canSubmit}
+              className="btn-tactile w-2/3 min-h-[46px] py-2.5 bg-[#0A0A0A] text-[#C9A227] border border-[#0A0A0A] font-black text-xs uppercase tracking-widest cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isProcessing ? 'Processing...' : 'Confirm & Print Receipt'}
             </button>

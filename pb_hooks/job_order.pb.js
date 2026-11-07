@@ -104,17 +104,52 @@ onRecordCreate((e) => {
 onRecordCreate((e) => {
   const regId = e.record.getString("registration");
   const amount = e.record.getFloat("amount");
+  const paymentType = e.record.getString("payment_type");
+  const paymentMethod = e.record.getString("payment_method");
+
+  if (!regId) throw new BadRequestError("A job order is required.");
+  const reg = e.app.findRecordById("registrations", regId);
+  const totalCentavos = Math.round((reg.getFloat("total_amount") || 0) * 100);
+  const existing = e.app.findRecordsByFilter("payments", "registration = {:registration}", "created", 0, 0, {
+    registration: regId,
+  });
+  const paidCentavos = existing.reduce((sum, payment) => sum + Math.round(payment.getFloat("amount") * 100), 0);
+  const remainingCentavos = Math.max(0, totalCentavos - paidCentavos);
+  const amountCentavos = Math.round(amount * 100);
+
+  if (!Number.isFinite(amount) || !Number.isInteger(amount) || amountCentavos < 100) {
+    throw new BadRequestError("Payment must be a positive whole-peso amount of at least ₱1.");
+  }
+  if (amountCentavos > remainingCentavos) throw new BadRequestError("Payment exceeds the current remaining balance.");
+  if (!["full", "initial", "additional"].includes(paymentType)) throw new BadRequestError("Invalid collection mode.");
+  if (paymentType === "full" && amountCentavos !== remainingCentavos) {
+    throw new BadRequestError("Full settlement must equal the current remaining balance.");
+  }
+  if (paymentType === "initial") {
+    const downpaymentCentavos = Math.min(remainingCentavos, Math.round(totalCentavos / 200) * 100);
+    if (existing.length > 0) throw new BadRequestError("A 50% downpayment is only allowed as the initial payment.");
+    if (amountCentavos !== downpaymentCentavos) throw new BadRequestError("Downpayment must equal exactly 50% of the total job amount.");
+  }
+  if (paymentMethod === "cash") {
+    const tenderedCentavos = Math.round(e.record.getFloat("cash_tendered") * 100);
+    if (tenderedCentavos < amountCentavos) throw new BadRequestError("Cash tendered must cover the payment amount.");
+    e.record.set("change_amount", (tenderedCentavos - amountCentavos) / 100);
+  } else {
+    e.record.set("cash_tendered", 0);
+    e.record.set("change_amount", 0);
+  }
 
   // Call e.next() so payment is written to DB first
   const res = e.next();
 
   if (regId && amount > 0) {
     try {
-      const reg = e.app.findRecordById("registrations", regId);
       if (reg) {
-        const currentPaid = reg.getFloat("paid_amount") || 0;
         const total = reg.getFloat("total_amount") || 0;
-        const newPaid = currentPaid + amount;
+        const savedPayments = e.app.findRecordsByFilter("payments", "registration = {:registration}", "created", 0, 0, {
+          registration: regId,
+        });
+        const newPaid = savedPayments.reduce((sum, payment) => sum + Math.round(payment.getFloat("amount") * 100), 0) / 100;
         const newBalance = Math.max(0, total - newPaid);
 
         reg.set("paid_amount", newPaid);
@@ -122,8 +157,10 @@ onRecordCreate((e) => {
 
         if (newBalance <= 0) {
           reg.set("payment_status", "fully_paid");
-        } else {
+        } else if (newPaid > 0) {
           reg.set("payment_status", "downpayment");
+        } else {
+          reg.set("payment_status", "unpaid");
         }
 
         // Push into paid shooting queue if it was pending
@@ -176,6 +213,7 @@ onRecordCreate((e) => {
       }
     } catch (err) {
       console.error("Failed to update registration payment stats:", err);
+      throw new BadRequestError("Payment could not update the job order. No receipt was issued.");
     }
   }
 
