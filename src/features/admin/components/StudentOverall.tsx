@@ -244,28 +244,6 @@ export function StudentOverall({ title, level, registrations, organizations, lev
       />
 
       <div className="min-w-0 border-2 border-[#0A0A0A] bg-white shadow-[6px_6px_0px_#0A0A0A]">
-        <div className="space-y-2 border-b-2 border-[#0A0A0A] p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="font-black uppercase tracking-wider">{title}</h3>
-            {ledger.status === 'ready' && <span className="text-neutral-600">Showing {shownRows.length} of {rows.length} students</span>}
-          </div>
-          {ledger.status === 'ready' && shownRows.length > 0 && (
-            <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[
-                ['Students', totals.count],
-                ['Billed', money(totals.billed)],
-                ['Received', money(totals.amounts.total ?? 0)],
-                ['Outstanding', money(totals.amounts.balance ?? 0)],
-              ].map(([label, value]) => (
-                <div key={label} className="border border-neutral-200 bg-[#F8F7F4] p-2">
-                  <dt className="text-[10px] font-bold uppercase text-neutral-600">{label}</dt>
-                  <dd className="font-black tabular-nums">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </div>
-
         {ledger.status !== 'ready' ? (
           <div role="status" className="p-4 text-neutral-600">
             {ledger.status === 'loading' ? 'Loading payment records…' : (
