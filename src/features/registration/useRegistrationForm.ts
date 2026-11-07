@@ -4,7 +4,7 @@ import { useToast } from '../../context/ToastContext';
 import type {
   Organization,
   Level,
-  Course,
+  SchoolCourse,
   Package,
   AddOn,
   Registration,
@@ -17,8 +17,12 @@ export function useRegistrationForm() {
 
   // Reference Master Data
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [levels, setLevels] = useState<Level[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]);
+  const [schoolCatalog, setSchoolCatalog] = useState<{
+    schoolId: string;
+    levels: Level[];
+    assignments: SchoolCourse[];
+    failed?: boolean;
+  } | null>(null);
   const [packages, setPackages] = useState<Package[]>([]);
   const [addOnsList, setAddOnsList] = useState<AddOn[]>([]);
   const [masterList, setMasterList] = useState<MasterListItem[]>([]);
@@ -28,8 +32,8 @@ export function useRegistrationForm() {
   const [givenName, setGivenName] = useState('');
   const [middleName, setMiddleName] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
-  const [selectedLevelId, setSelectedLevelId] = useState('');
-  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [preferredLevelId, setPreferredLevelId] = useState('');
+  const [preferredCourseId, setPreferredCourseId] = useState('');
   const [section, setSection] = useState('');
   const [department, setDepartment] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
@@ -92,48 +96,58 @@ export function useRegistrationForm() {
     loadReferenceData();
   }, []);
 
-  // 2. Cascade load levels when organization changes
+  // Fetch the selected school's levels and assignments together. Ignore late results
+  // after switching schools so an old response cannot repopulate the dropdowns.
   useEffect(() => {
-    if (!selectedOrgId) {
-      setLevels([]);
-      return;
-    }
-    async function loadLevels() {
+    if (!selectedOrgId) return;
+    let current = true;
+    async function loadSchoolCatalog() {
       try {
-        const res = await pb.collection('levels').getFullList<Level>({
-          filter: pb.filter('organization = {:orgId}', { orgId: selectedOrgId }),
-          sort: 'order',
-          requestKey: null,
-        });
-        setLevels(res);
-        setSelectedLevelId(res.length > 0 ? res[0].id : '');
+        const [levels, assignments] = await Promise.all([
+          pb.collection('levels').getFullList<Level>({
+            filter: pb.filter('organization = {:schoolId}', { schoolId: selectedOrgId }),
+            sort: 'order,name',
+          }),
+          pb.collection('school_courses').getFullList<SchoolCourse>({
+            filter: pb.filter('school_id = {:schoolId}', { schoolId: selectedOrgId }),
+            expand: 'course_id',
+            sort: 'course_id.name',
+          }),
+        ]);
+        if (current) setSchoolCatalog({ schoolId: selectedOrgId, levels, assignments });
       } catch (err) {
-        console.error('Failed to load levels:', err);
+        if (current) {
+          console.error('Failed to load school courses:', err);
+          setSchoolCatalog({ schoolId: selectedOrgId, levels: [], assignments: [], failed: true });
+        }
       }
     }
-    loadLevels();
+    loadSchoolCatalog();
+    return () => { current = false; };
   }, [selectedOrgId]);
 
-  // 3. Cascade load courses when level changes
-  useEffect(() => {
-    if (!selectedLevelId) {
-      setCourses([]);
-      return;
-    }
-    async function loadCourses() {
-      try {
-        const res = await pb.collection('courses').getFullList<Course>({
-          filter: pb.filter('level = {:levelId}', { levelId: selectedLevelId }),
-          requestKey: null,
-        });
-        setCourses(res);
-        setSelectedCourseId(res.length > 0 ? res[0].id : '');
-      } catch (err) {
-        console.error('Failed to load courses:', err);
-      }
-    }
-    loadCourses();
-  }, [selectedLevelId]);
+  const catalog = schoolCatalog?.schoolId === selectedOrgId ? schoolCatalog : null;
+  const levels = catalog?.levels ?? [];
+  const preferredLevel = levels.find((level) => level.id === preferredLevelId);
+  const selectedLevelId = preferredLevel?.id ?? levels[0]?.id ?? '';
+  const courses = catalog?.assignments.flatMap((assignment) =>
+    assignment.level === selectedLevelId && assignment.expand?.course_id ? [assignment.expand.course_id] : []
+  ) ?? [];
+  const selectedCourseId = courses.some((course) => course.id === preferredCourseId)
+    ? preferredCourseId : '';
+
+  const changeSchool = (schoolId: string) => {
+    if (schoolId === selectedOrgId) return;
+    setSchoolCatalog(null);
+    setSelectedOrgId(schoolId);
+    setPreferredLevelId('');
+    setPreferredCourseId('');
+  };
+
+  const changeLevel = (levelId: string) => {
+    setPreferredLevelId(levelId);
+    setPreferredCourseId('');
+  };
 
   // Master list selection auto-fill
   const selectFromMasterList = useCallback((item: MasterListItem) => {
@@ -143,12 +157,15 @@ export function useRegistrationForm() {
     if (item.email) setEmail(item.email);
     if (item.mobile_number) setMobileNumber(item.mobile_number);
     if (item.section) setSection(item.section);
-    if (item.organization) setSelectedOrgId(item.organization);
-    if (item.level) setSelectedLevelId(item.level);
-    if (item.course) setSelectedCourseId(item.course);
+    if (item.organization && organizations.some((school) => school.id === item.organization)) {
+      if (item.organization !== selectedOrgId) setSchoolCatalog(null);
+      setSelectedOrgId(item.organization);
+      setPreferredLevelId(item.level || '');
+      setPreferredCourseId(item.course || '');
+    }
     setSearchName('');
     setIsSearching(false);
-  }, []);
+  }, [organizations, selectedOrgId]);
 
   const toggleAddOn = useCallback((id: string) => {
     setSelectedAddOns((prev) =>
@@ -185,6 +202,14 @@ export function useRegistrationForm() {
     if (!mobileNumber.trim()) {
       toast.error('Please provide a valid contact mobile number.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (selectedOrgId && (!catalog || catalog.failed)) {
+      toast.error(catalog?.failed ? 'School courses could not be loaded. Refresh the page and try again.' : 'Wait for the school courses to load.');
+      return;
+    }
+    if (courses.length && !selectedCourseId) {
+      toast.error('Please select a course or strand for this school and academic level.');
       return;
     }
     if (!selectedPackageId) {
@@ -284,11 +309,13 @@ export function useRegistrationForm() {
     middleName,
     setMiddleName,
     selectedOrgId,
-    setSelectedOrgId,
+    setSelectedOrgId: changeSchool,
     selectedLevelId,
-    setSelectedLevelId,
+    setSelectedLevelId: changeLevel,
     selectedCourseId,
-    setSelectedCourseId,
+    setSelectedCourseId: setPreferredCourseId,
+    schoolCatalogLoading: !!selectedOrgId && !catalog,
+    schoolCatalogFailed: !!catalog?.failed,
     section,
     setSection,
     mobileNumber,

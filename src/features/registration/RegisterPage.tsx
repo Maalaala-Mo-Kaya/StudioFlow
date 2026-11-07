@@ -95,6 +95,8 @@ export const RegisterPage: React.FC = () => {
               selectedLevelId={form.selectedLevelId}
               onLevelChange={form.setSelectedLevelId}
               courses={form.courses}
+              schoolCatalogLoading={form.schoolCatalogLoading}
+              schoolCatalogFailed={form.schoolCatalogFailed}
               selectedCourseId={form.selectedCourseId}
               onCourseChange={form.setSelectedCourseId}
               section={form.section}

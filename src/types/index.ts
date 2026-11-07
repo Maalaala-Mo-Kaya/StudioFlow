@@ -53,9 +53,16 @@ export interface Level {
 
 export interface Course {
   id: string;
-  level: string;
   name: string;
   code?: string;
+}
+
+export interface SchoolCourse {
+  id: string;
+  school_id: string;
+  course_id: string;
+  level: string;
+  expand?: { course_id?: Course };
 }
 
 export interface Package {

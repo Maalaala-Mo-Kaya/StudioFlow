@@ -48,6 +48,7 @@ export const AdminPage: React.FC = () => {
               organizations={admin.organizations}
               levels={admin.levels}
               courses={admin.courses}
+              schoolCourses={admin.schoolCourses}
               newOrgName={admin.newOrgName}
               onNewOrgNameChange={admin.setNewOrgName}
               newOrgCode={admin.newOrgCode}
@@ -58,7 +59,7 @@ export const AdminPage: React.FC = () => {
               onDeleteOrg={admin.handleDeleteOrg}
               onAddCourse={admin.handleAddCourse}
               onUpdateCourse={admin.handleUpdateCourse}
-              onDeleteCourse={admin.handleDeleteCourse}
+              onRemoveCourse={admin.handleRemoveCourse}
             />
           )}
 

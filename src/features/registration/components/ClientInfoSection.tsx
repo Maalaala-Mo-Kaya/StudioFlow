@@ -15,6 +15,8 @@ interface ClientInfoSectionProps {
   selectedLevelId: string;
   onLevelChange: (value: string) => void;
   courses: Course[];
+  schoolCatalogLoading: boolean;
+  schoolCatalogFailed: boolean;
   selectedCourseId: string;
   onCourseChange: (value: string) => void;
   section: string;
@@ -35,6 +37,8 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
   selectedLevelId,
   onLevelChange,
   courses,
+  schoolCatalogLoading,
+  schoolCatalogFailed,
   selectedCourseId,
   onCourseChange,
   section,
@@ -96,14 +100,16 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
         <div>
-          <label className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
+          <label htmlFor="registration-school" className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
             School - Campus / Organization
           </label>
           <select
+            id="registration-school"
             value={selectedOrgId}
             onChange={(e) => onOrgChange(e.target.value)}
             className="w-full min-h-[48px] text-sm px-3.5 py-2.5 border border-neutral-400 focus:border-[#0A0A0A] bg-white font-bold"
           >
+            {!organizations.length && <option value="">No schools available</option>}
             {organizations.map((org) => (
               <option key={org.id} value={org.id}>
                 {org.name}
@@ -113,14 +119,17 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
         </div>
 
         <div>
-          <label className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
+          <label htmlFor="registration-level" className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
             Department / Academic Level
           </label>
           <select
+            id="registration-level"
             value={selectedLevelId}
             onChange={(e) => onLevelChange(e.target.value)}
+            disabled={!levels.length}
             className="w-full min-h-[48px] text-sm px-3.5 py-2.5 border border-neutral-400 focus:border-[#0A0A0A] bg-white font-bold"
           >
+            {!levels.length && <option value="">{schoolCatalogLoading ? 'Loading academic levels…' : 'No academic levels available'}</option>}
             {levels.map((lvl) => (
               <option key={lvl.id} value={lvl.id}>
                 {lvl.name}
@@ -132,24 +141,29 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
         <div className="sm:col-span-2">
-          <label className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
+          <label htmlFor="registration-course" className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
             Full Name of Course / Strand
           </label>
           <select
+            id="registration-course"
             value={selectedCourseId}
             onChange={(e) => onCourseChange(e.target.value)}
+            disabled={!courses.length}
+            required={courses.length > 0}
             className="w-full min-h-[48px] text-sm px-3.5 py-2.5 border border-neutral-400 focus:border-[#0A0A0A] bg-white font-bold"
           >
-            {courses.length === 0 ? (
-              <option value="">Standard General Program</option>
-            ) : (
-              courses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code ? `[${c.code}] ` : ''}
-                  {c.name}
-                </option>
-              ))
-            )}
+            <option value="">
+              {schoolCatalogLoading ? 'Loading courses…'
+                : schoolCatalogFailed ? 'Could not load courses. Refresh to retry.'
+                : courses.length ? 'Select a course or strand'
+                : 'No courses assigned for this school and level'}
+            </option>
+            {courses.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.code ? `${c.code} — ` : ''}
+                {c.name}
+              </option>
+            ))}
           </select>
         </div>
 

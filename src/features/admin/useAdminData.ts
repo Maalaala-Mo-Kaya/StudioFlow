@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import type {
-  Organization, Level, Course, Package, AddOn,
+  Organization, Level, Course, SchoolCourse, Package, AddOn,
   Registration, MasterListItem, StaffUser, StaffRole,
   FramingStatus, PhotoStatus,
 } from '../../types';
@@ -20,6 +20,7 @@ export function useAdminData() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
+  const [schoolCourses, setSchoolCourses] = useState<SchoolCourse[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
   const [addOns, setAddOns] = useState<AddOn[]>([]);
   const [masterList, setMasterList] = useState<MasterListItem[]>([]);
@@ -46,7 +47,7 @@ export function useAdminData() {
 
   const loadAllData = useCallback(async () => {
     try {
-      const [regsRes, orgsRes, levelsRes, coursesRes, pkgsRes, addonsRes, rosterRes, usersRes] =
+      const [regsRes, orgsRes, levelsRes, coursesRes, schoolCoursesRes, pkgsRes, addonsRes, rosterRes, usersRes] =
         await Promise.all([
           pb.collection('registrations').getFullList<Registration>({
             sort: '-created',
@@ -56,6 +57,7 @@ export function useAdminData() {
           pb.collection('organizations').getFullList<Organization>({ requestKey: null }),
           pb.collection('levels').getFullList<Level>({ requestKey: null }),
           pb.collection('courses').getFullList<Course>({ requestKey: null }),
+          pb.collection('school_courses').getFullList<SchoolCourse>({ requestKey: null }),
           pb.collection('packages').getFullList<Package>({ requestKey: null }),
           pb.collection('add_ons').getFullList<AddOn>({ requestKey: null }),
           pb.collection('master_lists').getFullList<MasterListItem>({ requestKey: null }),
@@ -66,6 +68,7 @@ export function useAdminData() {
       setOrganizations(orgsRes);
       setLevels(levelsRes);
       setCourses(coursesRes);
+      setSchoolCourses(schoolCoursesRes);
       setPackages(pkgsRes);
       setAddOns(addonsRes);
       setMasterList(rosterRes);
@@ -311,46 +314,25 @@ export function useAdminData() {
     }
   };
 
-  const handleAddCourse = async (name: string, code: string, levelId: string) => {
-    if (!name.trim() || !levelId) return;
-    try {
-      await pb.collection('courses').create({
-        name: name.trim(),
-        code: code.trim().toUpperCase(),
-        level: levelId,
-      });
-      toast.success(`Course ${code} created.`);
-      loadAllData();
-    } catch (err) {
-      console.error('Failed to add course:', err);
-      toast.error('Failed to add course.');
-    }
+  const handleAddCourse = async (schoolId: string, levelId: string, name: string, code: string) => {
+    await pb.send('/api/studioflow/school-courses', {
+      method: 'POST',
+      body: { schoolId, levelId, name, code },
+    });
+    await loadAllData();
   };
 
-  const handleUpdateCourse = async (id: string, name: string, code: string, levelId: string) => {
-    try {
-      await pb.collection('courses').update(id, {
-        name: name.trim(),
-        code: code.trim().toUpperCase(),
-        level: levelId,
-      });
-      toast.success('Course updated.');
-      loadAllData();
-    } catch (err) {
-      console.error('Failed to update course:', err);
-      toast.error('Failed to update course.');
-    }
+  const handleUpdateCourse = async (id: string, name: string, code: string) => {
+    await pb.collection('courses').update(id, {
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
+    });
+    await loadAllData();
   };
 
-  const handleDeleteCourse = async (id: string) => {
-    try {
-      await pb.collection('courses').delete(id);
-      toast.success('Course deleted.');
-      loadAllData();
-    } catch (err) {
-      console.error('Failed to delete course:', err);
-      toast.error('Failed to delete course.');
-    }
+  const handleRemoveCourse = async (assignmentId: string) => {
+    await pb.collection('school_courses').delete(assignmentId);
+    await loadAllData();
   };
 
   // --- Package & Add-on Mutations (T020) ---
@@ -517,6 +499,7 @@ export function useAdminData() {
     organizations,
     levels,
     courses,
+    schoolCourses,
     packages,
     addOns,
     masterList,
@@ -563,7 +546,7 @@ export function useAdminData() {
     handleDeleteOrg,
     handleAddCourse,
     handleUpdateCourse,
-    handleDeleteCourse,
+    handleRemoveCourse,
     // Package & Add-on Mutations
     handleUpdatePackage,
     handleTogglePackageActive,
