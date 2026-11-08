@@ -33,7 +33,7 @@ export const ContactDetailsSection: React.FC<ContactDetailsSectionProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor="registration-mobile_number" className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
-            Mobile Number
+            Mobile Number <span className="font-normal text-neutral-500">(Optional)</span>
           </label>
           <input
             {...validationProps('mobile_number', errors.mobile_number)}

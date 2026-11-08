@@ -8,6 +8,7 @@ import { ContactDetailsSection } from './components/ContactDetailsSection';
 import { PackageSelectionSection } from './components/PackageSelectionSection';
 import { TermsAndSignatureSection } from './components/TermsAndSignatureSection';
 import { RegistrationSummarySidebar } from './components/RegistrationSummarySidebar';
+import { RegistrationStepProgress } from './components/RegistrationStepProgress';
 
 export const RegisterPage: React.FC = () => {
   const form = useRegistrationForm();
@@ -21,7 +22,7 @@ export const RegisterPage: React.FC = () => {
   return (
     <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8">
       {/* Architectural Masthead Banner */}
-      <div className="animate-enter bg-[#0A0A0A] text-white p-6 sm:p-8 mb-8 border-2 border-[#0A0A0A] shadow-[6px_6px_0px_#C9A227]">
+      <div className="animate-enter bg-[#0A0A0A] text-white p-6 sm:p-8 border-2 border-b-0 border-[#0A0A0A] shadow-[6px_6px_0px_#C9A227]">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 border-b border-neutral-800">
           <div>
             <span className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-[#C9A227] block mb-1.5">
@@ -40,27 +41,8 @@ export const RegisterPage: React.FC = () => {
           Complete your academic profile, select your portrait package, and sign below to generate
           your official Job Order and studio queue number.
         </p>
-
-        {/* Sharp Step Index Bar */}
-        <div className="grid grid-cols-4 gap-2 mt-6 pt-4 border-t border-neutral-800 font-mono text-[10px] font-bold uppercase tracking-wider">
-          <div className="flex items-center gap-1.5 text-[#C9A227]">
-            <span className="px-1.5 py-0.5 bg-[#C9A227] text-[#0A0A0A] font-black">01</span>
-            <span className="truncate">Client</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-neutral-400">
-            <span className="px-1.5 py-0.5 border border-neutral-700 text-[#C9A227]">02</span>
-            <span className="truncate">Contact</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-neutral-400">
-            <span className="px-1.5 py-0.5 border border-neutral-700 text-[#C9A227]">03</span>
-            <span className="truncate">Package</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-neutral-400">
-            <span className="px-1.5 py-0.5 border border-neutral-700 text-[#C9A227]">04</span>
-            <span className="truncate">Sign</span>
-          </div>
-        </div>
       </div>
+      <RegistrationStepProgress />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Form & Master Lookup (8 cols on lg) */}
@@ -152,7 +134,7 @@ export const RegisterPage: React.FC = () => {
         </div>
 
         {/* Right Column: Sticky Live Job Order Summary & Checkout (4 cols on lg) */}
-        <aside className="lg:col-span-4 lg:sticky lg:top-6 space-y-6">
+        <aside className="lg:col-span-4 lg:sticky lg:top-(--registration-scroll-offset) space-y-6">
           <RegistrationSummarySidebar
             familyName={form.familyName}
             givenName={form.givenName}

@@ -62,7 +62,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       {...validationProps('package', errors.package)}
       aria-labelledby="sec-packages"
       tabIndex={-1}
-      className="scroll-mt-24 aria-invalid:outline-2 aria-invalid:outline-offset-8 aria-invalid:outline-red-600"
+      className="scroll-mt-(--registration-scroll-offset) aria-invalid:outline-2 aria-invalid:outline-offset-8 aria-invalid:outline-red-600"
     >
       <div className="flex items-center justify-between gap-2 pb-2.5 border-b-2 border-[#0A0A0A] mb-5">
         <h2

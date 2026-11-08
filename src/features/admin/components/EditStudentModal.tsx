@@ -170,12 +170,12 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
               />
             </div>
             <div>
-              <label className="block font-black uppercase text-[#0A0A0A] mb-1">
-                Mobile Number <span className="text-red-500">*</span>
+              <label htmlFor="edit-student-mobile" className="block font-black uppercase text-[#0A0A0A] mb-1">
+                Mobile Number <span className="font-normal text-neutral-500">(Optional)</span>
               </label>
               <input
-                type="text"
-                required
+                id="edit-student-mobile"
+                type="tel"
                 value={mobileNumber}
                 onChange={(e) => setMobileNumber(e.target.value)}
                 className="w-full p-2 bg-white border border-[#0A0A0A]"
