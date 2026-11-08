@@ -9,39 +9,63 @@ const steps = [
 
 export function RegistrationStepProgress() {
   const stripRef = useRef<HTMLDivElement>(null);
+  const fillRef = useRef<HTMLDivElement>(null);
   const [activeStep, setActiveStep] = useState(0);
 
   useLayoutEffect(() => {
     const strip = stripRef.current;
+    const fill = fillRef.current;
     const page = strip?.parentElement;
-    if (!strip || !page) return;
 
     const navbar = document.querySelector<HTMLElement>('header[role="banner"]');
     const headings = steps.map(({ headingId }) => document.getElementById(headingId));
+    if (!strip || !fill || !page || !headings.every((heading) => heading !== null)) return;
+
+    const lastStep = headings.length - 1;
     let currentStep = 0;
+    let currentProgress = 0;
     let readingLine = 0;
     let frame: number | undefined;
 
-    function updateStep() {
+    const updateProgress = () => {
       frame = undefined;
       const scrollTop = window.scrollY;
-      const remainingScroll = document.documentElement.scrollHeight - window.innerHeight - scrollTop;
-      const nextStep = scrollTop <= 0 ? 0 : Math.max(0, headings.findLastIndex((heading, index) => {
-        // Keep the active step through small scroll reversals at its boundary.
-        const tolerance = index <= currentStep ? 8 : 0;
-        return heading && (heading.getBoundingClientRect().top <= readingLine + tolerance
-          // The final heading may never reach the reading line in a tall viewport.
-          || remainingScroll <= 1 + tolerance);
-      }));
+      let nextStep = 0;
+      let progress = 0;
+
+      if (scrollTop > 0) {
+        const scrollLimit = document.documentElement.scrollHeight - window.innerHeight;
+        const stops = headings.map((heading) => Math.round(heading.getBoundingClientRect().top + scrollTop - readingLine));
+        stops[lastStep] = Math.min(stops[lastStep], scrollLimit);
+
+        // Keep room for each segment even when a tall viewport cannot scroll
+        // every heading up to the reading line.
+        const minimumSegment = Math.min(48, stops[lastStep] / lastStep);
+        for (let index = lastStep - 1; index >= 0; index--) {
+          stops[index] = Math.max(0, Math.min(stops[index], stops[index + 1] - minimumSegment));
+        }
+
+        nextStep = Math.max(0, stops.findLastIndex((stop) => scrollTop >= stop));
+        const segment = nextStep < lastStep
+          ? Math.max(0, scrollTop - stops[nextStep]) / (stops[nextStep + 1] - stops[nextStep])
+          : 0;
+        progress = (nextStep + segment) / lastStep;
+      }
+
+      // Drive the fill from scroll frames while keeping React updates at step boundaries.
+      if (progress !== currentProgress) {
+        fill.style.transform = `scaleX(${progress})`;
+        currentProgress = progress;
+      }
 
       if (nextStep !== currentStep) {
         currentStep = nextStep;
         setActiveStep(nextStep);
       }
-    }
+    };
 
     function scheduleUpdate() {
-      frame ??= requestAnimationFrame(updateStep);
+      frame ??= requestAnimationFrame(updateProgress);
     }
 
     const measureOffsets = () => {
@@ -53,7 +77,7 @@ export function RegistrationStepProgress() {
     };
 
     measureOffsets();
-    updateStep();
+    updateProgress();
 
     const observer = new ResizeObserver(() => {
       measureOffsets();
@@ -83,8 +107,8 @@ export function RegistrationStepProgress() {
       <div className="relative border-t border-neutral-800 pt-3">
         <div aria-hidden="true" className="pointer-events-none absolute inset-x-[12.5%] top-[22px] h-px bg-neutral-700">
           <div
-            className="h-full origin-left bg-[#C9A227] motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-out"
-            style={{ transform: `scaleX(${activeStep / (steps.length - 1)})` }}
+            ref={fillRef}
+            className="h-full origin-left bg-[#C9A227] [transform:scaleX(0)]"
           />
         </div>
         <ol aria-label="Registration steps" className="relative grid grid-cols-4 font-mono text-[10px] font-bold uppercase tracking-wider">
