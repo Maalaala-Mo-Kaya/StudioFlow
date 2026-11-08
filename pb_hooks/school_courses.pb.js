@@ -87,23 +87,3 @@ routerAdd("POST", "/api/studioflow/school-courses", (e) => {
   });
   return e.json(201, assignment);
 }, $apis.requireAuth("users"));
-
-onRecordCreateRequest((e) => {
-  const school = e.record.getString("organization");
-  const level = e.record.getString("level");
-  const course = e.record.getString("course");
-  if (level) {
-    const levels = e.app.findRecordsByFilter(
-      "levels", "id = {:level} && organization = {:school}", "", 1, 0, { level, school },
-    );
-    if (!levels.length) throw new BadRequestError("The selected academic level does not belong to this school.");
-  }
-  if (course) {
-    const matches = e.app.findRecordsByFilter(
-      "school_courses", "school_id = {:school} && level = {:level} && course_id = {:course}",
-      "", 1, 0, { school, level, course },
-    );
-    if (!matches.length) throw new BadRequestError("The selected course is not assigned to this school and academic level.");
-  }
-  e.next();
-}, "registrations");
