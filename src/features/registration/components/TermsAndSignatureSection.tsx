@@ -1,17 +1,21 @@
 import React from 'react';
 import { REGISTRATION_TERMS_CLAUSES } from '../../../constants/studio';
 import { SignaturePad } from '../../../components/SignaturePad';
+import { validationProps, type RegistrationErrors } from '../registrationValidation';
+import { RegistrationFieldError } from './RegistrationFieldError';
 
 interface TermsAndSignatureSectionProps {
   termsAccepted: boolean;
   onTermsAcceptedChange: (accepted: boolean) => void;
   onSignatureChange: (blob: Blob | null, dataUrl?: string | null) => void;
+  errors: RegistrationErrors;
 }
 
 export const TermsAndSignatureSection: React.FC<TermsAndSignatureSectionProps> = ({
   termsAccepted,
   onTermsAcceptedChange,
   onSignatureChange,
+  errors,
 }) => {
   return (
     <>
@@ -38,9 +42,11 @@ export const TermsAndSignatureSection: React.FC<TermsAndSignatureSectionProps> =
           ))}
         </div>
 
-        <label className="mt-4 flex items-start gap-3 cursor-pointer select-none p-3.5 border border-neutral-300 hover:border-[#0A0A0A] bg-[#F8F7F4] transition">
+        <label className="mt-4 flex items-start gap-3 cursor-pointer select-none p-3.5 border border-neutral-300 hover:border-[#0A0A0A] has-[[aria-invalid=true]]:border-red-600 bg-[#F8F7F4] transition">
           <input
+            {...validationProps('terms_accepted', errors.terms_accepted)}
             type="checkbox"
+            required
             checked={termsAccepted}
             onChange={(e) => onTermsAcceptedChange(e.target.checked)}
             className="mt-0.5 w-5 h-5 accent-[#0A0A0A] shrink-0"
@@ -50,10 +56,11 @@ export const TermsAndSignatureSection: React.FC<TermsAndSignatureSectionProps> =
             processing of my graduation portrait data.
           </span>
         </label>
+        <RegistrationFieldError field="terms_accepted" errors={errors} />
       </section>
 
       {/* SECTION 5: Digital Signature */}
-      <section aria-labelledby="sec-signature">
+      <section {...validationProps('signature', errors.signature)} aria-labelledby="sec-signature" tabIndex={-1}>
         <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#0A0A0A] mb-4">
           <h2
             id="sec-signature"
@@ -66,6 +73,7 @@ export const TermsAndSignatureSection: React.FC<TermsAndSignatureSectionProps> =
         </div>
 
         <SignaturePad onChange={onSignatureChange} />
+        <RegistrationFieldError field="signature" errors={errors} />
       </section>
     </>
   );

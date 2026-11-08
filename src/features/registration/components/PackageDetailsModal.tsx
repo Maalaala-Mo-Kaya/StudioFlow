@@ -125,7 +125,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
                 : 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A] hover:bg-neutral-800 shadow-[3px_3px_0px_#C9A227]'
             }`}
           >
-            {isSelected ? 'Currently Chosen' : 'Select This Package'}
+            {isSelected ? '✓ Chosen Package' : 'Choose Package'}
           </button>
         </div>
       </div>

@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import type {
@@ -11,6 +12,10 @@ import type {
   MasterListItem,
 } from '../../types';
 import { splitFullName } from '../../utils/formatters';
+import {
+  emailPattern, mobilePattern, packageRequiredMessage, registrationFields, validationProps,
+  type RegistrationErrors,
+} from './registrationValidation';
 
 export function useRegistrationForm() {
   const { toast } = useToast();
@@ -39,7 +44,7 @@ export function useRegistrationForm() {
   const [mobileNumber, setMobileNumber] = useState('');
   const [email, setEmail] = useState('');
 
-  const [selectedPackageId, setSelectedPackageId] = useState('');
+  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
   const [paymentType, setPaymentType] = useState<'full' | 'downpayment'>('full');
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -51,19 +56,17 @@ export function useRegistrationForm() {
   const [isSearching, setIsSearching] = useState(false);
 
   // Submission State
+  const [errors, setErrors] = useState<RegistrationErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitting = useRef(false);
   const [submittedRecord, setSubmittedRecord] = useState<Registration | null>(null);
 
   // 1. Initial Load of Reference Data
   useEffect(() => {
     async function loadReferenceData() {
       try {
-        const [orgsRes, pkgsRes, addonsRes] = await Promise.all([
+        const [orgsRes, addonsRes] = await Promise.all([
           pb.collection('organizations').getFullList<Organization>({
-            filter: 'is_active = true',
-            requestKey: null,
-          }),
-          pb.collection('packages').getFullList<Package>({
             filter: 'is_active = true',
             requestKey: null,
           }),
@@ -74,11 +77,7 @@ export function useRegistrationForm() {
         ]);
 
         setOrganizations(orgsRes);
-        setPackages(pkgsRes);
         setAddOnsList(addonsRes);
-
-        if (orgsRes.length > 0) setSelectedOrgId(orgsRes[0].id);
-        if (pkgsRes.length > 0) setSelectedPackageId(pkgsRes[0].id);
 
         // Fetch master list safely (protected under staff auth / RA 10173)
         try {
@@ -94,6 +93,38 @@ export function useRegistrationForm() {
       }
     }
     loadReferenceData();
+  }, []);
+
+  useEffect(() => {
+    const collection = pb.collection('packages');
+    let active = true;
+    let version = 0;
+    let unsubscribe: (() => Promise<void>) | undefined;
+
+    async function refreshPackages() {
+      const request = ++version;
+      try {
+        const records = await collection.getFullList<Package>({ filter: 'is_active = true', sort: 'created,id' });
+        if (active && request === version) {
+          setPackages(records);
+          setSelectedPackageId((id) => records.some((pkg) => pkg.id === id) ? id : null);
+        }
+      } catch (err) {
+        if (active && request === version) console.error('Failed to load registration packages:', err);
+      }
+    }
+
+    void refreshPackages();
+    void collection.subscribe('*', refreshPackages).then((stop) => {
+      if (!active) return stop();
+      unsubscribe = stop;
+      return refreshPackages();
+    }).catch((err) => console.error('Failed to subscribe to registration packages:', err));
+
+    return () => {
+      active = false;
+      void unsubscribe?.().catch(console.error);
+    };
   }, []);
 
   // Fetch the selected school's levels and assignments together. Ignore late results
@@ -129,12 +160,27 @@ export function useRegistrationForm() {
   const catalog = schoolCatalog?.schoolId === selectedOrgId ? schoolCatalog : null;
   const levels = catalog?.levels ?? [];
   const preferredLevel = levels.find((level) => level.id === preferredLevelId);
-  const selectedLevelId = preferredLevel?.id ?? levels[0]?.id ?? '';
+  const selectedLevelId = preferredLevel?.id ?? '';
   const courses = catalog?.assignments.flatMap((assignment) =>
     assignment.level === selectedLevelId && assignment.expand?.course_id ? [assignment.expand.course_id] : []
   ) ?? [];
   const selectedCourseId = courses.some((course) => course.id === preferredCourseId)
     ? preferredCourseId : '';
+
+  const clearErrors = useCallback((...fields: (keyof RegistrationErrors)[]) => {
+    setErrors((previous) => {
+      if (!fields.some((field) => previous[field])) return previous;
+      const next = { ...previous };
+      fields.forEach((field) => delete next[field]);
+      return next;
+    });
+  }, []);
+
+  const changeField = <T,>(field: keyof RegistrationErrors, setter: (value: T) => void) =>
+    (value: T) => {
+      setter(value);
+      clearErrors(field);
+    };
 
   const changeSchool = (schoolId: string) => {
     if (schoolId === selectedOrgId) return;
@@ -142,11 +188,13 @@ export function useRegistrationForm() {
     setSelectedOrgId(schoolId);
     setPreferredLevelId('');
     setPreferredCourseId('');
+    clearErrors('organization', 'level', 'course');
   };
 
   const changeLevel = (levelId: string) => {
     setPreferredLevelId(levelId);
     setPreferredCourseId('');
+    clearErrors('level', 'course');
   };
 
   // Master list selection auto-fill
@@ -165,7 +213,8 @@ export function useRegistrationForm() {
     }
     setSearchName('');
     setIsSearching(false);
-  }, [organizations, selectedOrgId]);
+    clearErrors('family_name', 'given_name', 'email', 'mobile_number', 'organization', 'level', 'course');
+  }, [clearErrors, organizations, selectedOrgId]);
 
   const toggleAddOn = useCallback((id: string) => {
     setSelectedAddOns((prev) =>
@@ -174,57 +223,59 @@ export function useRegistrationForm() {
   }, []);
 
   // Live Total Calculation
-  const totalAmount = useMemo(() => {
-    const selectedPackage = packages.find((p) => p.id === selectedPackageId);
-    const packageAmount = selectedPackage ? selectedPackage.amount : 0;
-    const addOnsTotal = selectedAddOns.reduce((sum, id) => {
-      const item = addOnsList.find((a) => a.id === id);
-      return sum + (item ? item.amount : 0);
-    }, 0);
-    return packageAmount + addOnsTotal;
-  }, [packages, selectedPackageId, selectedAddOns, addOnsList]);
+  const selectedPackage = packages.find((pkg) => pkg.id === selectedPackageId);
+  const totalAmount = selectedPackage
+    ? selectedPackage.amount + addOnsList.reduce((sum, item) => (
+      selectedAddOns.includes(item.id) ? sum + item.amount : sum
+    ), 0)
+    : 0;
 
   // Signature Handler
   const handleSignatureChange = useCallback((blob: Blob | null, dataUrl?: string | null) => {
     setSignatureBlob(blob);
     setSignatureDataUrl(dataUrl || null);
-  }, []);
+    if (blob) clearErrors('signature');
+  }, [clearErrors]);
+
+  const showErrors = (fieldErrors: RegistrationErrors) => {
+    setErrors(fieldErrors);
+    const field = fieldErrors.package ? 'package' : registrationFields.find((key) => fieldErrors[key]);
+    if (!field) return;
+    requestAnimationFrame(() => {
+      const target = document.getElementById(validationProps(field).id);
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: field === 'package' ? 'start' : 'center', behavior: 'smooth' });
+    });
+  };
 
   // Form Submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting.current) return;
 
-    if (!familyName.trim() || !givenName.trim()) {
-      toast.error('Please enter both Family Name and Given Name.');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
+    const cleanEmail = email.trim();
+    const cleanMobile = mobileNumber.trim();
+    const fieldErrors: RegistrationErrors = {};
+    if (!familyName.trim()) fieldErrors.family_name = 'Enter your family name.';
+    if (!givenName.trim()) fieldErrors.given_name = 'Enter your given name.';
+    if (!selectedOrgId) fieldErrors.organization = 'Select your school, campus, or organization.';
+    if (!selectedLevelId) fieldErrors.level = 'Select your academic level.';
+    if (!selectedCourseId) fieldErrors.course = 'Select a course or strand for this school and academic level.';
+    if (!cleanEmail) fieldErrors.email = 'Enter your email address.';
+    else if (!emailPattern.test(cleanEmail)) fieldErrors.email = 'Enter a valid email address.';
+    if (cleanMobile && !mobilePattern.test(cleanMobile.replace(/[ -]/g, ''))) {
+      fieldErrors.mobile_number = 'Enter a valid Philippine mobile number, such as 0917-000-0000.';
     }
-    if (!mobileNumber.trim()) {
-      toast.error('Please provide a valid contact mobile number.');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    if (selectedOrgId && (!catalog || catalog.failed)) {
-      toast.error(catalog?.failed ? 'School courses could not be loaded. Refresh the page and try again.' : 'Wait for the school courses to load.');
-      return;
-    }
-    if (courses.length && !selectedCourseId) {
-      toast.error('Please select a course or strand for this school and academic level.');
-      return;
-    }
-    if (!selectedPackageId) {
-      toast.error('Please select a pictorial package.');
-      return;
-    }
-    if (!termsAccepted) {
-      toast.error('You must agree to the Terms & Conditions to proceed.');
-      return;
-    }
-    if (!signatureBlob) {
-      toast.error('Please provide your digital signature on the signature pad.');
+    if (!termsAccepted) fieldErrors.terms_accepted = 'Agree to the Terms & Conditions to proceed.';
+    if (!selectedPackage || !signatureBlob || Object.keys(fieldErrors).length) {
+      if (!selectedPackage) fieldErrors.package = packageRequiredMessage;
+      if (!signatureBlob) fieldErrors.signature = 'Provide your digital signature on the signature pad.';
+      showErrors(fieldErrors);
       return;
     }
 
+    submitting.current = true;
+    setErrors({});
     setIsSubmitting(true);
     try {
       const selectedAddOnObjects = selectedAddOns.map((id) => {
@@ -236,14 +287,14 @@ export function useRegistrationForm() {
       formData.append('family_name', familyName.trim());
       formData.append('given_name', givenName.trim());
       formData.append('middle_name', middleName.trim());
-      if (selectedOrgId) formData.append('organization', selectedOrgId);
-      if (selectedLevelId) formData.append('level', selectedLevelId);
-      if (selectedCourseId) formData.append('course', selectedCourseId);
+      formData.append('organization', selectedOrgId);
+      formData.append('level', selectedLevelId);
+      formData.append('course', selectedCourseId);
       formData.append('section', section.trim());
       formData.append('department', department.trim());
-      formData.append('mobile_number', mobileNumber.trim());
-      formData.append('email', email.trim());
-      formData.append('package', selectedPackageId);
+      formData.append('mobile_number', cleanMobile);
+      formData.append('email', cleanEmail);
+      formData.append('package', selectedPackage.id);
       formData.append('add_ons', JSON.stringify(selectedAddOnObjects));
       formData.append('paid_amount', '0');
       formData.append('payment_type', paymentType);
@@ -265,12 +316,24 @@ export function useRegistrationForm() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: unknown) {
       console.error('Registration submission failed:', err);
+      if (err instanceof ClientResponseError) {
+        const fieldErrors: RegistrationErrors = {};
+        for (const field of registrationFields) {
+          const message = err.response.data?.[field]?.message;
+          if (typeof message === 'string') fieldErrors[field] = message;
+        }
+        if (Object.keys(fieldErrors).length) {
+          showErrors(fieldErrors);
+          return;
+        }
+      }
       const message =
         err instanceof Error
           ? err.message
           : 'Failed to submit registration. Please ensure the PocketBase backend server is running.';
       toast.error(message);
     } finally {
+      submitting.current = false;
       setIsSubmitting(false);
     }
   };
@@ -279,15 +342,22 @@ export function useRegistrationForm() {
     setFamilyName('');
     setGivenName('');
     setMiddleName('');
+    setSelectedOrgId('');
+    setPreferredLevelId('');
+    setPreferredCourseId('');
+    setSchoolCatalog(null);
     setSection('');
     setDepartment('');
     setMobileNumber('');
     setEmail('');
+    setSelectedPackageId(null);
     setSelectedAddOns([]);
+    setPaymentType('full');
     setTermsAccepted(false);
     setSignatureBlob(null);
     setSignatureDataUrl(null);
     setSubmittedRecord(null);
+    setErrors({});
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
@@ -301,9 +371,9 @@ export function useRegistrationForm() {
     masterList,
     // Form State & Setters
     familyName,
-    setFamilyName,
+    setFamilyName: changeField('family_name', setFamilyName),
     givenName,
-    setGivenName,
+    setGivenName: changeField('given_name', setGivenName),
     middleName,
     setMiddleName,
     selectedOrgId,
@@ -311,23 +381,23 @@ export function useRegistrationForm() {
     selectedLevelId,
     setSelectedLevelId: changeLevel,
     selectedCourseId,
-    setSelectedCourseId: setPreferredCourseId,
+    setSelectedCourseId: changeField('course', setPreferredCourseId),
     schoolCatalogLoading: !!selectedOrgId && !catalog,
     schoolCatalogFailed: !!catalog?.failed,
     section,
     setSection,
     mobileNumber,
-    setMobileNumber,
+    setMobileNumber: changeField('mobile_number', setMobileNumber),
     email,
-    setEmail,
-    selectedPackageId,
-    setSelectedPackageId,
+    setEmail: changeField('email', setEmail),
+    selectedPackageId: selectedPackage?.id ?? null,
+    setSelectedPackageId: changeField('package', (id: string) => setSelectedPackageId(id)),
     selectedAddOns,
     toggleAddOn,
     paymentType,
     setPaymentType,
     termsAccepted,
-    setTermsAccepted,
+    setTermsAccepted: changeField('terms_accepted', setTermsAccepted),
     signatureBlob,
     signatureDataUrl,
     hasSignature: Boolean(signatureBlob),
@@ -341,6 +411,7 @@ export function useRegistrationForm() {
     selectFromMasterList,
     // Computed & Actions
     totalAmount,
+    errors,
     isSubmitting,
     submittedRecord,
     handleSubmit,

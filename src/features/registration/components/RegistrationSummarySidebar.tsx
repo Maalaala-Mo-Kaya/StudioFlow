@@ -12,7 +12,7 @@ interface RegistrationSummarySidebarProps {
   courses: Course[];
   selectedCourseId: string;
   packages: Package[];
-  selectedPackageId: string;
+  selectedPackageId: string | null;
   addOnsList: AddOn[];
   selectedAddOns: string[];
   totalAmount: number;
@@ -21,7 +21,6 @@ interface RegistrationSummarySidebarProps {
   termsAccepted: boolean;
   hasSignature: boolean;
   isSubmitting: boolean;
-  onSubmit: (e: React.FormEvent) => void;
 }
 
 export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProps> = ({
@@ -42,7 +41,6 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
   termsAccepted,
   hasSignature,
   isSubmitting,
-  onSubmit,
 }) => {
   const selectedOrg = organizations.find((o) => o.id === selectedOrgId);
   const selectedCourse = courses.find((c) => c.id === selectedCourseId);
@@ -50,8 +48,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
 
   const activeAddOns = addOnsList.filter((a) => selectedAddOns.includes(a.id));
 
-  const amountDueNow =
-    paymentType === 'full' ? totalAmount : Math.ceil(totalAmount * 0.5);
+  const amountDueNow = selectedPkg && paymentType === 'downpayment' ? Math.ceil(totalAmount * 0.5) : totalAmount;
   const remainingBalance = totalAmount - amountDueNow;
 
   const fullName = [
@@ -153,9 +150,10 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
+            disabled={!selectedPkg}
             onClick={() => onPaymentTypeChange('full')}
-            className={`btn-tactile py-1.5 text-[10px] font-black uppercase tracking-wider border cursor-pointer transition-colors ${
-              paymentType === 'full'
+            className={`btn-tactile py-1.5 text-[10px] font-black uppercase tracking-wider border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+              selectedPkg && paymentType === 'full'
                 ? 'bg-[#C9A227] text-[#0A0A0A] border-[#C9A227]'
                 : 'bg-transparent text-neutral-400 border-neutral-700 hover:border-neutral-500'
             }`}
@@ -164,9 +162,10 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
           </button>
           <button
             type="button"
+            disabled={!selectedPkg}
             onClick={() => onPaymentTypeChange('downpayment')}
-            className={`btn-tactile py-1.5 text-[10px] font-black uppercase tracking-wider border cursor-pointer transition-colors ${
-              paymentType === 'downpayment'
+            className={`btn-tactile py-1.5 text-[10px] font-black uppercase tracking-wider border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+              selectedPkg && paymentType === 'downpayment'
                 ? 'bg-[#C9A227] text-[#0A0A0A] border-[#C9A227]'
                 : 'bg-transparent text-neutral-400 border-neutral-700 hover:border-neutral-500'
             }`}
@@ -180,11 +179,11 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
       <div className="border-t border-neutral-800 pt-3 space-y-1.5 text-xs font-mono">
         <div className="flex justify-between text-neutral-400">
           <span>Total Contract Billed:</span>
-          <span className="font-bold text-white">{formatCurrency(totalAmount)}</span>
+          <span className="font-bold text-white">{selectedPkg ? formatCurrency(totalAmount) : '₱0.00'}</span>
         </div>
         <div className="flex justify-between text-[#C9A227] font-black">
           <span>Amount Due at Cashier:</span>
-          <span className="text-sm">{formatCurrency(amountDueNow)}</span>
+          <span className="text-sm">{selectedPkg ? formatCurrency(amountDueNow) : '₱0.00'}</span>
         </div>
         {remainingBalance > 0 && (
           <div className="flex justify-between text-neutral-400 text-[11px]">
@@ -229,9 +228,9 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
 
       {/* Primary Submit Action */}
       <button
-        type="button"
-        onClick={onSubmit}
-        disabled={isSubmitting || !selectedPackageId || !termsAccepted || !hasSignature}
+        type="submit"
+        form="client-registration-form"
+        disabled={isSubmitting}
         className="btn-tactile w-full py-3.5 px-4 bg-[#C9A227] hover:bg-[#dfba3f] text-[#0A0A0A] font-black text-xs uppercase tracking-widest border border-[#C9A227] shadow-[4px_4px_0px_#0A0A0A] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all"
       >
         {isSubmitting ? (

@@ -64,7 +64,7 @@ export const RegisterPage: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Form & Master Lookup (8 cols on lg) */}
-        <div className="lg:col-span-8 space-y-6">
+        <div className="min-w-0 lg:col-span-8 space-y-6">
           {/* Optional Master List Quick Match */}
           <MasterListLookup
             masterList={form.masterList}
@@ -78,6 +78,7 @@ export const RegisterPage: React.FC = () => {
           {/* Main Registration Form */}
           <form
             id="client-registration-form"
+            noValidate
             onSubmit={form.handleSubmit}
             className="animate-enter-delay-1 space-y-8 bg-white border-2 border-[#0A0A0A] p-5 sm:p-8 shadow-[6px_6px_0px_#0A0A0A]"
           >
@@ -101,6 +102,7 @@ export const RegisterPage: React.FC = () => {
               onCourseChange={form.setSelectedCourseId}
               section={form.section}
               onSectionChange={form.setSection}
+              errors={form.errors}
             />
 
             <ContactDetailsSection
@@ -108,6 +110,7 @@ export const RegisterPage: React.FC = () => {
               onMobileNumberChange={form.setMobileNumber}
               email={form.email}
               onEmailChange={form.setEmail}
+              errors={form.errors}
             />
 
             <PackageSelectionSection
@@ -120,12 +123,14 @@ export const RegisterPage: React.FC = () => {
               paymentType={form.paymentType}
               onPaymentTypeChange={form.setPaymentType}
               totalAmount={form.totalAmount}
+              errors={form.errors}
             />
 
             <TermsAndSignatureSection
               termsAccepted={form.termsAccepted}
               onTermsAcceptedChange={form.setTermsAccepted}
               onSignatureChange={form.handleSignatureChange}
+              errors={form.errors}
             />
 
             {/* Submit Action at the bottom of the form */}
@@ -166,7 +171,6 @@ export const RegisterPage: React.FC = () => {
             termsAccepted={form.termsAccepted}
             hasSignature={form.hasSignature}
             isSubmitting={form.isSubmitting}
-            onSubmit={form.handleSubmit}
           />
         </aside>
       </div>
