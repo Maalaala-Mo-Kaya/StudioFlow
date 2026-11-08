@@ -102,123 +102,107 @@ onRecordCreate((e) => {
 }, "registrations");
 
 onRecordCreate((e) => {
-  const regId = e.record.getString("registration");
-  const amount = e.record.getFloat("amount");
-  const paymentType = e.record.getString("payment_type");
-  const paymentMethod = e.record.getString("payment_method");
-  if (!e.record.getString("status")) e.record.set("status", "completed");
-
-  if (!regId) throw new BadRequestError("A job order is required.");
-  const reg = e.app.findRecordById("registrations", regId);
-  const totalCentavos = Math.round((reg.getFloat("total_amount") || 0) * 100);
-  const existing = e.app.findRecordsByFilter("payments", "registration = {:registration}", "created", 0, 0, {
-    registration: regId,
-  });
-  const paidCentavos = existing.reduce((sum, payment) => sum + Math.round(payment.getFloat("amount") * 100), 0);
-  const remainingCentavos = Math.max(0, totalCentavos - paidCentavos);
-  const amountCentavos = Math.round(amount * 100);
-
-  if (!Number.isFinite(amount) || !Number.isInteger(amount) || amountCentavos < 100) {
-    throw new BadRequestError("Payment must be a positive whole-peso amount of at least ₱1.");
-  }
-  if (amountCentavos > remainingCentavos) throw new BadRequestError("Payment exceeds the current remaining balance.");
-  if (!["full", "initial", "additional"].includes(paymentType)) throw new BadRequestError("Invalid collection mode.");
-  if (paymentType === "full" && amountCentavos !== remainingCentavos) {
-    throw new BadRequestError("Full settlement must equal the current remaining balance.");
-  }
-  if (paymentType === "initial") {
-    const downpaymentCentavos = Math.min(remainingCentavos, Math.round(totalCentavos / 200) * 100);
-    if (existing.length > 0) throw new BadRequestError("A 50% downpayment is only allowed as the initial payment.");
-    if (amountCentavos !== downpaymentCentavos) throw new BadRequestError("Downpayment must equal exactly 50% of the total job amount.");
-  }
-  if (paymentMethod === "cash") {
-    const tenderedCentavos = Math.round(e.record.getFloat("cash_tendered") * 100);
-    if (tenderedCentavos < amountCentavos) throw new BadRequestError("Cash tendered must cover the payment amount.");
-    e.record.set("change_amount", (tenderedCentavos - amountCentavos) / 100);
-  } else {
-    e.record.set("cash_tendered", 0);
-    e.record.set("change_amount", 0);
-  }
-
-  // Call e.next() so payment is written to DB first
-  const res = e.next();
-
-  if (regId && amount > 0) {
+  const app = e.app;
+  let reg;
+  // Validate and update the job order in the same transaction as the receipt.
+  app.runInTransaction((tx) => {
+    e.app = tx;
     try {
-      if (reg) {
-        const total = reg.getFloat("total_amount") || 0;
-        const savedPayments = e.app.findRecordsByFilter("payments", "registration = {:registration}", "created", 0, 0, {
+      const regId = e.record.getString("registration");
+      const amount = e.record.getFloat("amount");
+      const paymentType = e.record.getString("payment_type");
+      const paymentMethod = e.record.getString("payment_method");
+      const status = e.record.getString("status") || "completed";
+      e.record.set("status", status);
+
+      if (!regId) throw new BadRequestError("A job order is required.");
+      if (!e.record.getString("receipt_no").trim()) throw new BadRequestError("A receipt number is required.");
+      if (!["completed", "voided", "refunded"].includes(status)) {
+        throw new BadRequestError("Invalid payment transaction status.");
+      }
+      reg = tx.findRecordById("registrations", regId);
+      const totalCentavos = Math.round(reg.getFloat("total_amount") * 100);
+      const existing = tx.findRecordsByFilter("payments",
+        "registration = {:registration} && (status = 'completed' || status = '')", "", 0, 0, {
           registration: regId,
         });
-        const newPaid = savedPayments.reduce((sum, payment) => sum + Math.round(payment.getFloat("amount") * 100), 0) / 100;
-        const newBalance = Math.max(0, total - newPaid);
+      const paidCentavos = existing.reduce((sum, payment) => sum + Math.round(payment.getFloat("amount") * 100), 0);
+      const remainingCentavos = Math.max(0, totalCentavos - paidCentavos);
+      const amountCentavos = Math.round(amount * 100);
 
-        reg.set("paid_amount", newPaid);
-        reg.set("balance", newBalance);
-
-        if (newBalance <= 0) {
-          reg.set("payment_status", "fully_paid");
-        } else if (newPaid > 0) {
-          reg.set("payment_status", "downpayment");
-        } else {
-          reg.set("payment_status", "unpaid");
-        }
-
-        // Push into paid shooting queue if it was pending
-        if (reg.getString("status") === "pending_payment") {
-          reg.set("status", "paid");
-        }
-
-        const cashier = e.record.getString("cashier_name");
-        if (cashier && !reg.getString("prepared_by")) {
-          reg.set("prepared_by", cashier);
-        }
-
-        e.app.save(reg);
-
-        // Guarantee folder exists on Windows C: storage
-        try {
-          const basePath = "C:\\StudioFlow_Photos";
-          let orgCode = "ORGANIZATION";
-          const orgId = reg.getString("organization");
-          if (orgId) {
-            try {
-              const org = e.app.findRecordById("organizations", orgId);
-              if (org) orgCode = org.getString("code") || org.getString("name") || "ORGANIZATION";
-            } catch (_) {}
-          }
-
-          let courseCode = "COURSE";
-          const courseId = reg.getString("course");
-          if (courseId) {
-            try {
-              const course = e.app.findRecordById("courses", courseId);
-              if (course) courseCode = course.getString("code") || course.getString("name") || "COURSE";
-            } catch (_) {}
-          }
-
-          const joNo = reg.getString("job_order_no") || "JO";
-          const fName = reg.getString("family_name") || "STUDENT";
-          const gName = reg.getString("given_name") || "";
-
-          const clean = (s) => (s ? String(s).replace(/\.\./g, "").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim() : "");
-          const folderName = `${clean(joNo)}_${clean(fName)}_${clean(gName)}`.replace(/_+$/, "");
-          const fullPath = `${basePath}\\${clean(orgCode)}\\${clean(courseCode)}\\${folderName}`;
-
-          if (typeof $os !== "undefined" && $os && $os.mkdirAll) {
-            $os.mkdirAll(fullPath, 511);
-          }
-        } catch (dirErr) {
-          console.log("Pictorial directory creation notice:", dirErr);
-        }
+      if (!Number.isFinite(amount) || !Number.isInteger(amount) || amountCentavos < 100) {
+        throw new BadRequestError("Payment must be a positive whole-peso amount of at least ₱1.");
       }
-    } catch (err) {
-      console.error("Failed to update registration payment stats:", err);
-      throw new BadRequestError("Payment could not update the job order. No receipt was issued.");
-    }
-  }
+      if (!["full", "initial", "additional"].includes(paymentType)) throw new BadRequestError("Invalid collection mode.");
+      if (paidCentavos > 0 && paymentType !== "additional") {
+        throw new BadRequestError("Only Additional Payment is available after a successful payment.");
+      }
+      if (amountCentavos > remainingCentavos) throw new BadRequestError("Payment exceeds the current remaining balance.");
+      if (paymentType === "full" && amountCentavos !== remainingCentavos) {
+        throw new BadRequestError("Full settlement must equal the current remaining balance.");
+      }
+      if (paymentType === "initial" && amountCentavos !== Math.min(remainingCentavos, Math.round(totalCentavos / 200) * 100)) {
+        throw new BadRequestError("Downpayment must equal exactly 50% of the total job amount.");
+      }
+      if (paymentMethod === "cash") {
+        const tenderedCentavos = Math.round(e.record.getFloat("cash_tendered") * 100);
+        if (tenderedCentavos < amountCentavos) throw new BadRequestError("Cash tendered must cover the payment amount.");
+        e.record.set("change_amount", (tenderedCentavos - amountCentavos) / 100);
+      } else {
+        e.record.set("cash_tendered", 0);
+        e.record.set("change_amount", 0);
+      }
 
-  return res;
+      e.next();
+      const newPaid = paidCentavos + (status === "completed" ? amountCentavos : 0);
+      const newBalance = Math.max(0, totalCentavos - newPaid);
+      reg.set("paid_amount", newPaid / 100);
+      reg.set("balance", newBalance / 100);
+      reg.set("payment_status", newBalance === 0 ? "fully_paid" : newPaid > 0 ? "downpayment" : "unpaid");
+      if (newPaid > 0 && reg.getString("status") === "pending_payment") reg.set("status", "paid");
+      const cashier = e.record.getString("cashier_name");
+      if (status === "completed" && cashier && !reg.getString("prepared_by")) reg.set("prepared_by", cashier);
+      tx.save(reg);
+    } finally {
+      e.app = app;
+    }
+  });
+
+  // Guarantee folder exists on Windows C: storage
+  try {
+    const basePath = "C:\\StudioFlow_Photos";
+    let orgCode = "ORGANIZATION";
+    const orgId = reg.getString("organization");
+    if (orgId) {
+      try {
+        const org = e.app.findRecordById("organizations", orgId);
+        if (org) orgCode = org.getString("code") || org.getString("name") || "ORGANIZATION";
+      } catch (_) {}
+    }
+
+    let courseCode = "COURSE";
+    const courseId = reg.getString("course");
+    if (courseId) {
+      try {
+        const course = e.app.findRecordById("courses", courseId);
+        if (course) courseCode = course.getString("code") || course.getString("name") || "COURSE";
+      } catch (_) {}
+    }
+
+    const joNo = reg.getString("job_order_no") || "JO";
+    const fName = reg.getString("family_name") || "STUDENT";
+    const gName = reg.getString("given_name") || "";
+
+    const clean = (s) => (s ? String(s).replace(/\.\./g, "").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim() : "");
+    const folderName = `${clean(joNo)}_${clean(fName)}_${clean(gName)}`.replace(/_+$/, "");
+    const fullPath = `${basePath}\\${clean(orgCode)}\\${clean(courseCode)}\\${folderName}`;
+
+    if (typeof $os !== "undefined" && $os && $os.mkdirAll) {
+      $os.mkdirAll(fullPath, 511);
+    }
+  } catch (dirErr) {
+    console.log("Pictorial directory creation notice:", dirErr);
+  }
 }, "payments");
 
 // Keep the job-order totals synchronized when an administrator voids or refunds
@@ -228,24 +212,30 @@ onRecordUpdate((e) => {
   if (!["completed", "voided", "refunded"].includes(status)) {
     throw new BadRequestError("Invalid payment transaction status.");
   }
-  const result = e.next();
-  const regId = e.record.getString("registration");
-  if (!regId) return result;
 
-  const reg = e.app.findRecordById("registrations", regId);
-  const records = e.app.findRecordsByFilter("payments", "registration = {:registration}", "created", 0, 0, {
-    registration: regId,
+  const app = e.app;
+  app.runInTransaction((tx) => {
+    e.app = tx;
+    try {
+      e.next();
+      const regId = e.record.getString("registration");
+      if (!regId) return;
+
+      const reg = tx.findRecordById("registrations", regId);
+      const records = tx.findRecordsByFilter("payments",
+        "registration = {:registration} && (status = 'completed' || status = '')", "", 0, 0, {
+          registration: regId,
+        });
+      const paid = records.reduce((sum, payment) => sum + Math.round(payment.getFloat("amount") * 100), 0);
+      const balance = Math.max(0, Math.round(reg.getFloat("total_amount") * 100) - paid);
+      reg.set("paid_amount", paid / 100);
+      reg.set("balance", balance / 100);
+      reg.set("payment_status", paid <= 0 ? "unpaid" : balance === 0 ? "fully_paid" : "downpayment");
+      tx.save(reg);
+    } finally {
+      e.app = app;
+    }
   });
-  const paid = records.reduce((sum, payment) => {
-    const paymentStatus = payment.getString("status") || "completed";
-    return paymentStatus === "completed" ? sum + Math.round(payment.getFloat("amount") * 100) : sum;
-  }, 0) / 100;
-  const balance = Math.max(0, (reg.getFloat("total_amount") || 0) - paid);
-  reg.set("paid_amount", paid);
-  reg.set("balance", balance);
-  reg.set("payment_status", paid <= 0 ? "unpaid" : balance <= 0 ? "fully_paid" : "downpayment");
-  e.app.save(reg);
-  return result;
 }, "payments");
 
 /**

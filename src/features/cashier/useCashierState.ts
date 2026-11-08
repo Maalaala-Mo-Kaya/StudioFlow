@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -7,6 +7,10 @@ import type { PaymentRecord, Registration } from '../../types';
 export type CollectionMode = 'full' | 'initial' | 'additional';
 const toCentavos = (amount: number) => Math.round(amount * 100);
 const fromCentavos = (amount: number) => amount / 100;
+
+export function canUseCollectionMode(reg: Registration, mode: CollectionMode) {
+  return toCentavos(reg.balance) > 0 && (mode === 'additional' || toCentavos(reg.paid_amount) <= 0);
+}
 
 export type CashierTab = 'pending' | 'paid' | 'balances';
 
@@ -26,6 +30,8 @@ export function useCashierState() {
   const [cashierName, setCashierName] = useState(user?.name || 'Mel (Cashier)');
   const [remarks, setRemarks] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const submittingPayment = useRef(false);
+  const receiptNo = useRef<string | null>(null);
 
   // Print Modal State
   const [printReg, setPrintReg] = useState<Registration | null>(null);
@@ -64,16 +70,19 @@ export function useCashierState() {
   }, [fetchRegistrations]);
 
   const openPaymentModal = useCallback(async (reg: Registration) => {
+    if (submittingPayment.current) return;
     try {
       const [latest, payments] = await Promise.all([
         pb.collection('registrations').getOne<Registration>(reg.id, {
-          expand: 'organization,level,course,package', requestKey: null,
+          expand: 'organization,level,course,package', requestKey: null, cache: 'no-store',
         }),
         pb.collection('payments').getFullList<PaymentRecord>({
-          filter: pb.filter('registration = {:registration}', { registration: reg.id }), requestKey: null,
+          filter: pb.filter('registration = {:registration}', { registration: reg.id }),
+          requestKey: null, cache: 'no-store',
         }),
       ]);
-      const paidCentavos = payments.reduce((sum, payment) => sum + toCentavos(payment.amount), 0);
+      const paidCentavos = payments.reduce((sum, payment) =>
+        (payment.status || 'completed') === 'completed' ? sum + toCentavos(payment.amount) : sum, 0);
       const totalCentavos = toCentavos(latest.total_amount || 0);
       const balanceCentavos = Math.max(0, totalCentavos - paidCentavos);
       const hydrated = {
@@ -81,13 +90,16 @@ export function useCashierState() {
         paid_amount: fromCentavos(paidCentavos),
         balance: fromCentavos(balanceCentavos),
       };
-      const mode: CollectionMode = payments.length === 0 && latest.payment_type === 'downpayment' ? 'initial' : 'full';
+      const mode: CollectionMode = !canUseCollectionMode(hydrated, 'full')
+        ? 'additional' : latest.payment_type === 'downpayment' ? 'initial' : 'full';
       const paymentCentavos = mode === 'initial'
         ? Math.min(balanceCentavos, Math.round(totalCentavos / 200) * 100)
         : balanceCentavos;
+      if (submittingPayment.current) return;
+      receiptNo.current = null;
       setSelectedReg(hydrated);
       setPaymentType(mode);
-      setAmountPaid(String(fromCentavos(paymentCentavos)));
+      setAmountPaid(mode === 'additional' ? '' : String(fromCentavos(paymentCentavos)));
       setRemarks('');
     } catch (err) {
       console.error('Failed to load current payment balance:', err);
@@ -96,7 +108,7 @@ export function useCashierState() {
   }, [toast]);
 
   const closePaymentModal = useCallback(() => {
-    setSelectedReg(null);
+    if (!submittingPayment.current) setSelectedReg(null);
   }, []);
 
   const openPrintModal = useCallback((reg: Registration, copyType: 'customer' | 'owner' = 'customer') => {
@@ -134,9 +146,11 @@ export function useCashierState() {
 
   const handleConfirmPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedReg) return;
-
-    if (isProcessing) return;
+    if (!selectedReg || submittingPayment.current) return;
+    if (!canUseCollectionMode(selectedReg, paymentType)) {
+      toast.error('This collection mode is unavailable for the current job order.');
+      return;
+    }
     const amount = Number(amountPaid);
     const amountCentavos = toCentavos(amount);
     const balanceCentavos = toCentavos(selectedReg.balance);
@@ -145,10 +159,12 @@ export function useCashierState() {
       toast.error('Please enter a valid payment amount.');
       return;
     }
+    submittingPayment.current = true;
     setIsProcessing(true);
     try {
-      const receiptNo = `REC-${crypto.randomUUID()}`;
-      await pb.collection('payments').create({
+      const receipt = receiptNo.current ??= `REC-${crypto.randomUUID()}`;
+      const payments = pb.collection('payments');
+      await payments.create({
         registration: selectedReg.id,
         amount: fromCentavos(amountCentavos),
         payment_type: paymentType,
@@ -157,22 +173,34 @@ export function useCashierState() {
         cashier_id: user?.id || '',
         cash_tendered: paymentMethod === 'cash' ? fromCentavos(amountCentavos) : 0,
         change_amount: 0,
-        receipt_no: receiptNo,
+        receipt_no: receipt,
         remarks: remarks.trim(),
-      }, { requestKey: null });
+      }, { requestKey: null }).catch(async (err: unknown) => {
+        // The server may have saved the payment before the response was lost.
+        await payments.getFirstListItem(pb.filter('registration = {:registration} && receipt_no = {:receipt}', {
+          registration: selectedReg.id, receipt,
+        }), { requestKey: null, cache: 'no-store' }).catch(() => { throw err; });
+      });
 
+      setSelectedReg(null);
+      toast.success('Payment recorded successfully.');
       const updated = await pb.collection('registrations').getOne<Registration>(selectedReg.id, {
         expand: 'organization,level,course,package',
         requestKey: null,
+        cache: 'no-store',
+      }).catch((err: unknown) => {
+        console.error('Failed to load the job order for the receipt:', err);
+        toast.error('Payment was recorded. Refresh the job order to print the receipt.');
+        fetchRegistrations();
+        return null;
       });
+      if (!updated) return;
 
       // Instant 0ms optimistic UI update for Cashier Table
       setRegistrations((prev) =>
         prev.map((r) => (r.id === selectedReg.id ? updated : r))
       );
 
-      toast.success('Payment recorded successfully.');
-      setSelectedReg(null);
       setPrintReg(updated);
       setPrintCopyType('customer');
 
@@ -183,6 +211,7 @@ export function useCashierState() {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       toast.error('Payment processing failed: ' + msg);
     } finally {
+      submittingPayment.current = false;
       setIsProcessing(false);
     }
   };

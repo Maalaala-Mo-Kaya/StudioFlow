@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import type { Registration } from '../../../types';
 import { PAYMENT_METHOD_OPTIONS } from '../../../constants/studio';
 import { formatClientName, formatCurrency, formatJobOrderNo, formatQueueNumber } from '../../../utils/formatters';
-import type { CollectionMode } from '../useCashierState';
+import { canUseCollectionMode, type CollectionMode } from '../useCashierState';
 
 interface PaymentModalProps {
   registration: Registration;
@@ -51,9 +51,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     : amountCentavos > balanceCentavos ? 'Payment cannot exceed the remaining balance.'
     : '';
   const projectedBalance = Math.max(0, balanceCentavos - (amountError ? 0 : amountCentavos));
-  const canSubmit = !isProcessing && balanceCentavos > 0 && !amountError && cashierName.trim().length > 0;
+  const modeDisabled = (mode: CollectionMode) => isProcessing || !canUseCollectionMode(selectedReg, mode);
+  const canSubmit = !modeDisabled(paymentType) && !amountError && cashierName.trim().length > 0;
 
   const selectMode = (mode: CollectionMode) => {
+    if (modeDisabled(mode) || mode === paymentType) return;
     onPaymentTypeChange(mode);
     if (mode === 'full') onAmountPaidChange(String(balanceCentavos / 100));
     if (mode === 'initial') onAmountPaidChange(String(Math.min(balanceCentavos, Math.round(totalCentavos / 200) * 100) / 100));
@@ -83,6 +85,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           <button
             type="button"
             onClick={onClose}
+            disabled={isProcessing}
             className="w-8 h-8 bg-[#0A0A0A] text-[#C9A227] flex items-center justify-center cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -124,60 +127,43 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               Collection Mode
             </label>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <button
-                type="button"
-                onClick={() => selectMode('full')}
-                disabled={balanceCentavos === 0}
-                className={`btn-tactile min-h-[42px] py-2 px-3 text-xs font-black uppercase tracking-wider border-2 cursor-pointer ${
-                  paymentType === 'full'
-                    ? 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A]'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:border-[#0A0A0A]'
-                }`}
-              >
-                Full Settlement
-              </button>
-
-              <button
-                type="button"
-                onClick={() => selectMode('initial')}
-                disabled={toCentavos(selectedReg.paid_amount || 0) > 0 || balanceCentavos === 0}
-                className={`btn-tactile min-h-[42px] py-2 px-3 text-xs font-black uppercase tracking-wider border-2 cursor-pointer ${
-                  paymentType === 'initial'
-                    ? 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A]'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:border-[#0A0A0A] disabled:cursor-not-allowed disabled:opacity-40'
-                }`}
-              >
-                50% Downpayment
-              </button>
-
-              <button
-                type="button"
-                onClick={() => selectMode('additional')}
-                disabled={balanceCentavos === 0}
-                className={`btn-tactile min-h-[42px] py-2 px-3 text-xs font-black uppercase tracking-wider border-2 cursor-pointer ${
-                  paymentType === 'additional'
-                    ? 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A]'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:border-[#0A0A0A] disabled:cursor-not-allowed disabled:opacity-40'
-                }`}
-              >
-                Additional Payment
-              </button>
+              {([
+                ['full', 'Full Settlement'],
+                ['initial', '50% Downpayment'],
+                ['additional', 'Additional Payment'],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => selectMode(mode)}
+                  disabled={modeDisabled(mode)}
+                  aria-pressed={paymentType === mode && canUseCollectionMode(selectedReg, mode)}
+                  className={`btn-tactile min-h-[42px] py-2 px-3 text-xs font-black uppercase tracking-wider border-2 cursor-pointer disabled:cursor-not-allowed disabled:border-neutral-300 disabled:bg-neutral-100 disabled:text-neutral-500 ${
+                    paymentType === mode
+                      ? 'bg-[#0A0A0A] text-[#C9A227] border-[#0A0A0A]'
+                      : 'bg-white text-neutral-700 border-neutral-300 enabled:hover:border-[#0A0A0A]'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
           {/* Amount Input */}
           <div>
-            <label className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
+            <label htmlFor="pos-payment-amount" className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
               Payment Amount (₱)
             </label>
             <input
+              id="pos-payment-amount"
               type="number"
               min="1"
               max={(balanceCentavos / 100).toFixed(2)}
               step="1"
               value={amountPaid}
               placeholder={paymentType === 'additional' ? 'Payment amount is required.' : undefined}
-              readOnly={paymentType !== 'additional'}
+              readOnly={paymentType !== 'additional' || modeDisabled('additional')}
               onKeyDown={(e) => {
                 if (['-', '+', '.', ',', 'e', 'E'].includes(e.key)) e.preventDefault();
               }}
@@ -245,6 +231,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             <button
               type="button"
               onClick={onClose}
+              disabled={isProcessing}
               className="btn-tactile w-1/3 min-h-[46px] py-2.5 border border-[#0A0A0A] text-[#0A0A0A] font-bold text-xs uppercase hover:bg-neutral-100 cursor-pointer"
             >
               Cancel
