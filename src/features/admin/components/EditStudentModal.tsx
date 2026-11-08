@@ -40,6 +40,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [organizationId, setOrganizationId] = useState(reg.organization || '');
   const [courseId, setCourseId] = useState(reg.course || '');
   const [packageId, setPackageId] = useState(reg.package || '');
+  const [pictorialDate, setPictorialDate] = useState(reg.pictorial_date?.slice(0, 10) ?? '');
   const [status, setStatus] = useState<RegistrationStatus>(reg.status);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(reg.payment_status);
   const [framingStatus, setFramingStatus] = useState<FramingStatus>(
@@ -72,6 +73,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
         organization: organizationId,
         course: courseId,
         package: packageId,
+        pictorial_date: pictorialDate ? `${pictorialDate} 00:00:00.000Z` : '',
         status,
         payment_status: paymentStatus,
         framing_status: framingStatus,
@@ -194,8 +196,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
             </div>
           </div>
 
-          {/* Row 3: School & Course */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Row 3: School, Course & Schedule */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-black uppercase text-[#0A0A0A] mb-1">
                 School / Organization
@@ -227,6 +229,18 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label htmlFor="edit-student-pictorial-date" className="block font-black uppercase text-[#0A0A0A] mb-1">
+                Scheduled Pictorial Date
+              </label>
+              <input
+                id="edit-student-pictorial-date"
+                type="date"
+                value={pictorialDate}
+                onChange={(e) => setPictorialDate(e.target.value)}
+                className="w-full p-2 bg-white border border-[#0A0A0A]"
+              />
             </div>
           </div>
 

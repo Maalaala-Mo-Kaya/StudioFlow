@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import type {
@@ -8,8 +9,11 @@ import type {
 } from '../../types';
 import { parseRosterCsv, exportRegistrationsToCsv } from '../../utils/csv';
 import { PROTECTED_SYSTEM_USERNAMES } from '../../constants/studio';
+import type { StudentExcelData } from './studentExcel';
 
 export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students';
+
+const excelUnavailable = 'The connected PocketBase server did not return an Excel report. Restart it with the latest StudioFlow hooks and migrations, then try again.';
 
 export function useAdminData() {
   const { toast } = useToast();
@@ -27,6 +31,7 @@ export function useAdminData() {
   const [masterList, setMasterList] = useState<MasterListItem[]>([]);
   const [staffAccounts, setStaffAccounts] = useState<StaffUser[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   // Form States
   const [newOrgName, setNewOrgName] = useState('');
@@ -508,6 +513,32 @@ export function useAdminData() {
     exportRegistrationsToCsv(registrations);
   }, [registrations]);
 
+  const exportExcel = async () => {
+    if (exportingExcel) return;
+    setExportingExcel(true);
+    try {
+      const [data, { downloadStudentExcel }] = await Promise.all([
+        // Bypass any app page cached under this URL before the export route was installed.
+        pb.send<Partial<StudentExcelData> | null>('/api/studioflow/student-excel', { method: 'GET', cache: 'no-store' }),
+        import('./studentExcel'),
+      ]);
+      // An older server can serve the app's HTML for an unknown GET route.
+      // PocketBase's client treats that non-JSON response as an empty object.
+      if (!Array.isArray(data?.packages) || !Array.isArray(data?.addOns) || !Array.isArray(data?.rows)) {
+        toast.error(excelUnavailable);
+        return;
+      }
+      await downloadStudentExcel({ packages: data.packages, addOns: data.addOns, rows: data.rows });
+    } catch (err) {
+      console.error('Failed to export the student workbook:', err);
+      toast.error(err instanceof ClientResponseError && err.status === 404
+        ? excelUnavailable
+        : 'Could not export the student workbook. Please try again.');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
   return {
     activeTab,
     setActiveTab,
@@ -581,5 +612,7 @@ export function useAdminData() {
     handleDeleteRegistration,
     // Report Export
     exportCsv,
+    exportExcel,
+    exportingExcel,
   };
 }

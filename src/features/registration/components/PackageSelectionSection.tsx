@@ -224,7 +224,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       {addOnsList.length > 0 && (
         <div className="mt-6 pt-5 border-t border-neutral-200">
           <h4 className="font-mono text-[11px] font-black text-[#0A0A0A] uppercase tracking-widest mb-3">
-            OPTIONAL // FRAME &amp; PRINT UPGRADES
+            ADDONS (Optional)
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {addOnsList.map((addon) => {

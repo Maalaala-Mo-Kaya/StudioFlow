@@ -3,9 +3,11 @@ import { FileSpreadsheet, Activity } from 'lucide-react';
 
 interface AdminHeaderProps {
   onExportCsv: () => void;
+  onExportExcel: () => void;
+  exportingExcel: boolean;
 }
 
-export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv }) => {
+export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportExcel, exportingExcel }) => {
   return (
     <div className="animate-enter bg-[#0A0A0A] text-white p-5 sm:p-6 mb-6 border-2 border-[#0A0A0A] shadow-[4px_4px_0px_#C9A227] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
@@ -22,14 +24,24 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv }) => {
         </h1>
       </div>
 
-      <button
-        type="button"
-        onClick={onExportCsv}
-        className="btn-tactile min-h-[42px] flex items-center justify-center gap-2 px-4 py-2 bg-[#C9A227] text-[#0A0A0A] text-xs font-black uppercase tracking-wider self-start sm:self-auto cursor-pointer"
-      >
-        <FileSpreadsheet className="w-4 h-4 stroke-[2.5]" />
-        <span>Export Master CSV</span>
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onExportCsv}
+          className="btn-tactile min-h-[42px] px-4 py-2 border border-[#C9A227] text-[#C9A227] text-xs font-black uppercase tracking-wider cursor-pointer"
+        >
+          Export Master CSV
+        </button>
+        <button
+          type="button"
+          onClick={onExportExcel}
+          disabled={exportingExcel}
+          className="btn-tactile min-h-[42px] flex items-center justify-center gap-2 px-4 py-2 bg-[#C9A227] text-[#0A0A0A] text-xs font-black uppercase tracking-wider cursor-pointer disabled:cursor-wait disabled:opacity-60"
+        >
+          <FileSpreadsheet className="w-4 h-4 stroke-[2.5]" />
+          {exportingExcel ? 'Exporting Excel…' : 'Export Excel'}
+        </button>
+      </div>
     </div>
   );
 };

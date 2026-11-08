@@ -114,6 +114,7 @@ export interface MasterListItem {
 export interface Registration {
   id: string;
   job_order_no: string;
+  pictorial_date?: string;
   queue_number: number;
   family_name: string;
   given_name: string;
