@@ -26,9 +26,6 @@ dist-ssr
 .env
 
 # pb data generated files
-pb_data/auxiliary.db-shm
-pb_data/auxiliary.db-wal
-pb_data/data.db-wal
-pb_data/data.db-shm
-pb_data/auxiliary.db
+pb_data
+pb_public
 
