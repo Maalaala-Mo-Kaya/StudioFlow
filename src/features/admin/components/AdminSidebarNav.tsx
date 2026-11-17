@@ -10,6 +10,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  ListChecks,
 } from 'lucide-react';
 import type { AdminTab } from '../useAdminData';
 
@@ -145,6 +146,12 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
       label: 'Framing Schedule',
       shortLabel: 'Framing',
       icon: Frame,
+    },
+    {
+      id: 'workflow',
+      label: 'Makeup & Photo Selection',
+      shortLabel: 'Studio Workflow',
+      icon: ListChecks,
     },
     {
       id: 'staff',

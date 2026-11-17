@@ -36,6 +36,7 @@ export function useRegistrationForm() {
   const [familyName, setFamilyName] = useState('');
   const [givenName, setGivenName] = useState('');
   const [middleName, setMiddleName] = useState('');
+  const [studentId, setStudentId] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
   const [preferredLevelId, setPreferredLevelId] = useState('');
   const [preferredCourseId, setPreferredCourseId] = useState('');
@@ -199,6 +200,7 @@ export function useRegistrationForm() {
 
   // Master list selection auto-fill
   const selectFromMasterList = useCallback((item: MasterListItem) => {
+    setStudentId(item.student_id ?? '');
     const { familyName: fName, givenName: gName } = splitFullName(item.full_name);
     if (fName) setFamilyName(fName);
     setGivenName(gName);
@@ -287,6 +289,7 @@ export function useRegistrationForm() {
       formData.append('family_name', familyName.trim());
       formData.append('given_name', givenName.trim());
       formData.append('middle_name', middleName.trim());
+      formData.append('student_id', studentId.trim());
       formData.append('organization', selectedOrgId);
       formData.append('level', selectedLevelId);
       formData.append('course', selectedCourseId);
@@ -342,6 +345,7 @@ export function useRegistrationForm() {
     setFamilyName('');
     setGivenName('');
     setMiddleName('');
+    setStudentId('');
     setSelectedOrgId('');
     setPreferredLevelId('');
     setPreferredCourseId('');
@@ -376,6 +380,8 @@ export function useRegistrationForm() {
     setGivenName: changeField('given_name', setGivenName),
     middleName,
     setMiddleName,
+    studentId,
+    setStudentId,
     selectedOrgId,
     setSelectedOrgId: changeSchool,
     selectedLevelId,

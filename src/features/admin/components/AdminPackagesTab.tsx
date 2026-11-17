@@ -15,12 +15,14 @@ interface AdminPackagesTabProps {
   onNewPkgNameChange: (val: string) => void;
   newPkgAmount: number;
   onNewPkgAmountChange: (val: number) => void;
+  newPkgPhotoLimit: number;
+  onNewPkgPhotoLimitChange: (val: number) => void;
   newPkgInclusions: string;
   onNewPkgInclusionsChange: (val: string) => void;
   onAddPackage: (e: React.FormEvent) => void;
   onUpdatePackage: (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[] }
+    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number }
   ) => Promise<void>;
   onTogglePackageActive: (id: string, current: boolean) => Promise<void>;
   onDeletePackage: (id: string) => Promise<void>;
@@ -39,6 +41,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   onNewPkgNameChange,
   newPkgAmount,
   onNewPkgAmountChange,
+  newPkgPhotoLimit,
+  onNewPkgPhotoLimitChange,
   newPkgInclusions,
   onNewPkgInclusionsChange,
   onAddPackage,
@@ -57,6 +61,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [editPkgCode, setEditPkgCode] = useState('');
   const [editPkgName, setEditPkgName] = useState('');
   const [editPkgAmount, setEditPkgAmount] = useState(0);
+  const [editPkgPhotoLimit, setEditPkgPhotoLimit] = useState(0);
   const [editPkgInclusionsArray, setEditPkgInclusionsArray] = useState<string[]>([]);
 
   // Add-on Form State
@@ -88,6 +93,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     setEditPkgCode(pkg.code);
     setEditPkgName(pkg.name);
     setEditPkgAmount(pkg.amount);
+    setEditPkgPhotoLimit(pkg.photo_selection_limit ?? 0);
     setEditPkgInclusionsArray(parsePackageInclusions(pkg.inclusions));
   };
 
@@ -99,6 +105,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
         name: editPkgName,
         amount: editPkgAmount,
         inclusions: editPkgInclusionsArray,
+        photo_selection_limit: editPkgPhotoLimit,
       });
       toast.success(`Package "${editPkgName}" updated successfully`);
       setEditingPkgId(null);
@@ -228,6 +235,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
               />
             </div>
 
+            <PhotoLimitInput value={newPkgPhotoLimit} onChange={onNewPkgPhotoLimitChange} />
+
             {/* Dynamic Form List for Inclusions */}
             <PackageInclusionsEditor
               inclusions={newPkgInclusionsList}
@@ -309,6 +318,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                         />
                       </div>
 
+                      <PhotoLimitInput value={editPkgPhotoLimit} onChange={setEditPkgPhotoLimit} />
+
                       {/* Repeatable Inclusions Editor in Edit Mode */}
                       <PackageInclusionsEditor
                         inclusions={editPkgInclusionsArray}
@@ -383,6 +394,9 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
 
                       {/* Inclusions Chips */}
                       <div className="mt-2 flex flex-wrap gap-1">
+                        {!!pkg.photo_selection_limit && (
+                          <span className="px-2 py-0.5 text-[10px] bg-[#F7F2E0] border border-neutral-300">Up to {pkg.photo_selection_limit} selected photos</span>
+                        )}
                         {parsePackageInclusions(pkg.inclusions).map((inc, i) => (
                           <span
                             key={i}
@@ -591,3 +605,13 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     </div>
   );
 };
+
+function PhotoLimitInput({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  return (
+    <label className="block text-[11px] font-black uppercase">
+      Photo selection limit <span className="font-normal normal-case">(0 for unlimited)</span>
+      <input type="number" min="0" step="1" value={value} onChange={(event) => onChange(Number(event.target.value))}
+        className="mt-1 w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-white font-bold" />
+    </label>
+  );
+}

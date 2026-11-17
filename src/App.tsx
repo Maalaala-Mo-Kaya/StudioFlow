@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { Navbar } from './components/Navbar';
 import { LoginPage } from './features/auth/LoginPage';
@@ -8,78 +7,26 @@ import { RegisterPage } from './features/registration/RegisterPage';
 import { CashierPage } from './features/cashier/CashierPage';
 import { PhotographerPage } from './features/photographer/PhotographerPage';
 import { AdminPage } from './features/admin/AdminPage';
-import { pb } from './db/pocketbase';
-import type { StaffRole } from './types';
+import { MakeupPage } from './features/workflow/MakeupPage';
+import { ChooserPage } from './features/workflow/ChooserPage';
+import { useHashNavigation } from './hooks/useHashNavigation';
+import { useRealtimeQueueCount } from './hooks/useRealtimeQueueCount';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<string>('register');
-  const [queueCount, setQueueCount] = useState<number>(0);
-
-  useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash.replace('#/', '').replace('#', '');
-      if (['register', 'login', 'cashier', 'photographer', 'admin'].includes(hash)) {
-        setCurrentTab(hash);
-      }
-    };
-
-    handleHashChange();
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
-
-  const handleSelectTab = (tab: string) => {
-    setCurrentTab(tab);
-    window.location.hash = `#/${tab}`;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleLoginSuccess = (role: StaffRole) => {
-    if (role === 'admin') {
-      handleSelectTab('admin');
-    } else if (role === 'cashier') {
-      handleSelectTab('cashier');
-    } else {
-      handleSelectTab('photographer');
-    }
-  };
-
-  useEffect(() => {
-    const updateCount = async () => {
-      try {
-        const records = await pb.collection('registrations').getList(1, 1, {
-          filter: "status = 'paid' || status = 'shooting'",
-          requestKey: null,
-        });
-        setQueueCount(records.totalItems);
-      } catch (err) {
-        if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
-        console.error('Failed to load queue count:', err);
-      }
-    };
-
-    updateCount();
-    pb.collection('registrations').subscribe('*', () => {
-      updateCount();
-    });
-
-    return () => {
-      pb.collection('registrations').unsubscribe('*');
-    };
-  }, []);
-
+  const { currentTab, selectTab, routeByStaffRole } = useHashNavigation();
+  const queueCount = useRealtimeQueueCount();
   return (
     <AuthProvider>
       <ToastProvider>
         <div className="group/app-shell min-h-dvh bg-[#F8F7F4] flex flex-col font-sans text-[#0A0A0A]">
-        <Navbar currentTab={currentTab} onSelectTab={handleSelectTab} queueCount={queueCount} />
+        <Navbar currentTab={currentTab} onSelectTab={selectTab} queueCount={queueCount} />
 
         <main className="flex-1">
           {/* Public Participant Portal */}
-          {currentTab === 'register' && <RegisterPage />}
+          {currentTab === 'register' && <ParticipantPortal />}
 
           {/* Unified Staff Login Portal */}
-          {currentTab === 'login' && <LoginPage onLoginSuccess={handleLoginSuccess} />}
+          {currentTab === 'login' && <LoginPage onLoginSuccess={routeByStaffRole} />}
 
           {/* Cashier Role Protected Route */}
           {currentTab === 'cashier' && (
@@ -92,6 +39,18 @@ export default function App() {
           {currentTab === 'photographer' && (
             <RoleLoginGate allowedRoles={['photographer', 'admin']}>
               <PhotographerPage />
+            </RoleLoginGate>
+          )}
+
+          {currentTab === 'mua' && (
+            <RoleLoginGate allowedRoles={['mua']} targetStationName="Makeup / Grooming">
+              <MakeupPage />
+            </RoleLoginGate>
+          )}
+
+          {currentTab === 'chooser' && (
+            <RoleLoginGate allowedRoles={['chooser']} targetStationName="Chooser">
+              <ChooserPage />
             </RoleLoginGate>
           )}
 
@@ -118,4 +77,12 @@ export default function App() {
     </ToastProvider>
   </AuthProvider>
   );
+}
+
+function ParticipantPortal() {
+  const { user } = useAuth();
+  if (user?.role === 'mua' || user?.role === 'chooser') {
+    return <RoleLoginGate allowedRoles={['cashier', 'photographer', 'admin']} targetStationName="Registration"><RegisterPage /></RoleLoginGate>;
+  }
+  return <RegisterPage />;
 }

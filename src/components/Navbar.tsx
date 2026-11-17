@@ -11,6 +11,8 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCount = 0 }) => {
   const { user, logout } = useAuth();
+  const stations = user?.role === 'admin' ? ADMIN_STATION_LINKS
+    : ADMIN_STATION_LINKS.filter((station) => user && station.id === ROLE_DEFAULT_ROUTE[user.role]);
 
   const handleSignOut = () => {
     logout();
@@ -36,9 +38,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
           <button
             type="button"
             onClick={handleMastheadClick}
-            className="flex items-center gap-3.5 text-left group focus:outline-none cursor-pointer"
+            className="flex min-w-0 items-center gap-2 sm:gap-3.5 text-left group focus:outline-none cursor-pointer"
           >
-            <div className="w-9 h-9 bg-[#C9A227] text-[#0A0A0A] rounded-none flex items-center justify-center font-mono font-black text-sm tracking-tighter border border-[#DFC15D] transition-transform duration-200 group-hover:scale-95">
+            <div className="w-9 h-9 shrink-0 bg-[#C9A227] text-[#0A0A0A] rounded-none flex items-center justify-center font-mono font-black text-sm tracking-tighter border border-[#DFC15D] transition-transform duration-200 group-hover:scale-95">
               {STUDIO_INFO.shortCode}
             </div>
             <div>
@@ -64,9 +66,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
           <div className="flex items-center gap-3">
             {user && (
               <div className="flex items-center gap-2 sm:gap-3">
-                {user.role === 'admin' && (
-                  <div className="hidden md:flex items-center border border-neutral-800 bg-[#141414]">
-                    {ADMIN_STATION_LINKS.map((st) => (
+                {stations.length > 0 && (
+                  <nav aria-label="Staff stations" className="hidden lg:flex items-center border border-neutral-800 bg-[#141414]">
+                    {stations.map((st) => (
                       <button
                         key={st.id}
                         type="button"
@@ -79,12 +81,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
                         {st.label}
                       </button>
                     ))}
-                  </div>
+                  </nav>
                 )}
 
                 <div className="flex items-center gap-2.5 border border-neutral-800 bg-[#141414] px-3 py-1.5">
                   <div className="text-right">
-                    <div className="text-xs font-bold text-white leading-none">{user.name}</div>
+                    <div className="max-w-[27vw] sm:max-w-40 truncate text-xs font-bold text-white leading-none">{user.name}</div>
                     <div className="text-[9px] font-mono font-bold text-[#C9A227] uppercase tracking-widest mt-1">
                       ROLE // {user.role}
                     </div>
@@ -106,9 +108,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
         </div>
 
         {/* Mobile Admin Station Bar */}
-        {user?.role === 'admin' && (
-          <div className="flex md:hidden border-t border-neutral-800 bg-[#141414] -mx-4 px-4 py-1.5 justify-between">
-            {ADMIN_STATION_LINKS.map((st) => (
+        {stations.length > 0 && (
+          <nav aria-label="Staff stations" className="grid grid-cols-3 sm:flex lg:hidden border-t border-neutral-800 bg-[#141414] py-1.5 gap-1">
+            {stations.map((st) => (
               <button
                 key={st.id}
                 type="button"
@@ -117,10 +119,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
                   currentTab === st.id ? 'bg-[#C9A227] text-[#0A0A0A]' : 'text-neutral-400'
                 }`}
               >
-                {st.mobileLabel}
+                {st.label}
               </button>
             ))}
-          </div>
+          </nav>
         )}
       </div>
     </header>

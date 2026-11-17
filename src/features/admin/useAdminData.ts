@@ -11,7 +11,7 @@ import { parseRosterCsv, exportRegistrationsToCsv } from '../../utils/csv';
 import { PROTECTED_SYSTEM_USERNAMES } from '../../constants/studio';
 import type { StudentExcelData } from './studentExcel';
 
-export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students';
+export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students' | 'workflow';
 
 const excelUnavailable = 'The connected PocketBase server did not return an Excel report. Restart it with the latest StudioFlow hooks and migrations, then try again.';
 
@@ -40,6 +40,7 @@ export function useAdminData() {
   const [newPkgCode, setNewPkgCode] = useState('');
   const [newPkgName, setNewPkgName] = useState('');
   const [newPkgAmount, setNewPkgAmount] = useState<number>(1000);
+  const [newPkgPhotoLimit, setNewPkgPhotoLimit] = useState(0);
   const [newPkgInclusions, setNewPkgInclusions] = useState('');
 
   // Roster CSV Upload State
@@ -162,6 +163,7 @@ export function useAdminData() {
         code: newPkgCode.trim().toUpperCase(),
         name: newPkgName.trim(),
         amount: Number(newPkgAmount),
+        photo_selection_limit: newPkgPhotoLimit,
         inclusions: JSON.stringify(inclusions),
         is_active: true,
       });
@@ -169,6 +171,7 @@ export function useAdminData() {
       setNewPkgCode('');
       setNewPkgName('');
       setNewPkgInclusions('');
+      setNewPkgPhotoLimit(0);
       loadAllData();
     } catch (err) {
       console.error('Failed to add package:', err);
@@ -256,6 +259,16 @@ export function useAdminData() {
         }
       }
       toast.error(errorMsg);
+    }
+  };
+
+  const handleUpdateStaff = async (id: string, changes: Partial<Pick<StaffUser, 'role' | 'disabled'>>) => {
+    try {
+      const updated = await pb.collection('users').update<StaffUser>(id, changes);
+      setStaffAccounts((accounts) => accounts.map((account) => account.id === id ? updated : account));
+      toast.success('Staff account updated.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update staff account.');
     }
   };
 
@@ -359,7 +372,7 @@ export function useAdminData() {
   // --- Package & Add-on Mutations (T020) ---
   const handleUpdatePackage = async (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[] }
+    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number }
   ) => {
     try {
       await pb.collection('packages').update(id, {
@@ -367,6 +380,7 @@ export function useAdminData() {
         code: data.code.trim().toUpperCase(),
         amount: Number(data.amount),
         inclusions: JSON.stringify(data.inclusions),
+        photo_selection_limit: data.photo_selection_limit,
       });
       toast.success(`Package ${data.code} updated.`);
       loadAllData();
@@ -566,6 +580,8 @@ export function useAdminData() {
     newPkgName,
     setNewPkgName,
     newPkgAmount,
+    newPkgPhotoLimit,
+    setNewPkgPhotoLimit,
     setNewPkgAmount,
     newPkgInclusions,
     setNewPkgInclusions,
@@ -587,6 +603,7 @@ export function useAdminData() {
     setStaffRole,
     handleCreateStaff,
     handleDeleteStaff,
+    handleUpdateStaff,
     handleUpdateFramingStatus,
     handleUpdatePhotoStatus,
     // School & Course Mutations

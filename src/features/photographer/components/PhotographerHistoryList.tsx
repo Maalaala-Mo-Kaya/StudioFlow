@@ -58,9 +58,6 @@ export const PhotographerHistoryList: React.FC<PhotographerHistoryListProps> = (
                 <span className="inline-flex items-center gap-1 font-mono text-[10px] font-black uppercase tracking-wider text-[#0A0A0A] bg-[#F7F2E0] px-2.5 py-1 border border-[#C9A227]">
                   <CheckCircle2 className="w-3.5 h-3.5 text-[#9A7816]" /> Done Shooting
                 </span>
-                <span className="text-[11px] text-neutral-500 font-mono bg-[#F8F7F4] px-2 py-1 border border-neutral-200">
-                  DIR: {reg.job_order_no}_{reg.family_name}
-                </span>
               </div>
             </div>
           ))}

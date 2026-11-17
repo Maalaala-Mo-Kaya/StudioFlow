@@ -28,11 +28,13 @@
 
 **StudioFlow V2** is a fast, paperless studio operations system built for graduation pictorial events. It runs entirely on your local studio network without needing an internet connection.
 
-It connects four stations into one seamless pipeline:
+It connects the studio stations across one workflow.
 
 - **Students** register, choose packages, and sign on a tablet or computer.
 - **Cashiers** collect payments and print claim stubs and studio receipts simultaneously.
+- **Makeup artists** claim paid students who purchased makeup or grooming and send them to the photo floor once preparation is complete.
 - **Photographers** get a live queue of paid clients with automatically generated photo folders.
+- **Choosers** help students review and confirm photos after the shoot.
 - **Administrators** track framing status, release deliverables, and export daily accounting reports.
 
 ---
@@ -42,8 +44,11 @@ It connects four stations into one seamless pipeline:
 ```mermaid
 flowchart LR
     A["1. Registration Kiosk\n(Student enters info & signs)"] --> B["2. Cashier Counter\n(Collects payment & prints 2-copy receipt)"]
-    B --> C["3. Photo Floor\n(Live queue & auto-created photo folders)"]
-    C --> D["4. Framing & Release\n(Track production & balance clearance)"]
+    B --> C["Photo Floor"]
+    B --> M["Makeup / Grooming\n(If purchased)"]
+    M --> C
+    C --> P["Photo Chooser"]
+    P --> D["Framing & Release\n(Track production & balance clearance)"]
 
     style A fill:#F8F7F4,stroke:#0A0A0A,stroke-width:2px,color:#0A0A0A
     style B fill:#FFFBEB,stroke:#C9A227,stroke-width:2px,color:#0A0A0A
@@ -109,18 +114,22 @@ StudioFlow includes pre-built batch scripts to simplify studio operations:
 
 ---
 
-## Station Guide (Needs Update for Chooser)
+## Station Guide
 
 | Station | Route | Default Users | Key Responsibilities |
 | :--- | :--- | :--- | :--- |
 | **Registration Kiosk** | `/#/register` | Public (Students) | Select school, course, and pictorial package; dynamic add-on selection; digital signature capture; instant Job Order assignment (`№ 00001`). |
 | **Cashier Counter** | `/#/cashier` | `cashier`, `admin` | Search client by Job Order or name; collect downpayment or full payment; 1-click simultaneous print for **Page 1 (Yellow Customer Copy)** and **Page 2 (White Studio Accounting Copy)**. |
-| **Photo Floor** | `/#/photographer` | `photographer`, `admin` | Live queue of paid students; 1-click **Copy Folder Path** directly into Windows File Explorer; photo shoot progress tracking (`shot_raw`, `client_selected`, `ready_to_print`). |
-| **Studio Admin** | `/#/admin` | `admin` | Manage school rosters, courses, and package pricing; track production framing stages; enforce zero-balance rule before release; export daily accounting CSV reports. |
+| **Makeup / Grooming** | `/#/mua` | `mua`, `admin` | MUAs claim, start, and complete preparation. Admins can release a stalled assignment to the waiting queue. |
+| **Photo Floor** | `/#/photographer` | `photographer`, `admin` | Live queue for paid students after any required preparation. **Copy Path** retrieves the assigned folder path. |
+| **Photo Chooser** | `/#/chooser` | `chooser`, `admin` | Search completed shoots, preview photos, confirm selections, and reopen a selection to revise it. |
+| **Studio Admin** | `/#/admin` | `admin` | Manage staff and catalog settings. Monitor makeup assignments and photo selection under **Makeup & Photo Selection**. |
+
+Create the two new staff accounts in **Admin → Staff Accounts**. Makeup eligibility comes from purchased add-on names and package inclusions that describe makeup, make-up, or grooming. StudioFlow records the service for the registration when the package or add-ons are selected. In **Packages & Add-ons**, set **Photo selection limit** to the allowed number of photographs. A value of `0` allows any number.
 
 ---
 
-## Studio LAN Setup (Needs Update)
+## Studio LAN Setup
 
 Run StudioFlow across all studio tablets, laptops, and PCs using a single Wi-Fi router (no internet required):
 
@@ -140,34 +149,39 @@ Runs run.bat               (Cashier Counter)         (Public Student Kiosk)
    - **Student Kiosks / Tablets**: `http://192.168.1.50:8090/#/register`
    - **Cashier Terminal**: `http://192.168.1.50:8090/#/cashier`
    - **Photographer PC**: `http://192.168.1.50:8090/#/photographer`
+   - **Makeup station**: `http://192.168.1.50:8090/#/mua`
+   - **Chooser station**: `http://192.168.1.50:8090/#/chooser`
+
+Leave `VITE_PB_URL` unset for the normal LAN setup so each browser uses the studio server's address. If you need to set it, use an address reachable by all stations.
 
 ---
 
 ## Photo Storage
 
-Photo directories are automatically created on the server computer under `C:\StudioFlow_Photos`:
+The PocketBase server creates photo directories under `C:\StudioFlow_Photos` by default. To use another location, set `STUDIOFLOW_PHOTOS_ROOT` to its absolute path in the server process environment before launching PocketBase. Use a volume that supports hard links, such as NTFS, and give PocketBase read and write access.
 
 ```
 C:\StudioFlow_Photos\
   └── [School Code]\
         └── [Course Code]\
-              └── [JobOrder]_[FamilyName]_[GivenName]\
+              └── [JobOrder]_[FamilyName]_[GivenName]_[RegistrationID]\
+                    ├── selected\
+                    └── unselected\
 ```
 
-**Example Folder**:
-```
-C:\StudioFlow_Photos\ACLC-MND\BSIT\00001_Cando_Manuel\
-```
+Use **Copy Path** in the photographer queue to find the server folder for a job order. From a remote station, use your studio's file share for that folder; a local drive path refers to the server's disk. Put finished image exports in the job folder or its `unselected` subfolder. Opening the gallery moves supported exports from the job folder into `unselected`. After confirmation, the server keeps both folders and the saved selection in sync. JPEG, PNG, WebP, GIF, and AVIF exports are supported. RAW files and unrecognized files stay where the photographer placed them. Avoid editing the `selected` and `unselected` folders by hand once selection has started.
 
-Photographers click **"Copy Path"** on the queue card to paste the exact folder directly into File Explorer, Lightroom, or tethering software.
+Legacy folders retain their original paths when they can be matched to a unique job order. If two legacy folders both contain photos for one job, a studio administrator should verify which folder belongs to the registration and reconcile the files before opening the gallery.
+
+If a transfer pauses, restore access to the original files and choose **Resume transfer** on the student card. Keep the photo root and the database backed up together. The database contains folder mappings and any unfinished transfers.
 
 ---
 
 ## Security & Staff Accounts
 
 The database enforces a **Zero-Trust Rule Model**:
-- Anonymous clients can only register and read active queue counters.
-- Financial ledgers and student contact information are restricted to authenticated staff.
+- The public kiosk can read the catalog, submit registrations, and read the active queue count.
+- Financial ledgers and full registration details are restricted by staff role. Makeup and Chooser stations receive the student details needed for their workflow.
 - Deletions, pricing edits, and school roster management are restricted to `admin`.
 
 ### Default Staff Usernames
@@ -201,5 +215,6 @@ All studio constants (studio name, tagline, hours, contact numbers, starting rec
 | `npm run dev` | Starts local development server with hot-reload |
 | `npm run build` | Bundles production-optimized static assets to `/dist` |
 | `npm run lint` | Runs ESLint type and code quality checks |
+| `npm run test:workflow` | Runs the isolated PocketBase integration suite with Node.js 22.13+ |
 
 ---

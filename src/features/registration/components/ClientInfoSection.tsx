@@ -12,6 +12,8 @@ interface ClientInfoSectionProps {
   onGivenNameChange: (value: string) => void;
   middleName: string;
   onMiddleNameChange: (value: string) => void;
+  studentId: string;
+  onStudentIdChange: (value: string) => void;
   organizations: Organization[];
   selectedOrgId: string;
   onOrgChange: (value: string) => void;
@@ -35,6 +37,8 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
   onGivenNameChange,
   middleName,
   onMiddleNameChange,
+  studentId,
+  onStudentIdChange,
   organizations,
   selectedOrgId,
   onOrgChange,
@@ -110,6 +114,11 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+        <label className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider">
+          Student ID <span className="font-normal normal-case">(optional)</span>
+          <input value={studentId} onChange={(event) => onStudentIdChange(event.target.value)} maxLength={80}
+            className="block w-full mt-1.5 min-h-[48px] text-sm px-3.5 py-2.5 border border-neutral-400 bg-[#F8F7F4] focus:bg-white font-bold" />
+        </label>
         <div>
           <label htmlFor="registration-organization" className="block text-[11px] font-black text-[#0A0A0A] uppercase tracking-wider mb-1.5">
             School / Campus / Organization <span className="text-red-600">*</span>

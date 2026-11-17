@@ -19,11 +19,12 @@ interface AuthRecordLike {
   name?: string;
   role?: string;
   verified?: boolean;
+  disabled?: boolean;
   created?: string;
 }
 
 const mapRecordToStaffUser = (record: AuthRecordLike | null | undefined): StaffUser | null => {
-  if (!record || !record.id) return null;
+  if (!record || !record.id || record.disabled) return null;
   return {
     id: record.id,
     username: record.username || record.email || 'staff',
@@ -64,6 +65,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setUser(staffUser);
     return staffUser;
+  }, []);
+
+  useEffect(() => {
+    const refresh = async () => {
+      const id = pb.authStore.record?.id;
+      if (!pb.authStore.isValid || !id) return;
+      const token = pb.authStore.token;
+      try {
+        const current = await pb.collection('users').getOne(id);
+        if (pb.authStore.token === token) pb.authStore.save(token, current);
+      } catch (error) {
+        if (pb.authStore.token === token && error && typeof error === 'object' &&
+          'status' in error && [401, 403, 404].includes(Number(error.status))) pb.authStore.clear();
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const logout = useCallback(() => {

@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { pb } from '../../db/pocketbase';
-import type { Registration, PhotoStatus } from '../../types';
+import type { Registration } from '../../types';
 import { playStudioChime } from '../../utils/audio';
+import { useToast } from '../../context/ToastContext';
+import { workflowError } from '../../hooks/useWorkflowData';
 
 export function usePhotographerQueue() {
+  const { toast } = useToast();
   const [queue, setQueue] = useState<Registration[]>([]);
   const [recentlyDone, setRecentlyDone] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
@@ -15,8 +18,8 @@ export function usePhotographerQueue() {
       setLoading(true);
       const [queueRes, doneRes] = await Promise.all([
         pb.collection('registrations').getFullList<Registration>({
-          filter: "status = 'paid' || status = 'shooting'",
-          sort: 'queue_number',
+          filter: "status = 'shooting' || (status = 'paid' && paid_amount > 0 && (makeup_state = 'completed' || (makeup_service = '' && makeup_state = '')))",
+          sort: 'created,queue_number,id',
           expand: 'organization,level,course,package',
           requestKey: null,
         }),
@@ -32,7 +35,7 @@ export function usePhotographerQueue() {
       setRecentlyDone(doneRes.items);
 
       const shooting = queueRes.find((r) => r.status === 'shooting');
-      if (shooting) setCurrentlyShootingId(shooting.id);
+      setCurrentlyShootingId(shooting?.id ?? null);
     } catch (err) {
       if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) {
         return;
@@ -46,7 +49,7 @@ export function usePhotographerQueue() {
   useEffect(() => {
     fetchLiveQueue();
 
-    pb.collection('registrations').subscribe('*', (e) => {
+    const subscription = pb.collection('registrations').subscribe('*', (e) => {
       if (e.action === 'create' || e.action === 'update') {
         playStudioChime();
       }
@@ -54,24 +57,24 @@ export function usePhotographerQueue() {
     });
 
     return () => {
-      pb.collection('registrations').unsubscribe('*');
+      void subscription.then((unsubscribe) => unsubscribe()).catch(console.error);
     };
   }, [fetchLiveQueue]);
 
   const handleCallStudent = useCallback(
     async (reg: Registration) => {
       try {
-        setCurrentlyShootingId(reg.id);
-        playStudioChime();
         await pb.collection('registrations').update(reg.id, {
           status: 'shooting',
         });
-        fetchLiveQueue();
+        playStudioChime();
       } catch (err) {
-        console.error('Failed to call student:', err);
+        toast.error(workflowError(err));
+      } finally {
+        void fetchLiveQueue();
       }
     },
-    [fetchLiveQueue]
+    [fetchLiveQueue, toast]
   );
 
   const handleMarkDone = useCallback(
@@ -84,26 +87,13 @@ export function usePhotographerQueue() {
         if (currentlyShootingId === reg.id) {
           setCurrentlyShootingId(null);
         }
-        fetchLiveQueue();
       } catch (err) {
-        console.error('Failed to mark shoot done:', err);
+        toast.error(workflowError(err));
+      } finally {
+        void fetchLiveQueue();
       }
     },
-    [currentlyShootingId, fetchLiveQueue]
-  );
-
-  const handleUpdatePhotoStatus = useCallback(
-    async (regId: string, photoStatus: PhotoStatus) => {
-      try {
-        await pb.collection('registrations').update(regId, {
-          photo_status: photoStatus,
-        });
-        fetchLiveQueue();
-      } catch (err) {
-        console.error('Failed to update photo status:', err);
-      }
-    },
-    [fetchLiveQueue]
+    [currentlyShootingId, fetchLiveQueue, toast]
   );
 
   return {
@@ -116,6 +106,5 @@ export function usePhotographerQueue() {
     fetchLiveQueue,
     handleCallStudent,
     handleMarkDone,
-    handleUpdatePhotoStatus,
   };
 }

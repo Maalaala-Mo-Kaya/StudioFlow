@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { Megaphone, CheckCircle2, Folder, Copy, Check, Camera } from 'lucide-react';
-import type { Registration, PhotoStatus } from '../../../types';
+import { Megaphone, CheckCircle2, Folder, Copy, Check } from 'lucide-react';
+import type { Registration } from '../../../types';
 import {
   formatClientName,
   formatJobOrderNo,
   formatQueueNumber,
   parsePackageInclusions,
 } from '../../../utils/formatters';
-import { getDeterministicFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
+import { getPhotoFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
+import { useToast } from '../../../context/ToastContext';
+import { workflowError } from '../../../hooks/useWorkflowData';
 
 interface PhotographerQueueCardProps {
   registration: Registration;
@@ -15,7 +17,6 @@ interface PhotographerQueueCardProps {
   isShooting: boolean;
   onCallStudent: (reg: Registration) => void;
   onMarkDone: (reg: Registration) => void;
-  onUpdatePhotoStatus?: (id: string, status: PhotoStatus) => void;
 }
 
 export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
@@ -24,17 +25,23 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
   isShooting,
   onCallStudent,
   onMarkDone,
-  onUpdatePhotoStatus,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [folderPath, setFolderPath] = useState('');
+  const { toast } = useToast();
   const inclusionsArray = parsePackageInclusions(reg.expand?.package?.inclusions);
 
   const handleCopyFolder = async () => {
-    const path = getDeterministicFolderPath(reg);
-    const success = await copyFolderPathToClipboard(path);
-    if (success) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+    try {
+      const path = await getPhotoFolderPath(reg.id);
+      if (await copyFolderPathToClipboard(path)) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } else {
+        setFolderPath(path);
+      }
+    } catch (error) {
+      toast.error(workflowError(error));
     }
   };
 
@@ -152,27 +159,9 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
               )}
             </button>
           </div>
-          {/* Photo Floor Status Progression (T043) */}
-          {onUpdatePhotoStatus && (
-            <div className="mt-2.5 pt-2 border-t border-neutral-500/20 flex items-center justify-between text-[10px] font-mono">
-              <span className="flex items-center gap-1 text-neutral-400">
-                <Camera className="w-3 h-3 text-[#C9A227]" /> Photo Stage:
-              </span>
-              <select
-                value={reg.photo_status || 'pending_shoot'}
-                onChange={(e) => onUpdatePhotoStatus(reg.id, e.target.value as PhotoStatus)}
-                className={`p-1 text-[10px] font-bold uppercase border cursor-pointer ${
-                  isShooting
-                    ? 'bg-[#0A0A0A] text-[#C9A227] border-[#C9A227]'
-                    : 'bg-white text-[#0A0A0A] border-[#0A0A0A]'
-                }`}
-              >
-                <option value="pending_shoot">Pending Shoot</option>
-                <option value="shot_raw">Raw Stored</option>
-                <option value="client_selected">Client Selected</option>
-                <option value="ready_to_print">Ready to Print</option>
-              </select>
-            </div>
+          {folderPath && (
+            <input type="text" aria-label="Pictorial folder path" value={folderPath} readOnly
+              onFocus={(event) => event.target.select()} className="mt-2 w-full bg-white text-black border border-neutral-400 p-1 font-mono text-xs" />
           )}
         </div>
       </div>

@@ -1,4 +1,4 @@
-export type StaffRole = 'admin' | 'cashier' | 'photographer';
+export type StaffRole = 'admin' | 'cashier' | 'photographer' | 'mua' | 'chooser';
 
 export interface StaffUser {
   id: string;
@@ -7,6 +7,7 @@ export interface StaffUser {
   name: string;
   role: StaffRole;
   verified?: boolean;
+  disabled?: boolean;
   created?: string;
 }
 
@@ -80,6 +81,7 @@ export interface Package {
   amount: number;
   description?: string;
   inclusions?: string[] | string;
+  photo_selection_limit?: number;
   is_active?: boolean;
 }
 

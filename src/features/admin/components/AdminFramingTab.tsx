@@ -2,7 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { Frame, Copy, Check, Filter } from 'lucide-react';
 import type { Registration, FramingStatus } from '../../../types';
 import { formatClientName, formatCurrency } from '../../../utils/formatters';
-import { getDeterministicFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
+import { getPhotoFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
+import { useToast } from '../../../context/ToastContext';
+import { workflowError } from '../../../hooks/useWorkflowData';
 import { DataTable } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 
@@ -15,9 +17,11 @@ export const AdminFramingTab: React.FC<AdminFramingTabProps> = ({
   registrations,
   onUpdateFramingStatus,
 }) => {
+  const { toast } = useToast();
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterSchool, setFilterSchool] = useState<string>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [folder, setFolder] = useState<{ id: string; path: string }>();
 
   // Extract participants with frame items in package or add-ons
   const framingRecords = useMemo(() => {
@@ -70,11 +74,16 @@ export const AdminFramingTab: React.FC<AdminFramingTabProps> = ({
   }, [framingRecords, filterStatus, filterSchool]);
 
   const handleCopy = async (reg: Registration) => {
-    const path = getDeterministicFolderPath(reg);
-    const success = await copyFolderPathToClipboard(path);
-    if (success) {
-      setCopiedId(reg.id);
-      setTimeout(() => setCopiedId(null), 2000);
+    try {
+      const path = await getPhotoFolderPath(reg.id);
+      if (await copyFolderPathToClipboard(path)) {
+        setCopiedId(reg.id);
+        setTimeout(() => setCopiedId(null), 2000);
+      } else {
+        setFolder({ id: reg.id, path });
+      }
+    } catch (error) {
+      toast.error(workflowError(error));
     }
   };
 
@@ -163,13 +172,16 @@ export const AdminFramingTab: React.FC<AdminFramingTabProps> = ({
       ),
     },
     {
-      id: 'folder', header: 'Pictorial Folder', sortable: true, accessor: getDeterministicFolderPath,
+      id: 'folder', header: 'Pictorial Folder',
       align: 'right',
-      cell: (reg) => (
+      cell: (reg) => folder?.id === reg.id ? (
+        <input aria-label="Pictorial folder path" value={folder.path} type="text" readOnly autoFocus
+          onFocus={(event) => event.target.select()} onBlur={() => setFolder(undefined)}
+          className="w-full min-w-40 border border-neutral-400 bg-white p-1 font-mono text-xs" />
+      ) : (
         <button
           type="button"
           onClick={() => handleCopy(reg)}
-          title={getDeterministicFolderPath(reg)}
           className="btn-tactile inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono font-bold uppercase bg-[#0A0A0A] text-[#C9A227] hover:bg-neutral-800 transition-colors cursor-pointer"
         >
           {copiedId === reg.id ? (

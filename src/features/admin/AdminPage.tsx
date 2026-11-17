@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAdminData } from './useAdminData';
 import { AdminHeader } from './components/AdminHeader';
 import { AdminSidebarNav } from './components/AdminSidebarNav';
@@ -9,9 +9,13 @@ import { AdminRosterTab } from './components/AdminRosterTab';
 import { AdminStaffTab } from './components/AdminStaffTab';
 import { AdminFramingTab } from './components/AdminFramingTab';
 import { AdminStudentsTab } from './components/AdminStudentsTab';
+import { MakeupPage } from '../workflow/MakeupPage';
+import { ChooserPage } from '../workflow/ChooserPage';
+import { stationButton } from '../workflow/StationLayout';
 
 export const AdminPage: React.FC = () => {
   const admin = useAdminData();
+  const [workflow, setWorkflow] = useState<'makeup' | 'photos'>('makeup');
 
   return (
     <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8">
@@ -76,6 +80,8 @@ export const AdminPage: React.FC = () => {
               onNewPkgNameChange={admin.setNewPkgName}
               newPkgAmount={admin.newPkgAmount}
               onNewPkgAmountChange={admin.setNewPkgAmount}
+              newPkgPhotoLimit={admin.newPkgPhotoLimit}
+              onNewPkgPhotoLimitChange={admin.setNewPkgPhotoLimit}
               newPkgInclusions={admin.newPkgInclusions}
               onNewPkgInclusionsChange={admin.setNewPkgInclusions}
               onAddPackage={admin.handleAddPackage}
@@ -126,6 +132,16 @@ export const AdminPage: React.FC = () => {
           )}
 
           {/* TAB 7: STAFF ACCOUNTS & ROLE MANAGEMENT */}
+          {admin.activeTab === 'workflow' && (
+            <div className="space-y-5">
+              <div className="flex flex-wrap gap-2" aria-label="Workflow reports">
+                <button type="button" className={stationButton} aria-pressed={workflow === 'makeup'} onClick={() => setWorkflow('makeup')}>Makeup / Grooming</button>
+                <button type="button" className={stationButton} aria-pressed={workflow === 'photos'} onClick={() => setWorkflow('photos')}>Photo Selection</button>
+              </div>
+              {workflow === 'makeup' ? <MakeupPage embedded /> : <ChooserPage embedded />}
+            </div>
+          )}
+
           {admin.activeTab === 'staff' && (
             <AdminStaffTab
               staffAccounts={admin.staffAccounts}
@@ -139,6 +155,7 @@ export const AdminPage: React.FC = () => {
               onStaffRoleChange={admin.setStaffRole}
               onCreateStaff={admin.handleCreateStaff}
               onDeleteStaff={admin.handleDeleteStaff}
+              onUpdateStaff={admin.handleUpdateStaff}
             />
           )}
         </main>

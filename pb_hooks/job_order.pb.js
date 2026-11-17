@@ -61,44 +61,21 @@ onRecordCreate((e) => {
     e.record.set("payment_status", "unpaid");
   }
 
-  // Auto-create pictorial directory on Windows C: storage (T042)
-  try {
-    const basePath = "C:\\StudioFlow_Photos";
-    let orgCode = "ORGANIZATION";
-    const orgId = e.record.getString("organization");
-    if (orgId) {
-      try {
-        const org = e.app.findRecordById("organizations", orgId);
-        if (org) orgCode = org.getString("code") || org.getString("name") || "ORGANIZATION";
-      } catch (_) {}
-    }
-
-    let courseCode = "COURSE";
-    const courseId = e.record.getString("course");
-    if (courseId) {
-      try {
-        const course = e.app.findRecordById("courses", courseId);
-        if (course) courseCode = course.getString("code") || course.getString("name") || "COURSE";
-      } catch (_) {}
-    }
-
-    const joNo = e.record.getString("job_order_no") || "JO";
-    const fName = e.record.getString("family_name") || "STUDENT";
-    const gName = e.record.getString("given_name") || "";
-
-    const clean = (s) => (s ? String(s).replace(/\.\./g, "").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim() : "");
-    const folderName = `${clean(joNo)}_${clean(fName)}_${clean(gName)}`.replace(/_+$/, "");
-    const fullPath = `${basePath}\\${clean(orgCode)}\\${clean(courseCode)}\\${folderName}`;
-
-    if (typeof $os !== "undefined" && $os && $os.mkdirAll) {
-      $os.mkdirAll(fullPath, 511);
-    }
-  } catch (dirErr) {
-    console.log("Pictorial directory creation notice:", dirErr);
-  }
+  const storage = require(__hooks + "/studio_photo_storage.js");
+  storage.setFolder(e.record, storage.pathFor(e.app, e.record) + "_" + (e.record.id || $security.randomString(15)));
 
   // Must call e.next() to proceed with the DB INSERT
   return e.next();
+}, "registrations");
+
+onRecordAfterCreateSuccess((e) => {
+  e.next();
+  try {
+    const storage = require(__hooks + "/studio_photo_storage.js");
+    storage.provision(e.record.getString("photo_folder"));
+  } catch (error) {
+    console.log("Pictorial directory creation notice:", error);
+  }
 }, "registrations");
 
 onRecordCreate((e) => {
@@ -168,38 +145,11 @@ onRecordCreate((e) => {
     }
   });
 
-  // Guarantee folder exists on Windows C: storage
+  // Retry directory provisioning after payment if storage was offline during registration.
   try {
-    const basePath = "C:\\StudioFlow_Photos";
-    let orgCode = "ORGANIZATION";
-    const orgId = reg.getString("organization");
-    if (orgId) {
-      try {
-        const org = e.app.findRecordById("organizations", orgId);
-        if (org) orgCode = org.getString("code") || org.getString("name") || "ORGANIZATION";
-      } catch (_) {}
-    }
-
-    let courseCode = "COURSE";
-    const courseId = reg.getString("course");
-    if (courseId) {
-      try {
-        const course = e.app.findRecordById("courses", courseId);
-        if (course) courseCode = course.getString("code") || course.getString("name") || "COURSE";
-      } catch (_) {}
-    }
-
-    const joNo = reg.getString("job_order_no") || "JO";
-    const fName = reg.getString("family_name") || "STUDENT";
-    const gName = reg.getString("given_name") || "";
-
-    const clean = (s) => (s ? String(s).replace(/\.\./g, "").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim() : "");
-    const folderName = `${clean(joNo)}_${clean(fName)}_${clean(gName)}`.replace(/_+$/, "");
-    const fullPath = `${basePath}\\${clean(orgCode)}\\${clean(courseCode)}\\${folderName}`;
-
-    if (typeof $os !== "undefined" && $os && $os.mkdirAll) {
-      $os.mkdirAll(fullPath, 511);
-    }
+    const storage = require(__hooks + "/studio_photo_storage.js");
+    const path = reg.getString("photo_folder");
+    if (path) storage.provision(path);
   } catch (dirErr) {
     console.log("Pictorial directory creation notice:", dirErr);
   }

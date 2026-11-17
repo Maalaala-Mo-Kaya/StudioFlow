@@ -1,7 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 routerAdd("GET", "/api/studioflow/student-excel", (e) => {
-  if (e.auth.getString("role") !== "admin") {
+  if (e.auth.getString("role") !== "admin" || e.auth.getBool("disabled")) {
     throw new ForbiddenError("Only administrators can export student financial reports.");
   }
 

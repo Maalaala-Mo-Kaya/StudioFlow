@@ -12,10 +12,8 @@ export const STUDIO_INFO = {
   defaultJobOrderNo: '00001',
 } as const;
 
-export const DEFAULT_PHOTOS_PATH = 'C:\\StudioFlow_Photos';
-
 export const REGISTRATION_TERMS_CLAUSES: ReadonlyArray<string> = [
-  'Hair and Make-up is NOT INCLUDED in the package.',
+  'Hair and make-up are included only when listed in the selected package or purchased as an add-on.',
   'Strictly NO Make-up retouch inside the studio.',
   'Check your schedules before paying (Date & Time of pictorial).',
   'Please keep this receipt for verification and claiming of your pictures.',
@@ -53,18 +51,21 @@ export const STAFF_PRESETS: ReadonlyArray<{
 export const ADMIN_STATION_LINKS: ReadonlyArray<{
   id: string;
   label: string;
-  mobileLabel: string;
 }> = [
-  { id: 'admin', label: 'Admin', mobileLabel: 'Admin Desk' },
-  { id: 'cashier', label: 'Cashier', mobileLabel: 'Cashier POS' },
-  { id: 'photographer', label: 'Queue', mobileLabel: 'Photo Queue' },
-  { id: 'register', label: 'Form', mobileLabel: 'Client Form' },
+  { id: 'admin', label: 'Admin' },
+  { id: 'cashier', label: 'Cashier' },
+  { id: 'photographer', label: 'Queue' },
+  { id: 'mua', label: 'MUA' },
+  { id: 'chooser', label: 'Chooser' },
+  { id: 'register', label: 'Form' },
 ];
 
 export const ROLE_DEFAULT_ROUTE: Record<StaffRole, string> = {
   admin: 'admin',
   cashier: 'cashier',
   photographer: 'photographer',
+  mua: 'mua',
+  chooser: 'chooser',
 };
 
 export const VALID_APP_ROUTES = [
@@ -73,6 +74,8 @@ export const VALID_APP_ROUTES = [
   'cashier',
   'photographer',
   'admin',
+  'mua',
+  'chooser',
 ] as const;
 
 export const PAYMENT_METHOD_OPTIONS = [

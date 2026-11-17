@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "deploy": "tsc --noEmit && vite build && powershell -Command \"Copy-Item -Path dist/* -Destination pb_public -Recurse -Force\"",
     "lint": "eslint .",
+    "test:workflow": "node --test scripts/test-studio-workflow.cjs",
     "preview": "vite preview"
   },
   "dependencies": {

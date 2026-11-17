@@ -16,7 +16,6 @@ export const PhotographerPage: React.FC = () => {
     fetchLiveQueue,
     handleCallStudent,
     handleMarkDone,
-    handleUpdatePhotoStatus,
   } = usePhotographerQueue();
 
   return (
@@ -101,7 +100,6 @@ export const PhotographerPage: React.FC = () => {
                   isShooting={reg.id === currentlyShootingId || reg.status === 'shooting'}
                   onCallStudent={handleCallStudent}
                   onMarkDone={handleMarkDone}
-                  onUpdatePhotoStatus={handleUpdatePhotoStatus}
                 />
               ))}
             </div>

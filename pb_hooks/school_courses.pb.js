@@ -1,7 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 routerAdd("POST", "/api/studioflow/school-courses", (e) => {
-  if (e.auth.getString("role") !== "admin") {
+  if (e.auth.getString("role") !== "admin" || e.auth.getBool("disabled")) {
     throw new ForbiddenError("Only administrators can assign school courses.");
   }
 
