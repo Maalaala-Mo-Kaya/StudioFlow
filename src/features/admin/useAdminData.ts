@@ -41,6 +41,7 @@ export function useAdminData() {
   const [newPkgName, setNewPkgName] = useState('');
   const [newPkgAmount, setNewPkgAmount] = useState<number>(1000);
   const [newPkgPhotoLimit, setNewPkgPhotoLimit] = useState(0);
+  const [newPkgRequiresMua, setNewPkgRequiresMua] = useState(false);
   const [newPkgInclusions, setNewPkgInclusions] = useState('');
 
   // Roster CSV Upload State
@@ -164,6 +165,7 @@ export function useAdminData() {
         name: newPkgName.trim(),
         amount: Number(newPkgAmount),
         photo_selection_limit: newPkgPhotoLimit,
+        requires_mua: newPkgRequiresMua,
         inclusions: JSON.stringify(inclusions),
         is_active: true,
       });
@@ -172,6 +174,7 @@ export function useAdminData() {
       setNewPkgName('');
       setNewPkgInclusions('');
       setNewPkgPhotoLimit(0);
+      setNewPkgRequiresMua(false);
       loadAllData();
     } catch (err) {
       console.error('Failed to add package:', err);
@@ -372,7 +375,7 @@ export function useAdminData() {
   // --- Package & Add-on Mutations (T020) ---
   const handleUpdatePackage = async (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number }
+    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean }
   ) => {
     try {
       await pb.collection('packages').update(id, {
@@ -381,12 +384,12 @@ export function useAdminData() {
         amount: Number(data.amount),
         inclusions: JSON.stringify(data.inclusions),
         photo_selection_limit: data.photo_selection_limit,
+        requires_mua: data.requires_mua,
       });
-      toast.success(`Package ${data.code} updated.`);
       loadAllData();
     } catch (err) {
       console.error('Failed to update package:', err);
-      toast.error('Failed to update package.');
+      throw err;
     }
   };
 
@@ -412,20 +415,20 @@ export function useAdminData() {
     }
   };
 
-  const handleAddAddOn = async (name: string, code: string, amount: number) => {
+  const handleAddAddOn = async (name: string, code: string, amount: number, requiresMua: boolean) => {
     if (!name.trim()) return;
     try {
       await pb.collection('add_ons').create({
         name: name.trim(),
         code: code.trim().toUpperCase(),
         amount: Number(amount),
+        requires_mua: requiresMua,
         is_active: true,
       });
-      toast.success(`Add-on ${name} added.`);
       loadAllData();
     } catch (err) {
       console.error('Failed to add add-on:', err);
-      toast.error('Failed to add add-on.');
+      throw err;
     }
   };
 
@@ -433,19 +436,20 @@ export function useAdminData() {
     id: string,
     name: string,
     code: string,
-    amount: number
+    amount: number,
+    requiresMua: boolean
   ) => {
     try {
       await pb.collection('add_ons').update(id, {
         name: name.trim(),
         code: code.trim().toUpperCase(),
         amount: Number(amount),
+        requires_mua: requiresMua,
       });
-      toast.success(`Add-on ${name} updated.`);
       loadAllData();
     } catch (err) {
       console.error('Failed to update add-on:', err);
-      toast.error('Failed to update add-on.');
+      throw err;
     }
   };
 
@@ -501,15 +505,9 @@ export function useAdminData() {
   };
 
   // --- Student Registration Mutations (T028) ---
-  const handleUpdateRegistration = async (id: string, data: Partial<Registration>) => {
-    try {
-      await pb.collection('registrations').update(id, data);
-      toast.success('Student registration updated.');
-      loadAllData();
-    } catch (err) {
-      console.error('Failed to update registration:', err);
-      toast.error('Failed to update registration: ' + (err instanceof Error ? err.message : 'Unknown error'));
-    }
+  const handleUpdateRegistration = async (id: string, data: Partial<Registration> & { mua_correction?: 'required' | 'waived' }) => {
+    await pb.collection('registrations').update(id, data);
+    loadAllData();
   };
 
   const handleDeleteRegistration = async (id: string) => {
@@ -582,6 +580,8 @@ export function useAdminData() {
     newPkgAmount,
     newPkgPhotoLimit,
     setNewPkgPhotoLimit,
+    newPkgRequiresMua,
+    setNewPkgRequiresMua,
     setNewPkgAmount,
     newPkgInclusions,
     setNewPkgInclusions,

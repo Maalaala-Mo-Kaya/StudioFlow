@@ -125,7 +125,7 @@ StudioFlow includes pre-built batch scripts to simplify studio operations:
 | **Photo Chooser** | `/#/chooser` | `chooser`, `admin` | Search completed shoots, preview photos, confirm selections, and reopen a selection to revise it. |
 | **Studio Admin** | `/#/admin` | `admin` | Manage staff and catalog settings. Monitor makeup assignments and photo selection under **Makeup & Photo Selection**. |
 
-Create the two new staff accounts in **Admin → Staff Accounts**. Makeup eligibility comes from purchased add-on names and package inclusions that describe makeup, make-up, or grooming. StudioFlow records the service for the registration when the package or add-ons are selected. In **Packages & Add-ons**, set **Photo selection limit** to the allowed number of photographs. A value of `0` allows any number.
+Create the two new staff accounts in **Admin → Staff Accounts**. In **Packages & Add-ons**, enable **Require makeup / grooming** on any package or add-on that should send new registrations to the MUA queue after confirmed payment. Catalog changes apply to new orders. To correct an existing order before photography, use **Students Directory → Edit Student Record → Correct MUA requirement**. Release any active MUA assignment before correcting the order. Set **Photo selection limit** to the allowed number of photographs. A value of `0` allows any number.
 
 ---
 

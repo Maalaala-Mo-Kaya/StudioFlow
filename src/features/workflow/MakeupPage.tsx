@@ -12,6 +12,7 @@ type MakeupState = 'waiting' | 'claimed' | 'in_progress' | 'completed';
 type Action = 'claim' | 'start' | 'complete' | 'release';
 interface MakeupAssignment extends StationStudent {
   service: string;
+  services?: { source: keyof typeof serviceSource; name: string }[];
   state: MakeupState;
   version: number;
   artistId: string;
@@ -22,6 +23,13 @@ interface MakeupAssignment extends StationStudent {
 
 const stateLabel: Record<MakeupState, string> = {
   waiting: 'Waiting', claimed: 'Claimed', in_progress: 'In progress', completed: 'Completed',
+};
+
+const serviceSource = {
+  package: 'Selected package',
+  add_on: 'Selected add-on',
+  admin: 'Admin correction',
+  legacy: 'Existing job order',
 };
 
 export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
@@ -75,7 +83,18 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
                 <span className="text-xs font-black uppercase">{stateLabel[row.state]}</span>
               </div>
               <StationStudentDetails student={row} />
-              <p className="text-sm border-t border-neutral-300 pt-2">{row.service || 'Makeup / grooming'}</p>
+              <div className="border-t border-neutral-300 pt-2">
+                <p className="text-xs font-black uppercase">MUA Service</p>
+                {row.services?.length ? (
+                  <ul className="space-y-1">
+                    {row.services.map(({ name, source }, index) => (
+                      <li key={index} className="text-sm break-words">
+                        {name} <span className="text-xs text-neutral-600">({serviceSource[source]})</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="text-sm">{row.service || 'Makeup / grooming'}</p>}
+              </div>
               {row.artistName && admin && <p className="text-xs font-bold">MUA {row.artistName}</p>}
               {row.completedAt && <p className="text-xs">{new Date(row.completedAt.replace(' ', 'T')).toLocaleString()}</p>}
               {row.state !== 'waiting' && row.state !== 'completed' && !row.eligible &&

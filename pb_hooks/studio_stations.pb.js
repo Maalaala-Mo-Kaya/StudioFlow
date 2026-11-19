@@ -21,6 +21,7 @@ routerAdd("GET", "/api/studioflow/makeup", (e) => {
     return {
       ...workflow.summary(e.app, record),
       service: record.getString("makeup_service"),
+      services: workflow.makeupServices(record),
       state: record.getString("makeup_state") || "waiting",
       version: record.getInt("makeup_version"),
       artistId,

@@ -54,7 +54,7 @@ migrate((app) => {
   const workflow = require(__hooks + "/studio_workflow.js");
   const storage = require(__hooks + "/studio_photo_storage.js");
   for (const record of app.findAllRecords("registrations")) {
-    const service = workflow.purchasedServices(app, record);
+    const service = legacyPurchasedServices(app, record, workflow);
     let path = "";
     try {
       const candidate = storage.photoFolder(app, record);
@@ -128,3 +128,21 @@ migrate((app) => {
   users.updateRule = "@request.auth.role = 'admin' || id = @request.auth.id";
   app.save(users);
 });
+
+// Reproduce the original classification only when upgrading a database that
+// predates the MUA queues. Later migrations preserve these saved job orders.
+function legacyPurchasedServices(app, registration, workflow) {
+  const pkg = workflow.catalogItem(app, "packages", registration.getString("package"));
+  let inclusions = pkg ? workflow.json(pkg, "inclusions") : null;
+  if (typeof inclusions === "string") {
+    try { inclusions = JSON.parse(inclusions); } catch (_) { /* legacy plain text */ }
+  }
+  const addOns = workflow.json(registration, "add_ons");
+  const included = (Array.isArray(inclusions) ? inclusions : [inclusions]).filter((item) =>
+    typeof item === "string" && !/\b(?:no|not|excluded|optional|separate|add[ -]on)\b/i.test(item));
+  const services = [
+    ...included,
+    ...(Array.isArray(addOns) ? addOns : []).map((item) => item?.name || item?.code),
+  ].filter((item) => typeof item === "string" && /(?:\bmake[\s_-]*up\b|\bgroom(?:ing)?\b)/i.test(item));
+  return [...new Set(services)].join(" + ");
+}

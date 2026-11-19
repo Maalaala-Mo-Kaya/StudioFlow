@@ -17,17 +17,19 @@ interface AdminPackagesTabProps {
   onNewPkgAmountChange: (val: number) => void;
   newPkgPhotoLimit: number;
   onNewPkgPhotoLimitChange: (val: number) => void;
+  newPkgRequiresMua: boolean;
+  onNewPkgRequiresMuaChange: (val: boolean) => void;
   newPkgInclusions: string;
   onNewPkgInclusionsChange: (val: string) => void;
   onAddPackage: (e: React.FormEvent) => void;
   onUpdatePackage: (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number }
+    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean }
   ) => Promise<void>;
   onTogglePackageActive: (id: string, current: boolean) => Promise<void>;
   onDeletePackage: (id: string) => Promise<void>;
-  onAddAddOn: (name: string, code: string, amount: number) => Promise<void>;
-  onUpdateAddOn: (id: string, name: string, code: string, amount: number) => Promise<void>;
+  onAddAddOn: (name: string, code: string, amount: number, requiresMua: boolean) => Promise<void>;
+  onUpdateAddOn: (id: string, name: string, code: string, amount: number, requiresMua: boolean) => Promise<void>;
   onToggleAddOnActive: (id: string, current: boolean) => Promise<void>;
   onDeleteAddOn: (id: string) => Promise<void>;
 }
@@ -43,6 +45,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   onNewPkgAmountChange,
   newPkgPhotoLimit,
   onNewPkgPhotoLimitChange,
+  newPkgRequiresMua,
+  onNewPkgRequiresMuaChange,
   newPkgInclusions,
   onNewPkgInclusionsChange,
   onAddPackage,
@@ -62,18 +66,21 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [editPkgName, setEditPkgName] = useState('');
   const [editPkgAmount, setEditPkgAmount] = useState(0);
   const [editPkgPhotoLimit, setEditPkgPhotoLimit] = useState(0);
+  const [editPkgRequiresMua, setEditPkgRequiresMua] = useState(false);
   const [editPkgInclusionsArray, setEditPkgInclusionsArray] = useState<string[]>([]);
 
   // Add-on Form State
   const [newAddonName, setNewAddonName] = useState('');
   const [newAddonCode, setNewAddonCode] = useState('');
   const [newAddonAmount, setNewAddonAmount] = useState(250);
+  const [newAddonRequiresMua, setNewAddonRequiresMua] = useState(false);
 
   // Editing Add-on State
   const [editingAddonId, setEditingAddonId] = useState<string | null>(null);
   const [editAddonName, setEditAddonName] = useState('');
   const [editAddonCode, setEditAddonCode] = useState('');
   const [editAddonAmount, setEditAddonAmount] = useState(0);
+  const [editAddonRequiresMua, setEditAddonRequiresMua] = useState(false);
 
   // Confirmation Modal State
   const [confirmModalState, setConfirmModalState] = useState<{
@@ -94,6 +101,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     setEditPkgName(pkg.name);
     setEditPkgAmount(pkg.amount);
     setEditPkgPhotoLimit(pkg.photo_selection_limit ?? 0);
+    setEditPkgRequiresMua(!!pkg.requires_mua);
     setEditPkgInclusionsArray(parsePackageInclusions(pkg.inclusions));
   };
 
@@ -106,6 +114,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
         amount: editPkgAmount,
         inclusions: editPkgInclusionsArray,
         photo_selection_limit: editPkgPhotoLimit,
+        requires_mua: editPkgRequiresMua,
       });
       toast.success(`Package "${editPkgName}" updated successfully`);
       setEditingPkgId(null);
@@ -119,12 +128,13 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     setEditAddonName(add.name);
     setEditAddonCode(add.code || '');
     setEditAddonAmount(add.amount);
+    setEditAddonRequiresMua(!!add.requires_mua);
   };
 
   const handleSaveAddonEdit = async () => {
     if (!editingAddonId) return;
     try {
-      await onUpdateAddOn(editingAddonId, editAddonName, editAddonCode, editAddonAmount);
+      await onUpdateAddOn(editingAddonId, editAddonName, editAddonCode, editAddonAmount, editAddonRequiresMua);
       toast.success(`Add-on "${editAddonName}" updated successfully`);
       setEditingAddonId(null);
     } catch (err: unknown) {
@@ -136,11 +146,12 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     e.preventDefault();
     if (!newAddonName.trim()) return;
     try {
-      await onAddAddOn(newAddonName, newAddonCode, newAddonAmount);
+      await onAddAddOn(newAddonName, newAddonCode, newAddonAmount, newAddonRequiresMua);
       toast.success(`Add-on "${newAddonName}" added to catalog`);
       setNewAddonName('');
       setNewAddonCode('');
       setNewAddonAmount(250);
+      setNewAddonRequiresMua(false);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to create add-on');
     }
@@ -236,6 +247,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
             </div>
 
             <PhotoLimitInput value={newPkgPhotoLimit} onChange={onNewPkgPhotoLimitChange} />
+            <MuaRequirementInput checked={newPkgRequiresMua} onChange={onNewPkgRequiresMuaChange} />
 
             {/* Dynamic Form List for Inclusions */}
             <PackageInclusionsEditor
@@ -319,6 +331,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                       </div>
 
                       <PhotoLimitInput value={editPkgPhotoLimit} onChange={setEditPkgPhotoLimit} />
+                      <MuaRequirementInput checked={editPkgRequiresMua} onChange={setEditPkgRequiresMua} />
 
                       {/* Repeatable Inclusions Editor in Edit Mode */}
                       <PackageInclusionsEditor
@@ -394,6 +407,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
 
                       {/* Inclusions Chips */}
                       <div className="mt-2 flex flex-wrap gap-1">
+                        <MuaRequirementBadge required={pkg.requires_mua} />
                         {!!pkg.photo_selection_limit && (
                           <span className="px-2 py-0.5 text-[10px] bg-[#F7F2E0] border border-neutral-300">Up to {pkg.photo_selection_limit} selected photos</span>
                         )}
@@ -478,6 +492,9 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
               <Plus className="w-4 h-4" /> Add to Catalog
             </button>
           </div>
+          <div className="sm:col-span-4">
+            <MuaRequirementInput checked={newAddonRequiresMua} onChange={setNewAddonRequiresMua} />
+          </div>
         </form>
 
         {/* Add-on List Grid */}
@@ -528,6 +545,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                       />
                     </div>
                   </div>
+                  <MuaRequirementInput checked={editAddonRequiresMua} onChange={setEditAddonRequiresMua} />
                   <div className="flex gap-2 justify-end pt-1">
                     <button
                       type="button"
@@ -555,6 +573,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     {add.code && (
                       <span className="text-[10px] text-neutral-500 ml-2">({add.code})</span>
                     )}
+                    <div className="mt-1"><MuaRequirementBadge required={add.requires_mua} /></div>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button
@@ -613,5 +632,29 @@ function PhotoLimitInput({ value, onChange }: { value: number; onChange: (value:
       <input type="number" min="0" step="1" value={value} onChange={(event) => onChange(Number(event.target.value))}
         className="mt-1 w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-white font-bold" />
     </label>
+  );
+}
+
+function MuaRequirementInput({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <fieldset className="border border-neutral-400 bg-white px-3 py-2">
+      <legend className="px-1 text-[10px] font-black uppercase">MUA Queue Requirement</legend>
+      <label className="flex items-center gap-2 text-[11px] font-bold uppercase">
+        <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)}
+          className="size-4 accent-[#C9A227]" />
+        Require makeup / grooming
+      </label>
+      <p className="mt-1 text-[10px] text-neutral-600">Sends students to the MUA queue after confirmed payment.</p>
+    </fieldset>
+  );
+}
+
+function MuaRequirementBadge({ required }: { required?: boolean }) {
+  return (
+    <span className={`inline-block px-2 py-0.5 text-[10px] font-bold uppercase border ${
+      required ? 'bg-[#F7F2E0] border-[#C9A227] text-[#765B12]' : 'bg-white border-neutral-300 text-neutral-700'
+    }`}>
+      {required ? 'MUA Required' : 'No MUA Required'}
+    </span>
   );
 }

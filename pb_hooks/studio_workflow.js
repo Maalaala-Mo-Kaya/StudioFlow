@@ -15,21 +15,43 @@ function catalogItem(app, collection, id) {
   return id ? app.findRecordsByFilter(collection, "id = {:id}", "", 1, 0, { id })[0] : null;
 }
 
-function purchasedServices(app, registration) {
-  const pkg = catalogItem(app, "packages", registration.getString("package"));
-  let inclusions = pkg ? json(pkg, "inclusions") : null;
-  if (typeof inclusions === "string") {
-    try { inclusions = JSON.parse(inclusions); } catch (_) { /* legacy plain text */ }
+function makeupServices(registration) {
+  const saved = json(registration, "makeup_services");
+  if (Array.isArray(saved)) return saved;
+  const service = registration.getString("makeup_service");
+  return service ? [{ source: "legacy", name: service }] : [];
+}
+
+function purchasedServices(app, registration, before) {
+  const services = before ? makeupServices(before) : [];
+  const addOnIds = (record) => {
+    const items = record && json(record, "add_ons");
+    return new Set(Array.isArray(items) ? items.map((item) => item?.id).filter(Boolean) : []);
+  };
+  const selected = addOnIds(registration);
+  const previous = addOnIds(before);
+  const packageId = registration.getString("package");
+  const changedPackage = packageId !== before?.getString("package");
+  const saved = services.filter((service) =>
+    (service.source !== "package" || !changedPackage)
+    && (service.source !== "add_on" || selected.has(service.id)));
+  const addService = (collection, source, id) => {
+    const item = catalogItem(app, collection, id);
+    if (item?.getBool("requires_mua")) {
+      saved.push({ source, id, name: item.getString("name") });
+    }
+  };
+  if (changedPackage) addService("packages", "package", packageId);
+  for (const id of selected) {
+    if (!previous.has(id)) addService("add_ons", "add_on", id);
   }
-  const addOns = json(registration, "add_ons");
-  const included = (Array.isArray(inclusions) ? inclusions : [inclusions]).filter((item) =>
-    typeof item === "string" && !/\b(?:no|not|excluded|optional|separate|add[ -]on)\b/i.test(item));
-  const services = [
-    ...included,
-    ...(Array.isArray(addOns) ? addOns : []).map((item) => item?.name || item?.code),
-  ].filter((item) => typeof item === "string"
-    && /(?:\bmake[\s_-]*up\b|\bgroom(?:ing)?\b)/i.test(item));
-  return [...new Set(services)].join(" + ");
+  return saved;
+}
+
+function saveMakeupServices(registration, services) {
+  registration.set("makeup_services", services);
+  // The existing queue filters and SQLite guard share this saved summary.
+  registration.set("makeup_service", services.map(({ name }) => name).join(" + "));
 }
 
 function staff(app, auth, roles) {
@@ -70,4 +92,4 @@ function summary(app, registration) {
   };
 }
 
-module.exports = { activeMakeup, catalogItem, finishedShoot, json, photographyComplete, photoQueue, purchasedServices, staff, summary, withRegistration };
+module.exports = { activeMakeup, catalogItem, finishedShoot, json, makeupServices, photographyComplete, photoQueue, purchasedServices, saveMakeupServices, staff, summary, withRegistration };

@@ -17,8 +17,8 @@ onRecordCreateRequest((e) => {
 }, "registrations");
 
 onRecordCreate((e) => {
-  const { purchasedServices } = require(__hooks + "/studio_workflow.js");
-  e.record.set("makeup_service", purchasedServices(e.app, e.record));
+  const workflow = require(__hooks + "/studio_workflow.js");
+  workflow.saveMakeupServices(e.record, workflow.purchasedServices(e.app, e.record));
   e.record.set("shoot_completed", false);
   return e.next();
 }, "registrations");
@@ -34,8 +34,13 @@ onRecordUpdateRequest((e) => {
   const before = e.record.original();
   const changed = (key) => e.record.getString(key) !== before.getString(key);
   const role = e.auth?.getString("role");
+  const correction = e.requestInfo().body.mua_correction;
+  if (correction !== undefined) {
+    if (role !== "admin" && !e.hasSuperuserAuth()) throw new ForbiddenError("Only administrators can correct the MUA requirement.");
+    if (!["required", "waived"].includes(correction)) throw new BadRequestError("Invalid MUA requirement correction.");
+  }
   const fields = [
-    "makeup_service", "makeup_state", "makeup_artist", "makeup_completed_at", "makeup_version", "shoot_completed",
+    "makeup_service", "makeup_services", "makeup_state", "makeup_artist", "makeup_completed_at", "makeup_version", "shoot_completed",
     "photo_folder", "photo_folder_key", "photo_edit_until", "photo_revision",
     "photo_selection", "photo_pending", "photo_last_request",
   ];
@@ -71,8 +76,24 @@ onRecordUpdateRequest((e) => {
     if (!e.hasSuperuserAuth()) workflow.staff(tx, e.auth, [role]);
     e.app = tx;
     try {
-      if (changed("package") || changed("add_ons")) {
-        e.record.set("makeup_service", workflow.purchasedServices(tx, e.record));
+      const beforePhotography = ["pending_payment", "paid"];
+      const canCorrect = beforePhotography.includes(current.getString("status")) && !current.getBool("shoot_completed");
+      if (correction && !canCorrect) throw new ApiError(409, "The MUA requirement can only be corrected before photography starts.");
+      if (canCorrect && (correction || changed("package") || changed("add_ons"))) {
+        const saved = workflow.makeupServices(current);
+        let services = workflow.purchasedServices(tx, e.record, current);
+        if (correction === "waived") services = [];
+        if (correction === "required" && !services.length) services = [{ source: "admin", name: "Makeup / grooming" }];
+        if (JSON.stringify(services) !== JSON.stringify(saved)) {
+          if (!beforePhotography.includes(e.record.getString("status"))) {
+            throw new ApiError(409, "Save the MUA correction before changing the queue status.");
+          }
+          const state = current.getString("makeup_state");
+          if (workflow.activeMakeup.includes(state)) throw new ApiError(409, "Release the active MUA assignment before changing its services.");
+          if (state === "completed") throw new ApiError(409, "Makeup or grooming is already complete for this order.");
+          workflow.saveMakeupServices(e.record, services);
+          e.record.set("makeup_version", current.getInt("makeup_version") + 1);
+        }
       }
       return e.next();
     } finally { e.app = app; }

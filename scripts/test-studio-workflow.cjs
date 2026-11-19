@@ -99,12 +99,16 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     method: 'POST', token: admin, body: { schoolId: school.id, levelId: level.id, name: 'Media Arts', code: 'MEDIA' }, status: 201,
   });
   const course = { id: assignment.payload.course_id };
-  const standard = await create('packages', { code: 'STD', name: 'Workflow Portrait', amount: 1000, is_active: true });
-  const prepared = await create('packages', {
-    code: 'GROOM', name: 'Workflow Deluxe', inclusions: JSON.stringify(['Hair styling and grooming service']),
-    amount: 1000, is_active: true, photo_selection_limit: 2,
+  const standard = await create('packages', {
+    code: 'STD', name: 'Package E', inclusions: JSON.stringify(['Makeup and grooming']),
+    amount: 1000, is_active: true, requires_mua: false,
   });
-  const makeup = await create('add_ons', { code: 'HAIR', name: 'Hair & Make-up', amount: 100, is_active: true });
+  const prepared = await create('packages', {
+    code: 'PKG-D', name: 'Package D', amount: 1000, is_active: true, photo_selection_limit: 2, requires_mua: true,
+  });
+  const makeup = await create('add_ons', { code: 'EXTRA', name: 'Studio upgrade', amount: 100, is_active: true, requires_mua: true });
+  const patchCatalog = (collection, item, body) => send(records(collection, item.id), { token: admin, method: 'PATCH', body })
+    .then(({ payload }) => payload);
   async function createStaff(username, role) {
     const account = await create('users', { username, name: username, email: username + '@example.test', password, passwordConfirm: password, role });
     return { id: account.id, username, token: (await login(username)).token };
@@ -114,7 +118,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const chooser = await createStaff('testchooser', 'chooser');
   const otherChooser = await createStaff('otherchooser', 'chooser');
   let sequence = 0;
-  async function register(pkg, addOns = []) {
+  async function register(pkg, addOns = [], expected = 200) {
     const studentId = 'WF-' + ++sequence;
     const form = new FormData();
     for (const [key, value] of Object.entries({
@@ -124,16 +128,17 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       status: 'shooting', paid_amount: '1000',
     })) form.set(key, value);
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');
-    const { payload } = await send(records('registrations'), { method: 'POST', body: form });
+    const { payload } = await send(records('registrations'), { method: 'POST', body: form, status: expected });
+    if (expected !== 200) return payload;
     assert.equal(payload.status, 'pending_payment');
     assert.equal(payload.paid_amount, 0);
     return payload;
   }
-  async function pay(student, amount, type = 'full') {
-    await create('payments', {
+  async function pay(student, amount, type = 'full', status = 200) {
+    await send(records('payments'), { token: cashier, method: 'POST', status, body: {
       registration: student.id, amount, cashier_name: 'Test cashier', payment_type: type,
-      payment_method: 'cash', cash_tendered: amount, receipt_no: 'RECEIPT-' + student.id,
-    }, cashier);
+      payment_method: 'cash', cash_tendered: amount, receipt_no: `RECEIPT-${student.id}-${type}`,
+    } });
   }
   const contest = (student, actor, action, status = 200, body) => send(`${api}/makeup/${student.id}/${action}`, {
     method: 'POST', token: actor.token || actor, status, body: { version: '0', ...body },
@@ -153,6 +158,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.match(legacy.makeup_service, /makeup/i);
   assert.equal(legacy.balance, 500);
   assert.equal(legacy.status, 'done_shooting');
+  const builtInAddOn = (await send(records('add_ons'))).payload.items.find((item) => item.code === 'ADD-HAIRMAKEUP');
+  assert.equal(builtInAddOn.requires_mua, true);
   await registrations(legacy, admin, { family_name: 'Corrected Name' });
   assert.equal((await send(`${api}/photo-folder/${legacyId}`, { method: 'POST', token: photographer })).payload.path, legacyPath);
   await registrations(legacy, cashier, { status: 'released', framing_status: 'released' }, 400);
@@ -203,10 +210,18 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   for (const count of [2, 5, 10]) {
     const student = await register(count === 5 ? standard : prepared, count === 5 ? [{ id: makeup.id }] : []);
     await pay(student, count === 5 ? 550 : 500, 'initial');
+    if (count === 2) {
+      const update = await Promise.race([
+        readEvent('registrations/*', ({ record }) => record.id === student.id && record.status === 'paid'),
+        delay(4000, 'timeout', { ref: false }),
+      ]);
+      assert.equal(update.action, 'update', 'Confirmed payment notifies connected queue clients.');
+    }
     const waiting = await queue(artists[0]);
     assert.deepEqual(waiting.map((row) => row.id), [student.id]);
     assert.equal(waiting[0].state, 'waiting');
     assert.equal(waiting[0].version, 0);
+    assert.equal(waiting[0].services[0].source, count === 5 ? 'add_on' : 'package');
     await shoot(student, 'shooting', 400);
     const clients = artists.slice(0, count);
     const [results, correction] = await Promise.all([
@@ -377,4 +392,50 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       body: { version: collision.version, requestId: randomUUID(), selected: [collision.photos[1].id] } }),
   ]);
   assert.deepEqual(race.map(({ status }) => status).sort(), [200, 409]);
+
+  // Configuration is captured at registration and stays attached to the order.
+  await patchCatalog('packages', prepared, { name: 'Renamed portrait' });
+  await patchCatalog('add_ons', makeup, { name: 'Renamed studio upgrade' });
+  const both = await register(prepared, [{ id: makeup.id, requires_mua: false }]);
+  assert.equal(both.total_amount, 1100);
+  await pay(both, 550, 'initial');
+  await pay(both, 550, 'initial', 400);
+  await pay(both, 550, 'additional');
+  const waitingFor = async (student) => (await queue(artists[2])).filter((row) => row.id === student.id);
+  await patchCatalog('packages', prepared, { is_active: false });
+  await register(prepared, [], 400);
+  assert.equal((await waitingFor(both)).length, 1);
+  const beforeCatalogChange = (await waitingFor(both))[0];
+  assert.deepEqual(beforeCatalogChange.services.map(({ source, name }) => [source, name]),
+    [['package', 'Renamed portrait'], ['add_on', 'Renamed studio upgrade']]);
+  await patchCatalog('packages', prepared, { requires_mua: false, is_active: true });
+  await patchCatalog('add_ons', makeup, { requires_mua: false, name: 'Hair & Makeup', is_active: false });
+  assert.deepEqual((await waitingFor(both))[0].services, beforeCatalogChange.services);
+  await pay(unpaid, 1000);
+  assert.equal((await waitingFor(unpaid))[0].services[0].name, 'Package D');
+  const updated = await register(prepared);
+  await register(prepared, [{ id: makeup.id }], 400);
+  await patchCatalog('add_ons', makeup, { is_active: true });
+  const unflagged = await register(standard, [{ id: makeup.id, requires_mua: true }]);
+  await pay(unflagged, 1100);
+  assert.equal((await waitingFor(unflagged)).length, 0);
+  await pay(updated, 1000);
+  assert.equal((await waitingFor(updated)).length, 0);
+  const photoCount = () => send(api + '/queue-count').then(({ payload }) => payload.count);
+  const priorCount = await photoCount();
+  await registrations(updated, cashier, { mua_correction: 'required' }, 403);
+  await registrations(updated, admin, { mua_correction: 'required' });
+  assert.equal((await waitingFor(updated))[0].services[0].source, 'admin');
+  assert.equal(await photoCount(), priorCount - 1);
+  await shoot(updated, 'shooting', 400);
+  await registrations(updated, admin, { status: 'shooting' }, 400);
+  await contest(updated, artists[2], 'claim', 200, { version: '1' });
+  await registrations(updated, admin, { mua_correction: 'waived' }, 409);
+  await contest(updated, admin, 'release', 200, { artistId: artists[2].id, version: '1' });
+  await registrations(updated, admin, { mua_correction: 'waived' });
+  assert.equal((await waitingFor(updated)).length, 0);
+  assert.equal(await photoCount(), priorCount);
+  await shoot(updated, 'shooting');
+  await registrations(updated, admin, { mua_correction: 'required' }, 409);
+  assert.equal((await registrations(updated)).payload.paid_amount, 1000);
 });

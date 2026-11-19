@@ -13,13 +13,15 @@ import type {
 import { formatCurrency } from '../../../utils/formatters';
 import { getRegistrationAddOns, sumAddOnAmounts } from '../../../utils/registrationAddOns';
 
+export type RegistrationEdits = Partial<Registration> & { mua_correction?: 'required' | 'waived' };
+
 interface EditStudentModalProps {
   registration: Registration;
   organizations: Organization[];
   courses: Course[];
   packages: Package[];
   onClose: () => void;
-  onSave: (id: string, data: Partial<Registration>) => Promise<void>;
+  onSave: (id: string, data: RegistrationEdits) => Promise<void>;
 }
 
 export const EditStudentModal: React.FC<EditStudentModalProps> = ({
@@ -50,6 +52,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
     reg.photo_status || 'pending_shoot'
   );
   const [notes, setNotes] = useState(reg.notes || '');
+  const [muaCorrection, setMuaCorrection] = useState<NonNullable<RegistrationEdits['mua_correction']> | ''>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const addOns = getRegistrationAddOns(reg.add_ons);
@@ -57,6 +60,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const packageChanged = selectedPkg && packageId !== reg.package;
   const currentTotal = packageChanged ? selectedPkg.amount + sumAddOnAmounts(addOns) + (reg.other_fees || 0) : reg.total_amount;
   const currentBalance = packageChanged ? Math.max(0, currentTotal - (reg.paid_amount || 0)) : reg.balance;
+  const beforePhotography = ['pending_payment', 'paid'].includes(reg.status);
+  const canCorrectMua = beforePhotography && !reg.makeup_state;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,8 +84,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
         framing_status: framingStatus,
         photo_status: photoStatus,
         notes: notes.trim(),
+        mua_correction: canCorrectMua && muaCorrection ? muaCorrection : undefined,
       });
-      onClose();
     } finally {
       setIsSubmitting(false);
     }
@@ -285,6 +290,27 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+            {beforePhotography && (
+              <div className="space-y-1 border-t border-neutral-200 pt-2">
+                <p>Saved MUA requirement: {reg.makeup_service || 'No MUA required'}</p>
+                {canCorrectMua ? (
+                  <label className="block">
+                    <span className="font-black uppercase">Correct MUA requirement</span>
+                    <select
+                      value={muaCorrection}
+                      onChange={(e) => setMuaCorrection(e.target.value as typeof muaCorrection)}
+                      className="mt-1 w-full p-2 bg-[#F8F7F4] border border-[#0A0A0A]"
+                    >
+                      <option value="">No manual correction</option>
+                      <option value="required">Require makeup / grooming</option>
+                      <option value="waived">Waive makeup / grooming</option>
+                    </select>
+                  </label>
+                ) : reg.makeup_state !== 'completed' && (
+                  <p className="text-neutral-600">Release the active MUA assignment to correct its requirement.</p>
+                )}
               </div>
             )}
           </div>

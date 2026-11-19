@@ -3,7 +3,7 @@ import { Edit3, Trash2, Users, FileDown } from 'lucide-react';
 import type { Registration, Organization, Level, Course, Package } from '../../../types';
 import { formatCurrency, formatClientName } from '../../../utils/formatters';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
-import { EditStudentModal } from './EditStudentModal';
+import { EditStudentModal, type RegistrationEdits } from './EditStudentModal';
 import { generateSignedYellowFormPdf } from '../../../utils/generateSignedPdf';
 import { getRegistrationAddOns } from '../../../utils/registrationAddOns';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
@@ -61,7 +61,7 @@ interface AdminStudentsTabProps {
   levels: Level[];
   courses: Course[];
   packages: Package[];
-  onUpdateRegistration: (id: string, data: Partial<Registration>) => Promise<void>;
+  onUpdateRegistration: (id: string, data: RegistrationEdits) => Promise<void>;
   onDeleteRegistration: (id: string) => Promise<void>;
 }
 
@@ -351,6 +351,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
             try {
               await onUpdateRegistration(id, data);
               toast.success('Student record updated');
+              setEditingStudent(null);
             } catch (err: unknown) {
               toast.error(err instanceof Error ? err.message : 'Failed to update student');
             }

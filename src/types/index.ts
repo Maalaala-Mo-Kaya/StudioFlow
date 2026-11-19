@@ -82,6 +82,7 @@ export interface Package {
   description?: string;
   inclusions?: string[] | string;
   photo_selection_limit?: number;
+  requires_mua?: boolean;
   is_active?: boolean;
 }
 
@@ -90,6 +91,7 @@ export interface AddOn {
   code?: string;
   name: string;
   amount: number;
+  requires_mua?: boolean;
   is_active?: boolean;
 }
 
@@ -145,6 +147,8 @@ export interface Registration {
   notes?: string;
   framing_status?: FramingStatus;
   photo_status?: PhotoStatus;
+  makeup_service?: string;
+  makeup_state?: '' | 'claimed' | 'in_progress' | 'completed';
   claimed_by?: string;
   released_at?: string;
   created: string;
