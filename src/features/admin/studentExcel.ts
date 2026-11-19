@@ -1,5 +1,6 @@
 import { Workbook } from 'exceljs';
 import { formatCurrency } from '../../utils/formatters';
+import { downloadBlob } from '../../utils/downloadBlob';
 
 interface CatalogColumn {
   id: string;
@@ -166,10 +167,5 @@ export async function downloadStudentExcel(data: StudentExcelData) {
   const file = new Blob([new Uint8Array(bytes)], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
-  const url = URL.createObjectURL(file);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `StudioFlow-Overall-${studioDate.format(new Date())}.xlsx`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(file, `StudioFlow-Overall-${studioDate.format(new Date())}.xlsx`);
 }

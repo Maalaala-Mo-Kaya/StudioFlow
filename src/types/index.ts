@@ -74,6 +74,12 @@ export interface SchoolCourse {
   expand?: { course_id?: Course };
 }
 
+export interface MuaServiceType {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
 export interface Package {
   id: string;
   code: string;
@@ -83,6 +89,7 @@ export interface Package {
   inclusions?: string[] | string;
   photo_selection_limit?: number;
   requires_mua?: boolean;
+  mua_service_types?: string[];
   is_active?: boolean;
 }
 
@@ -92,6 +99,7 @@ export interface AddOn {
   name: string;
   amount: number;
   requires_mua?: boolean;
+  mua_service_types?: string[];
   is_active?: boolean;
 }
 

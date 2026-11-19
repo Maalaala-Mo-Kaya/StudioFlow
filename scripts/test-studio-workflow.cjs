@@ -7,6 +7,7 @@ const { createServer } = require('node:net');
 const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
+const { runInNewContext } = require('node:vm');
 const { test } = require('node:test');
 const { setTimeout: delay } = require('node:timers/promises');
 
@@ -164,26 +165,28 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.equal((await send(`${api}/photo-folder/${legacyId}`, { method: 'POST', token: photographer })).payload.path, legacyPath);
   await registrations(legacy, cashier, { status: 'released', framing_status: 'released' }, 400);
 
-  const stream = await fetch(host + '/api/realtime', { signal: realtime.signal });
-  const reader = stream.body.getReader();
-  let pendingEvents = '';
-  async function readEvent(name, matches = () => true) {
-    while (true) {
-      const boundary = pendingEvents.indexOf('\n\n');
-      if (boundary < 0) {
-        const { value, done } = await reader.read();
-        if (done) throw new Error('Realtime stream closed.');
-        pendingEvents += Buffer.from(value).toString();
-        continue;
+  function readRealtime(stream) {
+    const reader = stream.body.getReader();
+    let pendingEvents = '';
+    return async function readEvent(name, matches = () => true) {
+      while (true) {
+        const boundary = pendingEvents.indexOf('\n\n');
+        if (boundary < 0) {
+          const { value, done } = await reader.read();
+          if (done) throw new Error('Realtime stream closed.');
+          pendingEvents += Buffer.from(value).toString();
+          continue;
+        }
+        const event = pendingEvents.slice(0, boundary);
+        pendingEvents = pendingEvents.slice(boundary + 2);
+        if (event.includes('event:' + name) || event.includes('event: ' + name)) {
+          const payload = JSON.parse(event.split('\n').find((line) => line.startsWith('data:')).slice(5));
+          if (matches(payload)) return payload;
+        }
       }
-      const event = pendingEvents.slice(0, boundary);
-      pendingEvents = pendingEvents.slice(boundary + 2);
-      if (event.includes('event:' + name) || event.includes('event: ' + name)) {
-        const payload = JSON.parse(event.split('\n').find((line) => line.startsWith('data:')).slice(5));
-        if (matches(payload)) return payload;
-      }
-    }
+    };
   }
+  const readEvent = readRealtime(await fetch(host + '/api/realtime', { signal: realtime.signal }));
   const connect = await readEvent('PB_CONNECT');
   await send('/api/realtime', { method: 'POST', token: photographer, status: 204,
     body: { clientId: connect.clientId, subscriptions: ['studioflow-workflow', 'registrations/*'] } });
@@ -438,4 +441,112 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await shoot(updated, 'shooting');
   await registrations(updated, admin, { mua_correction: 'required' }, 409);
   assert.equal((await registrations(updated)).payload.paid_amount, 1000);
+
+  const { payload: types } = await send(api + '/mua-service-types', { token: admin });
+  const makeupType = types.find((type) => type.name === 'Makeup');
+  const groomingType = types.find((type) => type.name === 'Grooming');
+  const hairType = await create('mua_service_types', { name: 'Hair Styling', is_active: true });
+  const report = (date = '') => send(api + '/mua-performance?date=' + date, { token: admin }).then(({ payload }) => payload);
+  await send(api + '/mua-performance', { token: artists[2].token, status: 403 });
+  await send(api + '/mua-performance?date=2026-02-30', { token: admin, status: 400 });
+  const performer = await createStaff('reportartist', 'mua');
+  const originalReport = await report();
+  assert.equal(originalReport.rows.find((row) => row.id === performer.id).totalClients, 0);
+  assert.ok(originalReport.columns.some((column) => column.id === hairType.id));
+  assert.ok(originalReport.rows.every((row) => !row.details.some((detail) => detail.jobId === legacyId)));
+
+  const multiPackage = await create('packages', {
+    code: 'MULTI', name: 'Premium Portrait', amount: 1000, is_active: true, requires_mua: true,
+    mua_service_types: [makeupType.id, groomingType.id, hairType.id],
+  });
+  const makeupPackage = await create('packages', {
+    code: 'SECOND', name: 'Standard Portrait', amount: 1000, is_active: true, requires_mua: true,
+    mua_service_types: [makeupType.id],
+  });
+  const duplicateMakeup = await create('add_ons', {
+    code: 'TOUCH', name: 'Touch up', amount: 100, is_active: true, requires_mua: true,
+    mua_service_types: [makeupType.id],
+  });
+  const multi = await register(multiPackage, [{ id: duplicateMakeup.id }]);
+  await pay(multi, 1100);
+  await contest(multi, performer, 'claim');
+  await contest(multi, performer, 'start');
+  assert.equal((await report()).rows.find((row) => row.id === performer.id).totalClients, 0);
+  const dashboard = new AbortController();
+  t.after(() => dashboard.abort());
+  const readDashboard = readRealtime(await fetch(host + '/api/realtime', { signal: dashboard.signal }));
+  const dashboardClient = await readDashboard('PB_CONNECT');
+  await send('/api/realtime', { method: 'POST', token: admin, status: 204,
+    body: { clientId: dashboardClient.clientId, subscriptions: ['studioflow-workflow'] } });
+  await Promise.all([contest(multi, performer, 'complete'), contest(multi, performer, 'complete')]);
+  const reportUpdate = await Promise.race([readDashboard('studioflow-workflow'), delay(4000, 'timeout', { ref: false })]);
+  assert.deepEqual(reportUpdate, {}, 'Completion invalidates the report for a separate connected admin.');
+  dashboard.abort();
+  const second = await register(makeupPackage);
+  await pay(second, 1000);
+  await contest(second, performer, 'claim');
+  const onBehalf = { onBehalf: true, artistId: performer.id };
+  await contest(second, admin, 'start', 409, { ...onBehalf, artistId: artists[2].id });
+  await contest(second, admin, 'start', 200, onBehalf);
+  await contest(second, admin, 'complete', 200, onBehalf);
+  await contest(second, admin, 'complete', 200, onBehalf);
+
+  const daily = await report();
+  const performance = daily.rows.find((row) => row.id === performer.id);
+  assert.equal(performance.totalClients, 2);
+  assert.equal(daily.totalClients, originalReport.totalClients + 2);
+  assert.deepEqual(performance.counts, { [makeupType.id]: 2, [groomingType.id]: 1, [hairType.id]: 1 });
+  const makeupDetail = performance.details.find((detail) => detail.jobId === multi.id && detail.serviceId === makeupType.id);
+  assert.equal(makeupDetail.actorId, performer.id);
+  assert.deepEqual(makeupDetail.sources.map(({ name }) => name), ['Premium Portrait', 'Touch up']);
+  const adminDetail = performance.details.find((detail) => detail.jobId === second.id);
+  assert.equal(adminDetail.actorRole, 'admin');
+  assert.notEqual(adminDetail.actorId, performer.id);
+  assert.equal(adminDetail.artistName, performer.username);
+
+  // Place a real completion produced above on an earlier day in the isolated
+  // fixture, using UTC timestamps on either side of Manila midnight.
+  const reportingModule = { exports: {} };
+  runInNewContext(await readFile(join(repo, 'pb_hooks', 'studio_mua_reporting.js'), 'utf8'),
+    { module: reportingModule, require: () => ({}), __hooks: '' });
+  const { studioDate } = reportingModule.exports;
+  assert.equal(studioDate('2026-10-01T15:59:59.999Z'), '2026-10-01');
+  assert.equal(studioDate('2026-10-01T16:00:00.000Z'), '2026-10-02');
+  const historyDb = new DatabaseSync(join(data, 'data.db'));
+  try {
+    historyDb.prepare('UPDATE mua_completions SET local_date = ?, completed_at = ? WHERE job_id = ?')
+      .run('2026-10-02', '2026-10-01 16:00:00.000Z', multi.id);
+  } finally { historyDb.close(); }
+  const booked = await register(makeupPackage);
+  await patchCatalog('mua_service_types', makeupType, { name: 'Premium Makeup', is_active: false });
+  await patchCatalog('packages', multiPackage, { name: 'Renamed Portrait', is_active: false });
+  await patchCatalog('users', performer, { name: 'Renamed Artist', disabled: true });
+  const historical = await report('2026-10-02');
+  assert.equal(historical.totalClients, 1);
+  assert.equal(historical.rows[0].name, performer.username);
+  assert.deepEqual(historical.columns.find((column) => column.id === makeupType.id), { id: makeupType.id, name: 'Makeup' });
+  assert.equal(historical.rows[0].details.find((detail) => detail.serviceId === makeupType.id).sources[0].name, 'Premium Portrait');
+  assert.equal((await report()).rows.find((row) => row.id === performer.id).totalClients, 1);
+  const afterDeactivation = await register(makeupPackage);
+  assert.equal(afterDeactivation.makeup_service, '');
+  await pay(booked, 1000);
+  await contest(booked, artists[3], 'claim');
+  await contest(booked, artists[3], 'start');
+  await contest(booked, artists[3], 'complete');
+  const bookedDetail = (await report()).rows.find((row) => row.id === artists[3].id).details.find((detail) => detail.jobId === booked.id);
+  assert.equal(bookedDetail.serviceId, makeupType.id);
+  assert.equal(bookedDetail.serviceName, 'Premium Makeup');
+
+  // Both export formats use the same row matrix as the dashboard.
+  const { muaReportTable } = await import('../src/features/admin/muaPerformance.ts');
+  const { buildMuaWorkbook, muaReportCsv } = await import('../src/features/admin/muaPerformanceExport.ts');
+  const matrix = muaReportTable(historical);
+  const expected = [matrix.headers, ...matrix.rows, matrix.total];
+  assert.deepEqual(muaReportCsv(historical).split('\r\n').map((line) => line.split(',').map((cell) =>
+    cell.startsWith('"') ? JSON.parse(cell) : Number(cell))), expected);
+  const workbook = await buildMuaWorkbook(historical);
+  const Excel = require('exceljs');
+  const readback = new Excel.Workbook();
+  await readback.xlsx.load(await workbook.xlsx.writeBuffer());
+  assert.deepEqual(readback.worksheets[0].getRows(1, expected.length).map((row) => row.values.slice(1)), expected);
 });

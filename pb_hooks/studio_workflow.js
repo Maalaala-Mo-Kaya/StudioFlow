@@ -37,9 +37,13 @@ function purchasedServices(app, registration, before) {
     && (service.source !== "add_on" || selected.has(service.id)));
   const addService = (collection, source, id) => {
     const item = catalogItem(app, collection, id);
-    if (item?.getBool("requires_mua")) {
-      saved.push({ source, id, name: item.getString("name") });
-    }
+    if (!item?.getBool("requires_mua")) return;
+    const categoryIds = item.getStringSlice("mua_service_types");
+    const types = categoryIds.map((categoryId) => catalogItem(app, "mua_service_types", categoryId))
+      .filter((category) => category?.getBool("is_active"))
+      .map((category) => ({ id: category.id, name: category.getString("name") }));
+    if (categoryIds.length && !types.length) return;
+    saved.push({ source, id, name: item.getString("name"), ...(types.length ? { types } : {}) });
   };
   if (changedPackage) addService("packages", "package", packageId);
   for (const id of selected) {

@@ -125,7 +125,9 @@ StudioFlow includes pre-built batch scripts to simplify studio operations:
 | **Photo Chooser** | `/#/chooser` | `chooser`, `admin` | Search completed shoots, preview photos, confirm selections, and reopen a selection to revise it. |
 | **Studio Admin** | `/#/admin` | `admin` | Manage staff and catalog settings. Monitor makeup assignments and photo selection under **Makeup & Photo Selection**. |
 
-Create the two new staff accounts in **Admin → Staff Accounts**. In **Packages & Add-ons**, enable **Require makeup / grooming** on any package or add-on that should send new registrations to the MUA queue after confirmed payment. Catalog changes apply to new orders. To correct an existing order before photography, use **Students Directory → Edit Student Record → Correct MUA requirement**. Release any active MUA assignment before correcting the order. Set **Photo selection limit** to the allowed number of photographs. A value of `0` allows any number.
+Create the two new staff accounts in **Admin → Staff Accounts**. In **Packages & Add-ons**, enable **Require makeup / grooming** on any package or add-on that should send new registrations to the MUA queue after confirmed payment. Assign one or more categories from **MUA Service Types**. Catalog changes apply to new orders. To correct an existing order before photography, use **Students Directory → Edit Student Record → Correct MUA requirement**. Release any active MUA assignment before correcting the order. Set **Photo selection limit** to the allowed number of photographs. A value of `0` allows any number.
+
+**Analytics & Overview → MUA Performance Analytics** shows the studio's day in Asia/Manila. Select a date to view history, select an artist to inspect completions, or export the daily summary as CSV or Excel. Each job order counts once per completed service type and once toward the total client count. Assignments completed after this feature is installed appear as **Uncategorized** if the order has no saved service type. Older completion records stay in the original queue history.
 
 ---
 

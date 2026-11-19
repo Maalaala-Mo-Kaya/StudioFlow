@@ -12,7 +12,7 @@ type MakeupState = 'waiting' | 'claimed' | 'in_progress' | 'completed';
 type Action = 'claim' | 'start' | 'complete' | 'release';
 interface MakeupAssignment extends StationStudent {
   service: string;
-  services?: { source: keyof typeof serviceSource; name: string }[];
+  services?: { source: keyof typeof serviceSource; name: string; types?: { id: string; name: string }[] }[];
   state: MakeupState;
   version: number;
   artistId: string;
@@ -40,6 +40,7 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
   const [conflict, setConflict] = useState(false);
   const [unavailable, setUnavailable] = useState<{ id: string; version: number }>();
   const [release, setRelease] = useState<MakeupAssignment>();
+  const [confirmCompletion, setConfirmCompletion] = useState<MakeupAssignment>();
   const admin = user?.role === 'admin';
   const waiting = data?.filter((row) => row.state === 'waiting' &&
     !(unavailable?.id === row.id && unavailable.version === row.version)) ?? [];
@@ -54,6 +55,7 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
         body: {
           version: row.version == null ? undefined : String(row.version),
           ...(action === 'release' ? { artistId: row.artistId } : {}),
+          ...(admin && (action === 'start' || action === 'complete') ? { onBehalf: true, artistId: row.artistId } : {}),
         },
       });
       if (action === 'complete') toast.success('Makeup or grooming completed. The student is in the photographer queue.');
@@ -87,9 +89,10 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
                 <p className="text-xs font-black uppercase">MUA Service</p>
                 {row.services?.length ? (
                   <ul className="space-y-1">
-                    {row.services.map(({ name, source }, index) => (
+                    {row.services.map(({ name, source, types }, index) => (
                       <li key={index} className="text-sm break-words">
-                        {name} <span className="text-xs text-neutral-600">({serviceSource[source]})</span>
+                        {types?.length ? types.map((type) => type.name).join(', ') + ' · ' : ''}{name}
+                        {' '}<span className="text-xs text-neutral-600">({serviceSource[source]})</span>
                       </li>
                     ))}
                   </ul>
@@ -108,7 +111,13 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
                 </button>
               )}
               {admin && (row.state === 'claimed' || row.state === 'in_progress') && (
-                <button type="button" className={stationButton} disabled={!!working} onClick={() => setRelease(row)}>Release assignment</button>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={stationButton} disabled={!!working || !row.eligible}
+                    onClick={() => row.state === 'claimed' ? void update(row, 'start') : setConfirmCompletion(row)}>
+                    {row.state === 'claimed' ? 'Start on behalf of MUA' : 'Record completion'}
+                  </button>
+                  <button type="button" className={stationButton} disabled={!!working} onClick={() => setRelease(row)}>Release assignment</button>
+                </div>
               )}
             </article>
           ))}
@@ -142,6 +151,14 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
         confirmText="Release assignment"
         onConfirm={() => { if (release) void update(release, 'release'); }}
         onClose={() => setRelease(undefined)}
+      />
+      <ConfirmModal
+        isOpen={!!confirmCompletion}
+        title="Confirm performing MUA"
+        message={`Confirm that ${confirmCompletion?.artistName} completed all required services for ${confirmCompletion?.name}. Your account will be recorded as the person confirming completion.`}
+        confirmText="Confirm completion"
+        onConfirm={async () => { if (confirmCompletion) await update(confirmCompletion, 'complete'); }}
+        onClose={() => setConfirmCompletion(undefined)}
       />
     </StationLayout>
   );

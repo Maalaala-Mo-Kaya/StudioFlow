@@ -15,6 +15,7 @@ import { formatCurrency, formatClientName } from '../../../utils/formatters';
 import { PrintReceiptModal } from '../../cashier/components/PrintReceiptModal';
 import { DataTable } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
+import { MuaPerformancePanel } from './MuaPerformancePanel';
 
 const transactionDate = new Intl.DateTimeFormat('en-PH', {
   timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short',
@@ -365,6 +366,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           </div>
         </div>
       </div>
+
+      <MuaPerformancePanel />
 
       {/* Financial Ledger & Audit Trail */}
       <DataTable

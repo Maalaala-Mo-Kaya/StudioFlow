@@ -36,16 +36,17 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
   const workflow = require(__hooks + "/studio_workflow.js");
   const action = e.request.pathValue("action");
   if (!["claim", "start", "complete", "release"].includes(action)) throw new NotFoundError();
-  const input = new DynamicModel({ artistId: "", version: "" });
+  const input = new DynamicModel({ artistId: "", version: "", onBehalf: false });
   e.bindBody(input);
   // Older MUA tabs omit the version. Treat those requests as version zero so
   // they can never act on a new assignment after an admin release.
-  const requestedVersion = input.version || (action === "release" ? "" : "0");
+  const requestedVersion = input.version || (action === "release" || input.onBehalf ? "" : "0");
   if (!/^\d+$/.test(requestedVersion)) {
     throw new BadRequestError("Reload the makeup queue page before updating this assignment.");
   }
   const stateAfter = workflow.withRegistration(e.app, e.request.pathValue("id"), (tx, record) => {
-    const account = workflow.staff(tx, e.auth, action === "release" ? ["admin"] : ["mua"]);
+    const onBehalf = input.onBehalf && (action === "start" || action === "complete");
+    const account = workflow.staff(tx, e.auth, action === "release" || onBehalf ? ["admin"] : ["mua"]);
     const state = record.getString("makeup_state");
     const artistId = record.getString("makeup_artist");
     const version = record.getInt("makeup_version");
@@ -68,7 +69,10 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
         reason: new ValidationError("already_assigned", "Another makeup artist claimed this student."),
       });
     }
-    if (action !== "claim" && artistId !== account.id) {
+    if (onBehalf && (!input.artistId || input.artistId !== artistId)) {
+      throw new ApiError(409, "Confirm the currently assigned MUA before recording this action.");
+    }
+    if (!onBehalf && action !== "claim" && artistId !== account.id) {
       throw new ForbiddenError("Only the assigned makeup artist can update this student.");
     }
     if (state === "completed" && action === "complete") return state;
@@ -86,8 +90,14 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
       record.set("makeup_state", "in_progress");
     } else {
       if (state !== "in_progress") throw new ApiError(409, "Start makeup or grooming before marking it complete.");
+      const artist = onBehalf ? workflow.catalogItem(tx, "users", artistId) : account;
+      if (!artist || artist.getString("role") !== "mua") {
+        throw new ApiError(409, "The performing MUA could not be verified.");
+      }
+      const completedAt = new Date().toISOString();
+      require(__hooks + "/studio_mua_reporting.js").logCompletion(tx, record, artist, account, completedAt);
       record.set("makeup_state", "completed");
-      record.set("makeup_completed_at", new Date().toISOString());
+      record.set("makeup_completed_at", completedAt);
     }
     tx.save(record);
     return record.getString("makeup_state");
@@ -98,12 +108,12 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
 onRecordAfterCreateSuccess((e) => {
   e.next();
   require(__hooks + "/studio_station_events.js").notify(e.app);
-}, "registrations");
+}, "registrations", "mua_service_types");
 
 onRecordAfterUpdateSuccess((e) => {
   e.next();
   require(__hooks + "/studio_station_events.js").notify(e.app);
-}, "registrations", "packages", "users");
+}, "registrations", "packages", "add_ons", "users", "mua_service_types");
 
 onRecordAfterDeleteSuccess((e) => {
   e.next();

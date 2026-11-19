@@ -42,6 +42,7 @@ export function useAdminData() {
   const [newPkgAmount, setNewPkgAmount] = useState<number>(1000);
   const [newPkgPhotoLimit, setNewPkgPhotoLimit] = useState(0);
   const [newPkgRequiresMua, setNewPkgRequiresMua] = useState(false);
+  const [newPkgMuaTypes, setNewPkgMuaTypes] = useState<string[]>([]);
   const [newPkgInclusions, setNewPkgInclusions] = useState('');
 
   // Roster CSV Upload State
@@ -166,6 +167,7 @@ export function useAdminData() {
         amount: Number(newPkgAmount),
         photo_selection_limit: newPkgPhotoLimit,
         requires_mua: newPkgRequiresMua,
+        mua_service_types: newPkgMuaTypes,
         inclusions: JSON.stringify(inclusions),
         is_active: true,
       });
@@ -175,6 +177,7 @@ export function useAdminData() {
       setNewPkgInclusions('');
       setNewPkgPhotoLimit(0);
       setNewPkgRequiresMua(false);
+      setNewPkgMuaTypes([]);
       loadAllData();
     } catch (err) {
       console.error('Failed to add package:', err);
@@ -375,7 +378,7 @@ export function useAdminData() {
   // --- Package & Add-on Mutations (T020) ---
   const handleUpdatePackage = async (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean }
+    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; mua_service_types: string[] }
   ) => {
     try {
       await pb.collection('packages').update(id, {
@@ -385,6 +388,7 @@ export function useAdminData() {
         inclusions: JSON.stringify(data.inclusions),
         photo_selection_limit: data.photo_selection_limit,
         requires_mua: data.requires_mua,
+        mua_service_types: data.mua_service_types,
       });
       loadAllData();
     } catch (err) {
@@ -415,7 +419,7 @@ export function useAdminData() {
     }
   };
 
-  const handleAddAddOn = async (name: string, code: string, amount: number, requiresMua: boolean) => {
+  const handleAddAddOn = async (name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[]) => {
     if (!name.trim()) return;
     try {
       await pb.collection('add_ons').create({
@@ -423,6 +427,7 @@ export function useAdminData() {
         code: code.trim().toUpperCase(),
         amount: Number(amount),
         requires_mua: requiresMua,
+        mua_service_types: serviceTypes,
         is_active: true,
       });
       loadAllData();
@@ -437,7 +442,8 @@ export function useAdminData() {
     name: string,
     code: string,
     amount: number,
-    requiresMua: boolean
+    requiresMua: boolean,
+    serviceTypes: string[]
   ) => {
     try {
       await pb.collection('add_ons').update(id, {
@@ -445,6 +451,7 @@ export function useAdminData() {
         code: code.trim().toUpperCase(),
         amount: Number(amount),
         requires_mua: requiresMua,
+        mua_service_types: serviceTypes,
       });
       loadAllData();
     } catch (err) {
@@ -582,6 +589,8 @@ export function useAdminData() {
     setNewPkgPhotoLimit,
     newPkgRequiresMua,
     setNewPkgRequiresMua,
+    newPkgMuaTypes,
+    setNewPkgMuaTypes,
     setNewPkgAmount,
     newPkgInclusions,
     setNewPkgInclusions,

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Plus, Edit3, Trash2, Sparkles } from 'lucide-react';
-import type { Package, AddOn } from '../../../types';
+import type { Package, AddOn, MuaServiceType } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
 import { PackageInclusionsEditor } from './PackageInclusionsEditor';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
+import { useWorkflowData } from '../../../hooks/useWorkflowData';
+import { MuaServiceCatalog } from './MuaServiceCatalog';
 
 interface AdminPackagesTabProps {
   packages: Package[];
@@ -19,17 +21,19 @@ interface AdminPackagesTabProps {
   onNewPkgPhotoLimitChange: (val: number) => void;
   newPkgRequiresMua: boolean;
   onNewPkgRequiresMuaChange: (val: boolean) => void;
+  newPkgMuaTypes: string[];
+  onNewPkgMuaTypesChange: (ids: string[]) => void;
   newPkgInclusions: string;
   onNewPkgInclusionsChange: (val: string) => void;
   onAddPackage: (e: React.FormEvent) => void;
   onUpdatePackage: (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean }
+    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; mua_service_types: string[] }
   ) => Promise<void>;
   onTogglePackageActive: (id: string, current: boolean) => Promise<void>;
   onDeletePackage: (id: string) => Promise<void>;
-  onAddAddOn: (name: string, code: string, amount: number, requiresMua: boolean) => Promise<void>;
-  onUpdateAddOn: (id: string, name: string, code: string, amount: number, requiresMua: boolean) => Promise<void>;
+  onAddAddOn: (name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[]) => Promise<void>;
+  onUpdateAddOn: (id: string, name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[]) => Promise<void>;
   onToggleAddOnActive: (id: string, current: boolean) => Promise<void>;
   onDeleteAddOn: (id: string) => Promise<void>;
 }
@@ -47,6 +51,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   onNewPkgPhotoLimitChange,
   newPkgRequiresMua,
   onNewPkgRequiresMuaChange,
+  newPkgMuaTypes,
+  onNewPkgMuaTypesChange,
   newPkgInclusions,
   onNewPkgInclusionsChange,
   onAddPackage,
@@ -59,6 +65,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   onDeleteAddOn,
 }) => {
   const { toast } = useToast();
+  const { data: serviceTypes, error: catalogError, refresh } = useWorkflowData<MuaServiceType[]>('/mua-service-types');
 
   // Editing Package State
   const [editingPkgId, setEditingPkgId] = useState<string | null>(null);
@@ -67,6 +74,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [editPkgAmount, setEditPkgAmount] = useState(0);
   const [editPkgPhotoLimit, setEditPkgPhotoLimit] = useState(0);
   const [editPkgRequiresMua, setEditPkgRequiresMua] = useState(false);
+  const [editPkgMuaTypes, setEditPkgMuaTypes] = useState<string[]>([]);
   const [editPkgInclusionsArray, setEditPkgInclusionsArray] = useState<string[]>([]);
 
   // Add-on Form State
@@ -74,6 +82,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [newAddonCode, setNewAddonCode] = useState('');
   const [newAddonAmount, setNewAddonAmount] = useState(250);
   const [newAddonRequiresMua, setNewAddonRequiresMua] = useState(false);
+  const [newAddonMuaTypes, setNewAddonMuaTypes] = useState<string[]>([]);
 
   // Editing Add-on State
   const [editingAddonId, setEditingAddonId] = useState<string | null>(null);
@@ -81,6 +90,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [editAddonCode, setEditAddonCode] = useState('');
   const [editAddonAmount, setEditAddonAmount] = useState(0);
   const [editAddonRequiresMua, setEditAddonRequiresMua] = useState(false);
+  const [editAddonMuaTypes, setEditAddonMuaTypes] = useState<string[]>([]);
 
   // Confirmation Modal State
   const [confirmModalState, setConfirmModalState] = useState<{
@@ -102,6 +112,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     setEditPkgAmount(pkg.amount);
     setEditPkgPhotoLimit(pkg.photo_selection_limit ?? 0);
     setEditPkgRequiresMua(!!pkg.requires_mua);
+    setEditPkgMuaTypes(pkg.mua_service_types ?? []);
     setEditPkgInclusionsArray(parsePackageInclusions(pkg.inclusions));
   };
 
@@ -115,6 +126,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
         inclusions: editPkgInclusionsArray,
         photo_selection_limit: editPkgPhotoLimit,
         requires_mua: editPkgRequiresMua,
+        mua_service_types: editPkgMuaTypes,
       });
       toast.success(`Package "${editPkgName}" updated successfully`);
       setEditingPkgId(null);
@@ -129,12 +141,13 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     setEditAddonCode(add.code || '');
     setEditAddonAmount(add.amount);
     setEditAddonRequiresMua(!!add.requires_mua);
+    setEditAddonMuaTypes(add.mua_service_types ?? []);
   };
 
   const handleSaveAddonEdit = async () => {
     if (!editingAddonId) return;
     try {
-      await onUpdateAddOn(editingAddonId, editAddonName, editAddonCode, editAddonAmount, editAddonRequiresMua);
+      await onUpdateAddOn(editingAddonId, editAddonName, editAddonCode, editAddonAmount, editAddonRequiresMua, editAddonMuaTypes);
       toast.success(`Add-on "${editAddonName}" updated successfully`);
       setEditingAddonId(null);
     } catch (err: unknown) {
@@ -146,12 +159,13 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     e.preventDefault();
     if (!newAddonName.trim()) return;
     try {
-      await onAddAddOn(newAddonName, newAddonCode, newAddonAmount, newAddonRequiresMua);
+      await onAddAddOn(newAddonName, newAddonCode, newAddonAmount, newAddonRequiresMua, newAddonMuaTypes);
       toast.success(`Add-on "${newAddonName}" added to catalog`);
       setNewAddonName('');
       setNewAddonCode('');
       setNewAddonAmount(250);
       setNewAddonRequiresMua(false);
+      setNewAddonMuaTypes([]);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to create add-on');
     }
@@ -247,7 +261,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
             </div>
 
             <PhotoLimitInput value={newPkgPhotoLimit} onChange={onNewPkgPhotoLimitChange} />
-            <MuaRequirementInput checked={newPkgRequiresMua} onChange={onNewPkgRequiresMuaChange} />
+            <MuaRequirementInput checked={newPkgRequiresMua} onChange={onNewPkgRequiresMuaChange}
+              categories={serviceTypes} selected={newPkgMuaTypes} onSelect={onNewPkgMuaTypesChange} />
 
             {/* Dynamic Form List for Inclusions */}
             <PackageInclusionsEditor
@@ -331,7 +346,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                       </div>
 
                       <PhotoLimitInput value={editPkgPhotoLimit} onChange={setEditPkgPhotoLimit} />
-                      <MuaRequirementInput checked={editPkgRequiresMua} onChange={setEditPkgRequiresMua} />
+                      <MuaRequirementInput checked={editPkgRequiresMua} onChange={setEditPkgRequiresMua}
+                        categories={serviceTypes} selected={editPkgMuaTypes} onSelect={setEditPkgMuaTypes} />
 
                       {/* Repeatable Inclusions Editor in Edit Mode */}
                       <PackageInclusionsEditor
@@ -493,7 +509,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
             </button>
           </div>
           <div className="sm:col-span-4">
-            <MuaRequirementInput checked={newAddonRequiresMua} onChange={setNewAddonRequiresMua} />
+            <MuaRequirementInput checked={newAddonRequiresMua} onChange={setNewAddonRequiresMua}
+              categories={serviceTypes} selected={newAddonMuaTypes} onSelect={setNewAddonMuaTypes} />
           </div>
         </form>
 
@@ -545,7 +562,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                       />
                     </div>
                   </div>
-                  <MuaRequirementInput checked={editAddonRequiresMua} onChange={setEditAddonRequiresMua} />
+                  <MuaRequirementInput checked={editAddonRequiresMua} onChange={setEditAddonRequiresMua}
+                    categories={serviceTypes} selected={editAddonMuaTypes} onSelect={setEditAddonMuaTypes} />
                   <div className="flex gap-2 justify-end pt-1">
                     <button
                       type="button"
@@ -611,6 +629,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
         </div>
       </div>
 
+      <MuaServiceCatalog categories={serviceTypes} error={catalogError} refresh={refresh} />
+
       {/* Reusable Confirm Modal */}
       <ConfirmModal
         isOpen={confirmModalState.isOpen}
@@ -635,7 +655,13 @@ function PhotoLimitInput({ value, onChange }: { value: number; onChange: (value:
   );
 }
 
-function MuaRequirementInput({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+function MuaRequirementInput({ checked, onChange, categories, selected, onSelect }: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  categories?: MuaServiceType[];
+  selected: string[];
+  onSelect: (ids: string[]) => void;
+}) {
   return (
     <fieldset className="border border-neutral-400 bg-white px-3 py-2">
       <legend className="px-1 text-[10px] font-black uppercase">MUA Queue Requirement</legend>
@@ -645,6 +671,19 @@ function MuaRequirementInput({ checked, onChange }: { checked: boolean; onChange
         Require makeup / grooming
       </label>
       <p className="mt-1 text-[10px] text-neutral-600">Sends students to the MUA queue after confirmed payment.</p>
+      {checked && (
+        <fieldset className="mt-2 space-y-1 border-t border-neutral-200 pt-2">
+          <legend className="text-[10px] font-black uppercase">MUA service types</legend>
+          {categories?.filter(({ id, is_active }) => is_active || selected.includes(id)).map(({ id, name, is_active }) => (
+            <label key={id} className="flex items-center gap-2 text-xs">
+              <input type="checkbox" className="accent-[#C9A227]" checked={selected.includes(id)}
+                onChange={(event) => onSelect(event.target.checked ? [...selected, id] : selected.filter((key) => key !== id))} />
+              {name}{is_active ? '' : ' (inactive)'}
+            </label>
+          ))}
+          {!selected.length && <p className="text-[10px] text-neutral-600">Orders without a service type are reported as Uncategorized.</p>}
+        </fieldset>
+      )}
     </fieldset>
   );
 }

@@ -84,6 +84,8 @@ export const AdminPage: React.FC = () => {
               onNewPkgPhotoLimitChange={admin.setNewPkgPhotoLimit}
               newPkgRequiresMua={admin.newPkgRequiresMua}
               onNewPkgRequiresMuaChange={admin.setNewPkgRequiresMua}
+              newPkgMuaTypes={admin.newPkgMuaTypes}
+              onNewPkgMuaTypesChange={admin.setNewPkgMuaTypes}
               newPkgInclusions={admin.newPkgInclusions}
               onNewPkgInclusionsChange={admin.setNewPkgInclusions}
               onAddPackage={admin.handleAddPackage}
