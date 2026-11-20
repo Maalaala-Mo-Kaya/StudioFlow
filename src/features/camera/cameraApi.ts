@@ -16,7 +16,7 @@ export interface CameraStatus {
     jobOrder: string;
     name: string;
     school: string;
-    queueNumber: number;
+    queueNumber: number | null;
     /** Photos currently in the client's folder (null if it can't be read). */
     photoCount: number | null;
   };

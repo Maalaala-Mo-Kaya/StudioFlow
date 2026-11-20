@@ -6,7 +6,7 @@ onRecordCreateRequest((e) => {
     throw new ForbiddenError("This staff account cannot submit registrations.");
   }
   for (const [field, value] of Object.entries({
-    job_order_no: "", queue_number: 0, paid_amount: 0, balance: 0,
+    job_order_no: "", queue_number: 0, queue_issued_at: "", paid_amount: 0, balance: 0,
     status: "pending_payment", payment_status: "unpaid", framing_status: "",
     photo_status: "pending_shoot", claimed_by: "", released_at: "", prepared_by: "",
     makeup_state: "", makeup_artist: "", makeup_completed_at: "", makeup_version: 0,
@@ -63,6 +63,7 @@ onRecordUpdateRequest((e) => {
     if (!["required", "waived"].includes(correction)) throw new BadRequestError("Invalid MUA requirement correction.");
   }
   const fields = [
+    "job_order_no", "queue_number", "queue_issued_at",
     "makeup_service", "makeup_services", "makeup_state", "makeup_artist", "makeup_completed_at", "makeup_version", "shoot_completed",
     "photo_folder", "photo_folder_key", "photo_edit_until", "photo_revision",
     "photo_selection", "photo_pending", "photo_last_request",
@@ -96,7 +97,7 @@ onRecordUpdateRequest((e) => {
       }
       if (role === "cashier" && next !== "released") throw new ForbiddenError("Only deliverable release is available at this station.");
       if (role === "photographer" && current === "paid"
-        && (before.getFloat("paid_amount") <= 0 || (before.getString("makeup_service") && before.getString("makeup_state") !== "completed"))) {
+        && (!before.getInt("queue_number") || before.getFloat("paid_amount") <= 0 || (before.getString("makeup_service") && before.getString("makeup_state") !== "completed"))) {
         throw new BadRequestError("The student is still waiting for payment or makeup / grooming.");
       }
     }
@@ -129,6 +130,7 @@ onRecordUpdateRequest((e) => {
           if (state === "completed") throw new ApiError(409, "Makeup or grooming is already complete for this order.");
           workflow.saveMakeupServices(e.record, services);
           e.record.set("makeup_version", current.getInt("makeup_version") + 1);
+          require(__hooks + "/studio_numbering.js").handoffToPhotography(tx, e.record);
         }
       }
       return e.next();

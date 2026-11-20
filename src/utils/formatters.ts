@@ -1,4 +1,3 @@
-import { STUDIO_INFO } from '../constants/studio';
 import type { Registration } from '../types';
 
 export interface FormatCurrencyOptions {
@@ -42,16 +41,16 @@ export function formatCurrency(
 /**
  * Formats a daily queue number into a 3-digit zero-padded string (`#001`).
  */
-export function formatQueueNumber(queueNumber: number | undefined | null, fallback = 1): string {
-  return `#${String(queueNumber || fallback).padStart(3, '0')}`;
+export function formatQueueNumber(queueNumber?: number | null): string {
+  return queueNumber && queueNumber > 0 ? `#${String(queueNumber).padStart(3, '0')}` : '—';
 }
 
 /**
  * Formats a job order number with the classic receipt prefix (`№ 00001`).
  */
 export function formatJobOrderNo(jobOrderNo?: string | null): string {
-  if (!jobOrderNo) return `№ ${STUDIO_INFO.defaultJobOrderNo}`;
-  const trimmed = String(jobOrderNo).trim();
+  const trimmed = jobOrderNo?.trim();
+  if (!trimmed) return '—';
   const num = parseInt(trimmed, 10);
   if (!isNaN(num) && /^\d+$/.test(trimmed)) {
     return `№ ${String(num).padStart(5, '0')}`;

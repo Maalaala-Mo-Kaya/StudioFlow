@@ -48,7 +48,9 @@ export function CashierTable({
     {
       id: 'name', header: 'Client Name', sortable: true,
       accessor: (reg) => `${reg.family_name} ${reg.given_name}`,
-      cell: formatClientName,
+      cell: (reg) => <>{formatClientName(reg)}
+        {!reg.job_order_no && <span className="mt-0.5 block break-all font-mono text-[10px] normal-case text-neutral-500">Ref {reg.id}</span>}
+      </>,
       cellClassName: 'font-black uppercase text-sm',
     },
     {
@@ -147,14 +149,14 @@ export function CashierTable({
             </button>
           ) : null}
 
-          <button
+          {reg.job_order_no && <button
             type="button"
             onClick={() => onOpenPrint(reg)}
             title="Print Yellow Form / Receipt"
             className="btn-tactile min-h-[36px] px-3 py-1.5 bg-obsidian text-gold hover:bg-neutral-800 font-bold text-[11px] uppercase tracking-wider flex items-center gap-1.5 cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5" /> Print
-          </button>
+          </button>}
 
           {reg.status !== 'pending_payment' && reg.status !== 'released' && reg.status !== 'cancelled' && (
             <button

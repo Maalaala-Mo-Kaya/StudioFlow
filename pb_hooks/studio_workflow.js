@@ -1,5 +1,5 @@
 // Shared by the registration hooks, migration and staff APIs.
-const photoQueue = "(status = 'shooting' OR (status = 'paid' AND paid_amount > 0 AND (makeup_state = 'completed' OR (makeup_service = '' AND makeup_state = ''))))";
+const photoQueue = "(status = 'shooting' OR (status = 'paid' AND queue_number > 0 AND paid_amount > 0 AND (makeup_state = 'completed' OR (makeup_service = '' AND makeup_state = ''))))";
 const finishedShoot = ["done_shooting", "completed", "ready_for_pickup", "released"];
 const activeMakeup = ["claimed", "in_progress"];
 
@@ -22,6 +22,20 @@ function makeupServices(registration) {
   return service ? [{ source: "legacy", name: service }] : [];
 }
 
+function serviceTypes(app, item) {
+  return item.getStringSlice("mua_service_types")
+    .map((id) => catalogItem(app, "mua_service_types", id))
+    .filter((category) => category?.getBool("is_active"))
+    .map((category) => ({ id: category.id, name: category.getString("name") }));
+}
+
+function serviceRequirement(app, item, source) {
+  if (!item?.getBool("requires_mua") || (source === "add_on" && item.getString("revenue_category") === "studio")) return null;
+  const types = serviceTypes(app, item);
+  if (item.getStringSlice("mua_service_types").length && !types.length) return null;
+  return { source, id: item.id, name: item.getString("name"), ...(types.length ? { types } : {}) };
+}
+
 function purchasedServices(app, registration, before) {
   const services = before ? makeupServices(before) : [];
   const addOnIds = (record) => {
@@ -36,14 +50,8 @@ function purchasedServices(app, registration, before) {
     (service.source !== "package" || !changedPackage)
     && (service.source !== "add_on" || selected.has(service.id)));
   const addService = (collection, source, id) => {
-    const item = catalogItem(app, collection, id);
-    if (!item?.getBool("requires_mua")) return;
-    const categoryIds = item.getStringSlice("mua_service_types");
-    const types = categoryIds.map((categoryId) => catalogItem(app, "mua_service_types", categoryId))
-      .filter((category) => category?.getBool("is_active"))
-      .map((category) => ({ id: category.id, name: category.getString("name") }));
-    if (categoryIds.length && !types.length) return;
-    saved.push({ source, id, name: item.getString("name"), ...(types.length ? { types } : {}) });
+    const service = serviceRequirement(app, catalogItem(app, collection, id), source);
+    if (service) saved.push(service);
   };
   if (changedPackage) addService("packages", "package", packageId);
   for (const id of selected) {
@@ -94,8 +102,8 @@ function summary(app, registration) {
     course: course?.getString("name") || "",
     packageName: pkg?.getString("name") || json(registration, "package_snapshot")?.name || "",
     photographyComplete: photographyComplete(registration),
-    queueNumber: registration.getInt("queue_number"),
+    queueNumber: registration.getInt("queue_number") || null,
   };
 }
 
-module.exports = { activeMakeup, catalogItem, finishedShoot, json, makeupServices, photographyComplete, photoQueue, purchasedServices, saveMakeupServices, staff, summary, withRegistration };
+module.exports = { activeMakeup, catalogItem, finishedShoot, json, makeupServices, photographyComplete, photoQueue, purchasedServices, saveMakeupServices, serviceRequirement, staff, summary, withRegistration };

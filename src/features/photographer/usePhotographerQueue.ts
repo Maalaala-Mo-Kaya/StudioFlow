@@ -18,8 +18,8 @@ export function usePhotographerQueue() {
       setLoading(true);
       const [queueRes, doneRes] = await Promise.all([
         pb.collection('registrations').getFullList<Registration>({
-          filter: "status = 'shooting' || (status = 'paid' && paid_amount > 0 && (makeup_state = 'completed' || (makeup_service = '' && makeup_state = '')))",
-          sort: 'created,queue_number,id',
+          filter: "status = 'shooting' || (status = 'paid' && queue_number > 0 && paid_amount > 0 && (makeup_state = 'completed' || (makeup_service = '' && makeup_state = '')))",
+          sort: 'queue_issued_at,queue_number,id',
           expand: 'organization,level,course,package,session_type',
           requestKey: null,
         }),

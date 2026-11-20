@@ -14,6 +14,8 @@ import type {
 import type { ClientKind } from '../../types';
 import { splitFullName } from '../../utils/formatters';
 import { useStudioSettings } from '../../hooks/useStudioSettings';
+import { useWorkflowData } from '../../hooks/useWorkflowData';
+import { registrationAddOns } from './registrationAddOns';
 import {
   emailPattern, mobilePattern, packageRequiredMessage, registrationFields, validationProps,
   type RegistrationErrors,
@@ -48,8 +50,10 @@ export function useRegistrationForm() {
     assignments: SchoolCourse[];
     failed?: boolean;
   } | null>(null);
-  const [packages, setPackages] = useState<Package[]>([]);
-  const [addOnsList, setAddOnsList] = useState<AddOn[]>([]);
+  const { data: registrationCatalog, error: catalogError, refresh: refreshCatalog } =
+    useWorkflowData<{ packages: Package[]; addOns: AddOn[] }>('/registration-catalog');
+  const packages = registrationCatalog?.packages ?? [];
+  const addOnsList = registrationCatalog?.addOns ?? [];
   const [masterList, setMasterList] = useState<MasterListItem[]>([]);
 
   // Form Fields
@@ -87,19 +91,11 @@ export function useRegistrationForm() {
   useEffect(() => {
     async function loadReferenceData() {
       try {
-        const [orgsRes, addonsRes] = await Promise.all([
-          pb.collection('organizations').getFullList<Organization>({
-            filter: 'is_active = true',
-            requestKey: null,
-          }),
-          pb.collection('add_ons').getFullList<AddOn>({
-            filter: 'is_active = true',
-            requestKey: null,
-          }),
-        ]);
-
+        const orgsRes = await pb.collection('organizations').getFullList<Organization>({
+          filter: 'is_active = true',
+          requestKey: null,
+        });
         setOrganizations(orgsRes);
-        setAddOnsList(addonsRes);
 
         // Fetch master list safely (protected under staff auth / RA 10173)
         try {
@@ -115,38 +111,6 @@ export function useRegistrationForm() {
       }
     }
     loadReferenceData();
-  }, []);
-
-  useEffect(() => {
-    const collection = pb.collection('packages');
-    let active = true;
-    let version = 0;
-    let unsubscribe: (() => Promise<void>) | undefined;
-
-    async function refreshPackages() {
-      const request = ++version;
-      try {
-        const records = await collection.getFullList<Package>({ filter: 'is_active = true', sort: 'created,id' });
-        if (active && request === version) {
-          setPackages(records);
-          setSelectedPackageId((id) => records.some((pkg) => pkg.id === id) ? id : null);
-        }
-      } catch (err) {
-        if (active && request === version) console.error('Failed to load registration packages:', err);
-      }
-    }
-
-    void refreshPackages();
-    void collection.subscribe('*', refreshPackages).then((stop) => {
-      if (!active) return stop();
-      unsubscribe = stop;
-      return refreshPackages();
-    }).catch((err) => console.error('Failed to subscribe to registration packages:', err));
-
-    return () => {
-      active = false;
-      void unsubscribe?.().catch(console.error);
-    };
   }, []);
 
   // Fetch the selected school's levels and assignments together. Ignore late results
@@ -220,7 +184,7 @@ export function useRegistrationForm() {
   };
 
   // Master list selection auto-fill
-  const selectFromMasterList = useCallback((item: MasterListItem) => {
+  const selectFromMasterList = (item: MasterListItem) => {
     setStudentId(item.student_id ?? '');
     const { familyName: fName, givenName: gName } = splitFullName(item.full_name);
     if (fName) setFamilyName(fName);
@@ -237,7 +201,7 @@ export function useRegistrationForm() {
     setSearchName('');
     setIsSearching(false);
     clearErrors('family_name', 'given_name', 'email', 'mobile_number', 'organization', 'level', 'course');
-  }, [clearErrors, organizations, selectedOrgId]);
+  };
 
   const toggleAddOn = useCallback((id: string) => {
     setSelectedAddOns((prev) =>
@@ -254,27 +218,16 @@ export function useRegistrationForm() {
   const kindAddOns = clientKind
     ? addOnsList.filter((item) => [clientKind, 'both'].includes(item.client_kind || 'both'))
     : [];
-  const chosenAddOns = selectedAddOns.filter((id) => kindAddOns.some((item) => item.id === id));
-
-  // Live Total Calculation
   const selectedPackage = kindPackages.find((pkg) => pkg.id === selectedPackageId);
-  const totalAmount = selectedPackage
-    ? selectedPackage.amount + kindAddOns.reduce((sum, item) => (
-      chosenAddOns.includes(item.id) ? sum + item.amount : sum
-    ), 0)
-    : 0;
-
-  // Show the optional artist note only when the selected order includes an MUA service.
-  const bringsMakeup = !!selectedPackage && (!!selectedPackage.requires_mua
-    || kindAddOns.some((item) => chosenAddOns.includes(item.id) && item.requires_mua));
-  const asksLook = bringsMakeup;
+  const { manualAddOns, selected, defaultAddOn, requiresMua: asksLook, totalAmount } =
+    registrationAddOns(selectedPackage, kindAddOns, selectedAddOns);
 
   // Signature Handler
-  const handleSignatureChange = useCallback((blob: Blob | null, dataUrl?: string | null) => {
+  const handleSignatureChange = (blob: Blob | null, dataUrl?: string | null) => {
     setSignatureBlob(blob);
     setSignatureDataUrl(dataUrl || null);
     if (blob) clearErrors('signature');
-  }, [clearErrors]);
+  };
 
   const showErrors = (fieldErrors: RegistrationErrors) => {
     setErrors(fieldErrors);
@@ -327,11 +280,6 @@ export function useRegistrationForm() {
     setErrors({});
     setIsSubmitting(true);
     try {
-      const selectedAddOnObjects = chosenAddOns.map((id) => {
-        const item = kindAddOns.find((a) => a.id === id);
-        return { id, code: item?.code, name: item?.name || '', amount: item?.amount || 0 };
-      });
-
       const formData = new FormData();
       formData.append('family_name', familyName.trim());
       formData.append('given_name', givenName.trim());
@@ -356,7 +304,10 @@ export function useRegistrationForm() {
       formData.append('mobile_number', cleanMobile);
       formData.append('email', cleanEmail);
       formData.append('package', selectedPackage.id);
-      formData.append('add_ons', JSON.stringify(selectedAddOnObjects));
+      formData.append('add_ons', JSON.stringify(selected.map(({ id }) => ({ id }))));
+      formData.append('no_mua_default_quote', defaultAddOn
+        ? `${defaultAddOn.id}:${Math.round(defaultAddOn.amount * 100)}`
+        : 'none');
       if (asksLook) {
         formData.append('makeup_look_note', makeupLookNote.trim());
       }
@@ -375,10 +326,11 @@ export function useRegistrationForm() {
         created.signatureDataUrl = signatureDataUrl;
       }
 
-      toast.success('Registration submitted! Official Job Order recorded.');
+      toast.success('Registration submitted. Show your reference to the cashier.');
       setSubmittedRecord(created);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: unknown) {
+      refreshCatalog();
       console.error('Registration submission failed:', err);
       if (err instanceof ClientResponseError) {
         const fieldErrors: RegistrationErrors = {};
@@ -402,7 +354,7 @@ export function useRegistrationForm() {
     }
   };
 
-  const resetForm = useCallback(() => {
+  const resetForm = () => {
     setFamilyName('');
     setGivenName('');
     setMiddleName('');
@@ -431,7 +383,7 @@ export function useRegistrationForm() {
     setSubmittedRecord(null);
     setErrors({});
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+  };
 
   const changeKind = (kind: ClientKind) => {
     setChosenKind(kind);
@@ -465,7 +417,10 @@ export function useRegistrationForm() {
     levels,
     courses,
     packages: kindPackages,
-    addOnsList: kindAddOns,
+    addOnsList: manualAddOns,
+    defaultAddOn,
+    catalogError,
+    catalogLoading: !registrationCatalog && !catalogError,
     masterList,
     // Form State & Setters
     familyName,
@@ -492,7 +447,7 @@ export function useRegistrationForm() {
     setEmail: changeField('email', setEmail),
     selectedPackageId: selectedPackage?.id ?? null,
     setSelectedPackageId: changeField('package', (id: string) => setSelectedPackageId(id)),
-    selectedAddOns: chosenAddOns,
+    selectedAddOns: selected.map(({ id }) => id),
     toggleAddOn,
     asksLook,
     makeupLookNote,

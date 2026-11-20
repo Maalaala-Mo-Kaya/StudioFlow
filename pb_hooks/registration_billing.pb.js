@@ -12,8 +12,27 @@ onRecordCreateRequest((e) => {
   try { selections = JSON.parse(e.record.getString("add_ons") || "null") ?? []; } catch (_) { throw new BadRequestError("Invalid add-on selection."); }
   // Runs before registration_validation sets the default client type: empty means a school client.
   const clientKind = e.record.getString("client_kind") === "walkin" ? "walkin" : "school";
-  e.record.set("add_ons", pricing.priceAddOns(e.app, selections, [], clientKind));
-  return e.next();
+  const quote = e.requestInfo().body?.no_mua_default_quote;
+  const app = e.app;
+  return app.runInTransaction((tx) => {
+    // Use one catalog snapshot for the quote, service requirements and sold prices.
+    e.app = tx;
+    try {
+      const workflow = require(__hooks + "/studio_workflow.js");
+      const [defaultAddOn] = pricing.defaultAddOns(tx, clientKind);
+      const addOns = pricing.priceAddOns(tx, selections, [], clientKind)
+        .filter((item) => item.id !== defaultAddOn?.id);
+      e.record.set("add_ons", addOns);
+      const auto = e.record.getString("package") && defaultAddOn
+        && !workflow.purchasedServices(tx, e.record).length ? defaultAddOn : null;
+      const expected = auto ? auto.id + ":" + pricing.cents(auto.getFloat("amount")) : "none";
+      if (quote !== undefined && quote !== expected) {
+        throw new BadRequestError("The automatic add-on changed. Review the updated package total and submit again.");
+      }
+      if (auto) e.record.set("add_ons", [...addOns, { ...pricing.snapshotAddOn(auto), auto_applied: true }]);
+      return e.next();
+    } finally { e.app = app; }
+  });
 }, "registrations");
 
 onRecordCreate((e) => {
@@ -123,3 +142,32 @@ onRecordCreateRequest((e) => {
 }, "packages", "add_ons");
 onRecordCreateRequest(checkCatalogPrice, "packages", "add_ons");
 onRecordUpdateRequest(checkCatalogPrice, "packages", "add_ons");
+
+onRecordValidate((e) => {
+  const item = e.record;
+  if (item.getBool("default_when_no_mua")) {
+    if (item.getBool("requires_mua")) {
+      throw new BadRequestError("A default for clients without makeup or grooming cannot require MUA service.");
+    }
+    for (const kind of ["school", "walkin"]) {
+      const pricing = require(__hooks + "/studio_pricing.js");
+      if (item.getBool("is_active") && pricing.offeredTo(item, kind)
+        && pricing.defaultAddOns(e.app, kind).some((other) => other.id !== item.id)) {
+        throw new BadRequestError(`Turn off the current default for ${kind === "school" ? "school" : "walk-in"} clients before setting another.`);
+      }
+    }
+  }
+  return e.next();
+}, "add_ons");
+
+routerAdd("GET", "/api/studioflow/registration-catalog", (e) => {
+  const workflow = require(__hooks + "/studio_workflow.js");
+  let catalog;
+  e.app.runInTransaction((tx) => {
+    const list = (collection, source) => tx.findRecordsByFilter(collection, "is_active = true", "created,id", 0, 0)
+      .map((item) => ({ ...item.publicExport(), requires_mua: !!workflow.serviceRequirement(tx, item, source) }));
+    catalog = { packages: list("packages", "package"), addOns: list("add_ons", "add_on") };
+  });
+  e.response.header().set("Cache-Control", "no-store");
+  return e.json(200, catalog);
+});

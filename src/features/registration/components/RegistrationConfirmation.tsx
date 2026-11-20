@@ -1,7 +1,6 @@
 import React from 'react';
 import { Check } from 'lucide-react';
 import type { Registration } from '../../../types';
-import { formatJobOrderNo, formatQueueNumber } from '../../../utils/formatters';
 
 interface RegistrationConfirmationProps {
   record: Registration;
@@ -18,7 +17,7 @@ export const RegistrationConfirmation: React.FC<RegistrationConfirmationProps> =
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-neutral-800">
           <div>
             <span className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-gold block mb-1">
-              STATUS // OFFICIAL JOB ORDER RECORDED
+              Pending payment
             </span>
             <h2 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-tight">
               Registration Complete
@@ -31,26 +30,14 @@ export const RegistrationConfirmation: React.FC<RegistrationConfirmationProps> =
 
         <p className="text-xs sm:text-sm text-neutral-300 mt-4 leading-relaxed">
           Proceed to the <strong className="text-gold uppercase">Cashier Counter</strong> and
-          present your Job Order or Queue Number below to pay. The cashier prints your official Job Order claim stub after payment.
+          show your registration reference to pay. The cashier issues your official Job Order after payment.
         </p>
 
-        <div className="grid grid-cols-2 gap-4 mt-6">
-          <div className="bg-obsidian-2 border border-neutral-800 p-4">
-            <span className="font-mono text-[10px] font-bold text-neutral-400 uppercase tracking-widest block">
-              Job Order No.
-            </span>
-            <span className="text-xl sm:text-2xl font-mono font-black text-red-500 mt-1 block">
-              {formatJobOrderNo(record.job_order_no)}
-            </span>
-          </div>
-          <div className="bg-obsidian-2 border border-gold p-4">
-            <span className="font-mono text-[10px] font-bold text-gold uppercase tracking-widest block">
-              Daily Queue No.
-            </span>
-            <span className="text-xl sm:text-2xl font-mono font-black text-white mt-1 block">
-              {formatQueueNumber(record.queue_number)}
-            </span>
-          </div>
+        <div className="mt-6 border border-gold bg-obsidian-2 p-4">
+          <span className="block font-mono text-[10px] font-bold uppercase tracking-widest text-gold">
+            Registration reference
+          </span>
+          <span className="mt-1 block break-all font-mono text-xl font-black text-white">{record.id}</span>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3 mt-7">

@@ -1,49 +1,13 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 /**
- * PocketBase Hook: job order numbers, daily FCFS queue numbers, and the client's
- * photo folder (created at the first payment, see the payments hook below).
+ * PocketBase hooks for confirmed payments and deliverable release.
  * Compatible with PocketBase v0.23+ / 0.41.x hook middleware pattern (e.next()).
  */
 
-onRecordCreate((e) => {
-  const app = e.app;
-  // Numbers are read and the row inserted in one transaction. PocketBase runs one write
-  // transaction at a time, so two kiosks registering together can't get the same number.
-  app.runInTransaction((tx) => {
-    e.app = tx;
-    try {
-      // 1. Sequential 5-digit job order number (numeric max, so 99999 -> 100000 still sorts right).
-      if (!e.record.getString("job_order_no")) {
-        const last = new DynamicModel({ n: 0 });
-        tx.db().newQuery(
-          "SELECT COALESCE(MAX(CAST(job_order_no AS INTEGER)), 0) AS n FROM registrations WHERE job_order_no GLOB '[0-9]*'"
-        ).one(last);
-        e.record.set("job_order_no", String(last.n + 1).padStart(5, "0"));
-      }
-
-      // 2. Daily FCFS queue number.
-      if (!e.record.getInt("queue_number")) {
-        // The queue restarts at midnight studio time (Asia/Manila, UTC+8), not midnight UTC.
-        // `created` is stored in UTC, so compare against Manila midnight expressed in UTC.
-        const offset = 8 * 3600000;
-        const manilaDay = new Date(Date.now() + offset).toISOString().slice(0, 10);
-        const dayStart = new Date(Date.parse(manilaDay + "T00:00:00Z") - offset).toISOString().replace("T", " ");
-        const records = tx.findRecordsByFilter("registrations", "created >= {:dayStart}", "-queue_number", 1, 0, { dayStart });
-        e.record.set("queue_number", records.length && records[0].getInt("queue_number") > 0 ? records[0].getInt("queue_number") + 1 : 1);
-      }
-
-      // 3. Default statuses.
-      if (!e.record.getString("status")) e.record.set("status", "pending_payment");
-      if (!e.record.getString("payment_status")) e.record.set("payment_status", "unpaid");
-
-      // No photo folder yet: it is named and created at the first payment, so unpaid kiosk
-      // registrations leave no empty folders and a name corrected before payment is used.
-      e.next();
-    } finally {
-      e.app = app;
-    }
-  });
+onRecordEnrich((e) => {
+  e.next();
+  require(__hooks + "/studio_numbering.js").exposeNumbers(e.record);
 }, "registrations");
 
 onRecordCreate((e) => {
@@ -66,6 +30,7 @@ onRecordCreate((e) => {
       const status = "completed";
 
       if (!regId) throw new BadRequestError("A job order is required.");
+      tx.db().newQuery("UPDATE registrations SET id = id WHERE id = {:id}").bind({ id: regId }).execute();
       reg = tx.findRecordById("registrations", regId);
       if (reg.getString("status") === "cancelled") {
         throw new BadRequestError("This job order is cancelled. Restore it before collecting payment.");
@@ -118,10 +83,13 @@ onRecordCreate((e) => {
       const totals = ledgerRules.ledger(tx, reg);
       ledgerRules.applyTotals(reg, totals);
       if (totals.net > 0 && reg.getString("status") === "pending_payment") reg.set("status", "paid");
+      const numbering = require(__hooks + "/studio_numbering.js");
+      const newlyNumbered = numbering.issueJobOrder(tx, reg);
+      numbering.handoffToPhotography(tx, reg);
       const cashier = e.record.getString("cashier_name");
       if (status === "completed" && cashier && !reg.getString("prepared_by")) reg.set("prepared_by", cashier);
       // First payment: the client's photo folder is named now (<job no>_<Last>_<First>).
-      require(__hooks + "/studio_photo_storage.js").assignFolder(tx, reg);
+      require(__hooks + "/studio_photo_storage.js").assignFolder(tx, reg, newlyNumbered);
       tx.save(reg);
     } finally {
       e.app = app;

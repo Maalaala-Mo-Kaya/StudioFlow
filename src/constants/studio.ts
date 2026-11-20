@@ -9,7 +9,6 @@ export const STUDIO_INFO = {
   hours: 'Studio Opens: 9:00 AM – 6:00 PM',
   phone: '032-2540886',
   facebook: 'www.fb.com/hi-light studio',
-  defaultJobOrderNo: '00001',
 } as const;
 
 export const REGISTRATION_TERMS_CLAUSES: ReadonlyArray<string> = [

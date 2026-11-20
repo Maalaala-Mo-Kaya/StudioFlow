@@ -68,14 +68,17 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       VALUES ('legacypay00001', ?, 1000, 'additional', 'cash', 1000, 'REC-legacy-receipt', 'completed',
         '2026-01-05 01:00:00.000Z', '2026-01-05 01:00:00.000Z')`).run(legacyId);
   } finally { legacyDb.close(); }
-  server = spawn(executable, ['serve', '--http', host.slice(7), ...flags], options);
-  for (const stream of [server.stdout, server.stderr]) stream.on('data', (chunk) => { logs += chunk; });
-  for (let attempt = 0; attempt < 60; attempt++) {
-    if (await fetch(host + '/api/health').then((res) => res.ok).catch(() => false)) break;
-    assert.equal(server.exitCode, null, logs);
-    if (attempt === 59) assert.fail(logs);
-    await delay(150);
+  async function startServer() {
+    server = spawn(executable, ['serve', '--http', host.slice(7), ...flags], options);
+    for (const stream of [server.stdout, server.stderr]) stream.on('data', (chunk) => { logs += chunk; });
+    for (let attempt = 0; attempt < 60; attempt++) {
+      if (await fetch(host + '/api/health').then((res) => res.ok).catch(() => false)) return;
+      assert.equal(server.exitCode, null, logs);
+      await delay(150);
+    }
+    assert.fail(logs);
   }
+  await startServer();
 
   async function send(path, { token, method = 'GET', body, status = 200 } = {}) {
     const headers = token ? { Authorization: token } : {};
@@ -166,6 +169,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const legacyPayment = (await send(records('payments', 'legacypay00001'), { token: admin })).payload;
   assert.deepEqual([legacyPayment.receipt_no, legacyPayment.balance_before, legacyPayment.balance_after], ['REC-legacy-receipt', 1500, 500]);
   assert.equal(legacy.status, 'done_shooting');
+  assert.equal(legacy.job_order_no, '00050');
   const builtInAddOn = (await send(records('add_ons'))).payload.items.find((item) => item.code === 'ADD-HAIRMAKEUP');
   assert.equal(builtInAddOn.requires_mua, true);
   await registrations(legacy, admin, { family_name: 'Corrected Name' });
@@ -202,13 +206,21 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const liveUpdate = await Promise.race([readEvent('studioflow-workflow'), delay(4000, 'timeout', { ref: false })]);
   assert.deepEqual(liveUpdate, {}, 'The server must notify connected realtime clients.');
   const unpaid = await register(prepared);
+  assert.deepEqual([plain.job_order_no, plain.queue_number, unpaid.job_order_no, unpaid.queue_number], [null, null, null, null]);
+  assert.deepEqual([(await registrations(plain, cashier)).payload.job_order_no, (await registrations(plain, cashier)).payload.queue_number], [null, null]);
+  await pay(plain, 1, 'full', 400);
+  assert.equal((await registrations(plain)).payload.job_order_no, null);
+  await registrations(plain, admin, { job_order_no: '12345' }, 403);
+  await registrations(plain, admin, { queue_number: 123 }, 403);
   // The client folder is made at the first payment, named <job no>_<Last>_<First> (no record ID).
   const clientFolder = (student) => join(photos, 'WORKFLOW', 'MEDIA', `${student.job_order_no}_Dela Cruz_Juan Carlos`);
-  await assert.rejects(stat(clientFolder(plain)), { code: 'ENOENT' }, 'An unpaid job order has no folder yet.');
+  await assert.rejects(stat(join(photos, 'WORKFLOW', 'MEDIA')), { code: 'ENOENT' }, 'An unpaid registration has no folder yet.');
   await pay(plain, 1000);
-  assert.ok((await stat(clientFolder(plain))).isDirectory(), 'The first payment creates the client folder.');
-  assert.deepEqual((await readdir(clientFolder(plain))).sort(), ['selected', 'unselected']);
-  await assert.rejects(stat(clientFolder(unpaid)), { code: 'ENOENT' });
+  const paidPlain = (await registrations(plain)).payload;
+  assert.equal(paidPlain.job_order_no, '00051', 'Failed payments consume no number and the legacy sequence carries forward.');
+  assert.ok(paidPlain.queue_number > 0, 'No-MUA jobs are ready for photography at payment.');
+  assert.ok((await stat(clientFolder(paidPlain))).isDirectory(), 'The first payment creates the client folder.');
+  assert.deepEqual((await readdir(clientFolder(paidPlain))).sort(), ['selected', 'unselected']);
   assert.equal((await queue(artists[0])).length, 0);
   assert.equal((await send(api + '/queue-count')).payload.count, 1);
   assert.equal((await send(records('registrations'))).payload.items.length, 0);
@@ -226,6 +238,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   for (const count of [2, 5, 10]) {
     const student = await register(count === 5 ? standard : prepared, count === 5 ? [{ id: makeup.id }] : []);
     await pay(student, count === 5 ? 550 : 500, 'initial');
+    const paid = (await registrations(student)).payload;
+    assert.match(paid.job_order_no, /^\d{5,}$/);
+    assert.equal(paid.queue_number, null);
     if (count === 2) {
       const update = await Promise.race([
         readEvent('registrations/*', ({ record }) => record.id === student.id && record.status === 'paid'),
@@ -236,6 +251,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const waiting = await queue(artists[0]);
     assert.deepEqual(waiting.map((row) => row.id), [student.id]);
     assert.equal(waiting[0].state, 'waiting');
+    assert.equal(waiting[0].queueNumber, null);
     assert.equal(waiting[0].version, 0);
     assert.equal(waiting[0].services[0].source, count === 5 ? 'add_on' : 'package');
     await shoot(student, 'shooting', 400);
@@ -259,13 +275,19 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal((await queue(other)).length, 0);
     const reloaded = { ...owner, token: (await login(owner.username)).token };
     assert.equal((await queue(reloaded))[0].state, 'claimed');
+    assert.equal((await registrations(student)).payload.queue_number, null);
     await contest(student, owner, 'claim');
     await contest(student, other, 'start', 403);
     await contest(student, owner, 'start');
+    assert.equal((await registrations(student)).payload.queue_number, null);
     await contest(student, owner, 'start');
     await shoot(student, 'done_shooting', 400);
     await contest(student, owner, 'complete');
+    const completed = (await registrations(student)).payload;
+    assert.equal(completed.job_order_no, paid.job_order_no);
+    assert.ok(completed.queue_number > 0);
     await contest(student, owner, 'complete');
+    assert.equal((await registrations(student)).payload.queue_number, completed.queue_number);
     if (count === 2) {
       const update = await Promise.race([
         readEvent('registrations/*', ({ record }) => record.id === student.id && record.makeup_state === 'completed'),
@@ -279,7 +301,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.ok((await queue(admin)).some((item) => item.id === student.id && item.artistId === owner.id && item.completedAt));
     await shoot(student, 'shooting');
     await shoot(student, 'done_shooting');
-    galleryStudent = student;
+    galleryStudent = completed;
   }
   const paused = await register(prepared);
   await pay(paused, 1000);
@@ -325,7 +347,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const path = await folder(galleryStudent);
   assert.notEqual(path, plainFolder);
   assert.equal(path, clientFolder(galleryStudent));
-  assert.equal(plainFolder, clientFolder(plain));
+  assert.equal(plainFolder, clientFolder(paidPlain));
   assert.equal((await send(api + '/chooser?q=' + plain.student_id, { token: chooser.token })).payload.items[0].availability, 'empty');
   await writeFile(join(plainFolder, 'other.png'), png);
   await writeFile(join(path, 'first.png'), png);
@@ -339,7 +361,6 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   }
   // Search lists only photographed clients: a client not photographed yet is not found.
   assert.deepEqual(await list(unpaid.student_id), []);
-  assert.deepEqual(await list(unpaid.job_order_no), []);
   const route = `${api}/chooser/${galleryStudent.id}`;
   const open = (actor = chooser) => send(route + '/open', { token: actor.token, method: 'POST' }).then((r) => r.payload);
   const first = await open();
@@ -625,11 +646,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.equal(bookedDetail.serviceId, makeupType.id);
   assert.equal(bookedDetail.serviceName, 'Premium Makeup');
 
-  // Daily queue numbers keep counting within the studio day (Asia/Manila).
   const pickup = await register(standard);
   const dropped = await register(standard);
-  assert.equal(dropped.queue_number, pickup.queue_number + 1);
-  assert.equal(Number(dropped.job_order_no), Number(pickup.job_order_no) + 1);
+  assert.deepEqual([dropped.queue_number, pickup.queue_number, dropped.job_order_no, pickup.job_order_no], [null, null, null, null]);
 
   // Release gate: full payment alone is not enough; production must be marked ready.
   const release = { status: 'released', framing_status: 'released', claimed_by: 'Juan', released_at: new Date().toISOString() };
@@ -672,6 +691,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
 
   // Cancelling keeps the job order and its payments; paid orders cannot be deleted.
   await pay(dropped, 500, 'initial');
+  const issuedDropped = (await registrations(dropped)).payload;
   await send(records('registrations', dropped.id), { token: admin, method: 'DELETE', status: 409 });
   // Cancel and Restore go through their routes, with a reason; direct status edits are refused.
   await registrations(dropped, admin, { status: 'cancelled' }, 400);
@@ -713,6 +733,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await pay(dropped, 700, 'additional');
   droppedNow = (await registrations(dropped)).payload;
   assert.deepEqual([droppedNow.balance, droppedNow.payment_status], [0, 'fully_paid']);
+  assert.deepEqual([droppedNow.job_order_no, droppedNow.queue_number], [issuedDropped.job_order_no, issuedDropped.queue_number]);
   await send(`${api}/registrations/${dropped.id}/cancel`, { method: 'POST', token: admin, body: { reason: 'cancel again for later checks' } });
   // Fully refunded before the shoot: Restore puts it back to Pending Payment, not Paid.
   const refundedAll = await register(standard);
@@ -803,10 +824,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await send(records('session_types', unused.id), { token: admin, method: 'DELETE', status: 204 });
   // The overall export lists walk-ins on their own sheet with the session code.
   const overall = (await send(api + '/student-excel', { token: admin })).payload;
-  const walkinRow = overall.rows.find((row) => row.jobOrder === event.job_order_no);
+  const eventNumber = (await registrations(event)).payload.job_order_no;
+  const walkinRow = overall.rows.find((row) => row.jobOrder === eventNumber);
   assert.deepEqual([walkinRow.level, walkinRow.course], ['walkin', 'WED']);
   // Cancelled orders carry who, when and why for the CANCELLED sheet; active ones carry nothing.
-  const droppedRow = overall.rows.find((row) => row.jobOrder === dropped.job_order_no);
+  const droppedRow = overall.rows.find((row) => row.jobOrder === issuedDropped.job_order_no);
   assert.deepEqual([droppedRow.cancelled, droppedRow.cancellation.reason], [true, 'cancel again for later checks']);
   assert.ok(droppedRow.cancellation.at && droppedRow.cancellation.by && droppedRow.cancellation.statusBefore, 'the export says when, who and the status before');
   assert.equal(walkinRow.cancellation, null);
@@ -824,9 +846,10 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const elementary = (await send(records('levels', grade6.level), { token: admin })).payload;
   assert.deepEqual([elementary.organization, elementary.name, elementary.order > (level.order || 0)], [school.id, 'Elementary', true]);
   // Students at other levels appear in the export under their level's name.
-  const pupil = await register(standard, [], 200, { level: grade6.level, course: grade6.course_id });
-  const pupilRow = (await send(api + '/student-excel', { token: admin })).payload.rows.find((row) => row.jobOrder === pupil.job_order_no);
+  await register(standard, [], 200, { level: grade6.level, course: grade6.course_id });
+  const pupilRow = (await send(api + '/student-excel', { token: admin })).payload.rows.find((row) => row.course === 'G6');
   assert.deepEqual([pupilRow.level, pupilRow.course], ['ELEMENTARY', 'G6']);
+  assert.equal(pupilRow.jobOrder, '');
 
   // Other fees change the price: the public kiosk can't set them; only an admin can, and the total follows.
   const feeClient = await register(standard, [], 200, { other_fees: '-900' });
@@ -836,7 +859,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await registrations(feeClient, admin, { other_fees: -10 }, 400);
   const withFees = (await registrations(feeClient, admin, { other_fees: 150 })).payload;
   assert.deepEqual([withFees.total_amount, withFees.paid_amount, withFees.balance, withFees.payment_status], [1150, 500, 650, 'downpayment']);
-  const feeRow = (await send(api + '/student-excel', { token: admin })).payload.rows.find((row) => row.jobOrder === feeClient.job_order_no);
+  const feeRow = (await send(api + '/student-excel', { token: admin })).payload.rows.find((row) => row.jobOrder === withFees.job_order_no);
   assert.deepEqual([feeRow.due, feeRow.otherFees, feeRow.packageAmount], [115000, 15000, 100000], 'the export splits the total into package and other fees');
 
   // Add-ons after registration: admin only, catalog-priced, and the total follows.
@@ -967,20 +990,26 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.equal((await registrations(skipped, admin, { makeup_look: '' })).payload.makeup_look, '');
   await registrations(skipped, cashier, { makeup_look: 'full' }, 403);
 
-  // Job order numbers stay unique when several kiosks register at the same moment.
+  // Concurrent registration consumes no numbers. Concurrent first payments allocate both sequences.
   const together = await Promise.all(Array.from({ length: 6 }, () => register(standard)));
-  const numbers = together.map((student) => student.job_order_no);
+  assert.ok(together.every((student) => student.job_order_no === null && student.queue_number === null));
+  const concurrentPayments = await Promise.all(together.map((student) => pay(student, 1000)));
+  const concurrentPaid = await Promise.all(together.map(async (student) => (await registrations(student)).payload));
+  const numbers = concurrentPaid.map((student) => student.job_order_no);
   assert.equal(new Set(numbers).size, numbers.length, numbers.join(', '));
   assert.deepEqual(numbers.map(Number).sort((a, b) => a - b),
     Array.from({ length: 6 }, (_, index) => Math.min(...numbers.map(Number)) + index), 'Numbers are consecutive.');
+  const queues = concurrentPaid.map((student) => student.queue_number);
+  assert.ok(queues.every((number) => number > 0));
+  assert.equal(new Set(concurrentPaid.map((student) => student.queue_issued_at.slice(0, 10) + '/' + student.queue_number)).size, together.length);
   const indexDb = new DatabaseSync(join(data, 'data.db'), { readOnly: true });
   try {
     assert.ok(indexDb.prepare("SELECT 1 FROM sqlite_master WHERE name = 'idx_registration_job_order_no'").get(), 'Unique job order index');
   } finally { indexDb.close(); }
 
   // PDF copies of the paperwork go to <client folder>/RECEIPTS, under names taken from the database.
-  const docsClient = together[0];
-  const docsPayment = await pay(docsClient, 1000);
+  const docsClient = concurrentPaid[0];
+  const docsPayment = concurrentPayments[0];
   const pdf = (text) => new Blob([Buffer.from('%PDF-1.4\n' + text + '\n%%EOF')], { type: 'application/pdf' });
   const documents = (student, files, token = cashier, status = 200) => {
     const form = new FormData();
@@ -1003,7 +1032,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await documents(docsClient, [[jobPdf, pdf('fine')], [receiptPdf, new Blob(['not a pdf'])]], cashier, 400);
   assert.match(await readFile(join(receiptsDir, jobPdf), 'utf8'), /job order v2/, 'A rejected request writes nothing.');
   await documents(docsClient, [[jobPdf, pdf('x')]], photographer, 403);
-  await documents(together[1], [[`JO-${together[1].job_order_no}.pdf`, pdf('unpaid')]], cashier, 409);
+  await documents(await register(standard), [['JO-00000.pdf', pdf('unpaid')]], cashier, 409);
 
   await t.test('revenue allocation and managed MUA queue', async (featureTest) => {
     // Financial tests use the same implementation as Analytics and the workbooks, with real PocketBase records.
@@ -1016,6 +1045,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const { buildAuditWorkbook } = await vite.ssrLoadModule('/src/features/admin/auditWorkbook.ts');
     const { buildStudentWorkbook } = await vite.ssrLoadModule('/src/features/admin/studentExcel.ts');
     const { receiptRevenueLine, orderExtras } = await vite.ssrLoadModule('/src/features/receipts/receiptData.ts');
+    const { registrationAddOns } = await vite.ssrLoadModule('/src/features/registration/registrationAddOns.ts');
     const { buildRegistrationsCsv } = await vite.ssrLoadModule('/src/utils/csv.ts');
     const studio = await create('packages', {
       code: 'STUDIO-1500', name: 'Portrait', amount: 1500, is_active: true, revenue_category: 'studio',
@@ -1038,6 +1068,67 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       const current = (await registrations(job)).payload;
       return buildAudit([current], await recordsFor('payments', job), await recordsFor('refunds', job));
     };
+
+    const wardrobeFields = {
+      name: 'Wardrobe', amount: 50, is_active: true, client_kind: 'school',
+      revenue_category: 'studio', default_when_no_mua: true,
+    };
+    const wardrobe = await create('add_ons', { ...wardrobeFields, code: 'WARDROBE' });
+    await send(records('add_ons'), {
+      method: 'POST', token: admin, status: 400, body: { ...wardrobeFields, code: 'OVERLAP', client_kind: 'both' },
+    });
+    await send(records('add_ons', groomingAddOn.id), {
+      method: 'PATCH', token: admin, status: 400, body: { default_when_no_mua: true },
+    });
+    const walkinDefault = await create('add_ons', { ...wardrobeFields, code: 'WALK-WARDROBE', amount: 65, client_kind: 'walkin' });
+    await patchCatalog('studio_settings', settings, { walkin_enabled: true });
+    const walkinWithDefault = await walkIn({ no_mua_default_quote: walkinDefault.id + ':6500' });
+    assert.deepEqual(walkinWithDefault.add_ons.map(({ id, amount }) => [id, amount]), [[walkinDefault.id, 65]]);
+    await patchCatalog('studio_settings', settings, { walkin_enabled: false });
+    const catalog = (await send(api + '/registration-catalog')).payload;
+    const offered = catalog.addOns.filter((item) => item.client_kind !== 'walkin');
+    const portrait = catalog.packages.find((item) => item.id === studio.id);
+    const muaPortrait = catalog.packages.find((item) => item.id === pureMua.id);
+    const preview = (selections, pkg = portrait) => {
+      const { defaultAddOn, totalAmount } = registrationAddOns(pkg, offered, selections);
+      return [defaultAddOn?.id, totalAmount];
+    };
+    assert.deepEqual(preview([]), [wardrobe.id, 1550]);
+    assert.deepEqual(preview([groomingAddOn.id]), [undefined, 1650]);
+    assert.deepEqual(preview([]), [wardrobe.id, 1550]);
+    assert.deepEqual(preview([], muaPortrait), [undefined, 300]);
+    assert.deepEqual(preview([wardrobe.id, wardrobe.id]), [wardrobe.id, 1550]);
+
+    const included = await register(studio, [{ id: wardrobe.id, amount: 0 }], 200, {
+      no_mua_default_quote: wardrobe.id + ':5000',
+    });
+    assert.deepEqual([included.total_amount, included.balance, included.makeup_service], [1550, 1550, '']);
+    assert.deepEqual(included.add_ons, [{
+      id: wardrobe.id, code: 'WARDROBE', name: 'Wardrobe', amount: 50, revenue_category: 'studio', auto_applied: true,
+    }]);
+    assert.deepEqual((await register(pureMua, [], 200, { no_mua_default_quote: 'none' })).add_ons, []);
+    const withGrooming = await register(studio, [{ id: groomingAddOn.id }, { id: wardrobe.id }], 200, {
+      no_mua_default_quote: 'none',
+    });
+    assert.deepEqual(withGrooming.add_ons.map((item) => item.id), [groomingAddOn.id]);
+    await patchCatalog('add_ons', wardrobe, { amount: 75 });
+    await register(studio, [], 400, { no_mua_default_quote: wardrobe.id + ':5000' });
+    assert.equal((await register(studio)).total_amount, 1575);
+    await patchCatalog('add_ons', wardrobe, { is_active: false });
+    assert.equal((await register(studio, [], 200, { no_mua_default_quote: 'none' })).total_amount, 1500);
+    await patchCatalog('add_ons', walkinDefault, { is_active: false });
+    const wardrobePayment = await pay(included, 1550);
+    const includedPaid = (await registrations(included, cashier)).payload;
+    assert.equal(includedPaid.total_amount, 1550);
+    assert.equal(includedPaid.balance, 0);
+    assert.ok(includedPaid.queue_number > 0);
+    assert.deepEqual(orderExtras(includedPaid), [['Wardrobe', 50]]);
+    assert.equal(wardrobePayment.balance_before, 1550);
+    assert.deepEqual((await auditFor(included)).totals.revenue, { studio: 1550, mua: 0, unallocated: 0 });
+    const includedReport = (await send(api + '/student-excel', { token: admin })).payload;
+    assert.equal(includedReport.rows.find((row) => row.jobOrder === includedPaid.job_order_no).addOns[wardrobe.id], 5000);
+    assert.ok(!(await report()).rows.flatMap((row) => row.details).some((detail) => detail.jobId === included.id));
+
     const studioOnly = await register(studio);
     await pay(studioOnly, 1500);
     assert.deepEqual((await auditFor(studioOnly)).totals.revenue, { studio: 1500, mua: 0, unallocated: 0 });
@@ -1094,7 +1185,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
 
     const discountReport = (await send(api + '/student-excel', { token: admin })).payload;
-    const exportRow = discountReport.rows.find((row) => row.jobOrder === mixed.job_order_no);
+    const exportRow = discountReport.rows.find((row) => row.jobOrder === discounted.job_order_no);
     assert.deepEqual([exportRow.packageAmount, exportRow.discount, exportRow.due], [150000, 15000, 180000]);
     const discountBook = buildStudentWorkbook({ ...discountReport, rows: [exportRow] });
     const discountSheet = discountBook.worksheets[0];
@@ -1198,4 +1289,15 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const readback = new Excel.Workbook();
   await readback.xlsx.load(await workbook.xlsx.writeBuffer());
   assert.deepEqual(readback.worksheets[0].getRows(1, expected.length).map((row) => row.values.slice(1)), expected);
+
+  // A server restart keeps both issued identifiers and the high-water mark.
+  const beforeRestart = (await registrations(docsClient)).payload;
+  server.kill();
+  await once(server, 'exit');
+  await startServer();
+  const afterRestart = (await registrations(docsClient, (await login('cashier', 'password123')).token)).payload;
+  assert.deepEqual([afterRestart.job_order_no, afterRestart.queue_number], [beforeRestart.job_order_no, beforeRestart.queue_number]);
+  const afterRestartClient = await register(standard);
+  await pay(afterRestartClient, 1000);
+  assert.ok(Number((await registrations(afterRestartClient)).payload.job_order_no) > Math.max(...numbers.map(Number)));
 });

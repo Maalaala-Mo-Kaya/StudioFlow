@@ -71,7 +71,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
               isShooting ? 'bg-gold text-on-gold' : 'bg-obsidian text-gold'
             }`}
           >
-            {formatQueueNumber(reg.queue_number, index + 1)}
+            {formatQueueNumber(reg.queue_number)}
           </span>
           {isShooting ? (
             <span className="bg-gold/20 text-gold font-mono text-[10px] font-black uppercase tracking-widest px-2 py-0.5 border border-gold animate-pulse">

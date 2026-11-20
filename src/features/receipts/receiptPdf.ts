@@ -570,7 +570,7 @@ export async function downloadJobOrderPdfFor(registration: Registration, cashier
 export async function saveClientDocuments(registrationId: string): Promise<boolean> {
   const data = await loadReceiptData(registrationId);
   const reg = data.registration;
-  if (!data.payments.length) return false;
+  if (!reg.job_order_no || !data.payments.length) return false;
   const files: Array<[name: string, doc: jsPDF]> = [
     [`JO-${reg.job_order_no}.pdf`, await buildJobOrderPdf(data, reg.prepared_by || 'Cashier Staff')],
   ];

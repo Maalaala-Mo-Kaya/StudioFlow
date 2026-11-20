@@ -76,7 +76,7 @@ export const CashierFilterBar: React.FC<CashierFilterBarProps> = ({
         bare
         query={searchQuery}
         onQueryChange={onSearchChange}
-        searchPlaceholder="Search Job № 00001, name, school..."
+        searchPlaceholder="Search name, job number, registration or student ID…"
         searchLabel="Search job orders"
         quickFilter={(
           <div className="w-full sm:w-72 shrink-0">

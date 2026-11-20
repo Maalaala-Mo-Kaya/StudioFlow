@@ -46,6 +46,7 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
         <h3 className="text-base font-black text-ink uppercase">
           {formatClientName(reg)}
         </h3>
+        {!reg.job_order_no && <p className="break-all font-mono text-xs text-neutral-500">Ref {reg.id}</p>}
         <p className="text-xs font-semibold text-neutral-600 mt-0.5">
           {clientGroup(reg, true) || 'School N/A'} •{' '}
           {clientDetail(reg) || 'General'}{' '}
@@ -124,13 +125,13 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
           </button>
         ) : null}
 
-        <button
+        {reg.job_order_no && <button
           type="button"
           onClick={() => onOpenPrint(reg)}
           className="btn-tactile min-h-[44px] px-4 flex items-center justify-center gap-1.5 bg-obsidian text-gold text-xs font-black uppercase tracking-wider cursor-pointer"
         >
           <Printer className="w-4 h-4" /> Stub
-        </button>
+        </button>}
 
         {reg.status !== 'pending_payment' && reg.status !== 'released' && reg.status !== 'cancelled' && (
           <button

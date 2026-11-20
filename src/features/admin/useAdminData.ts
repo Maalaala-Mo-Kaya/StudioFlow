@@ -468,7 +468,10 @@ export function useAdminData() {
     }
   };
 
-  const handleAddAddOn = async (name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind, revenueCategory: RevenueCategory | '') => {
+  const handleAddAddOn = async (
+    name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[],
+    clientKind: PackageKind, revenueCategory: RevenueCategory | '', defaultWhenNoMua: boolean,
+  ) => {
     if (!name.trim()) return;
     try {
       await pb.collection('add_ons').create({
@@ -479,6 +482,7 @@ export function useAdminData() {
         mua_service_types: serviceTypes,
         client_kind: clientKind,
         revenue_category: revenueCategory,
+        default_when_no_mua: defaultWhenNoMua,
         is_active: true,
       });
       loadAllData();
@@ -497,6 +501,7 @@ export function useAdminData() {
     serviceTypes: string[],
     clientKind: PackageKind,
     revenueCategory: RevenueCategory | '',
+    defaultWhenNoMua: boolean,
   ) => {
     try {
       await pb.collection('add_ons').update(id, {
@@ -507,6 +512,7 @@ export function useAdminData() {
         mua_service_types: serviceTypes,
         client_kind: clientKind,
         revenue_category: revenueCategory,
+        default_when_no_mua: defaultWhenNoMua,
       });
       loadAllData();
     } catch (err) {
@@ -522,7 +528,7 @@ export function useAdminData() {
       loadAllData();
     } catch (err) {
       console.error('Failed to toggle add-on:', err);
-      toast.error('Failed to toggle add-on status.');
+      toast.error(err instanceof Error ? err.message : 'Failed to toggle add-on status.');
     }
   };
 

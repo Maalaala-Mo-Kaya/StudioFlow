@@ -26,6 +26,18 @@ function offeredTo(item, clientKind) {
   return kind === "both" || kind === (clientKind || "school");
 }
 
+function defaultAddOns(app, clientKind) {
+  return app.findRecordsByFilter("add_ons", "is_active = true && default_when_no_mua = true", "", 0, 0)
+    .filter((item) => offeredTo(item, clientKind));
+}
+
+function snapshotAddOn(item) {
+  return {
+    id: item.id, code: item.getString("code"), name: item.getString("name"), amount: item.getFloat("amount"),
+    revenue_category: item.getString("revenue_category"),
+  };
+}
+
 /**
  * Turns the client's add-on choices into catalog snapshots { id, code, name, amount }.
  * Add-ons already on the job order (`previous`) keep the price they were sold at; new ones must be
@@ -61,11 +73,8 @@ function priceAddOns(app, selections, previous = [], clientKind = "school") {
     }
     if (used.has(item.id)) throw new BadRequestError("Each add-on can only be selected once.");
     used.add(item.id);
-    return {
-      id: item.id, code: item.getString("code"), name: item.getString("name"), amount: item.getFloat("amount"),
-      revenue_category: item.getString("revenue_category"),
-    };
+    return snapshotAddOn(item);
   });
 }
 
-module.exports = { addOnCents, cents, offeredTo, priceAddOns, savedAddOns };
+module.exports = { addOnCents, cents, defaultAddOns, offeredTo, priceAddOns, savedAddOns, snapshotAddOn };

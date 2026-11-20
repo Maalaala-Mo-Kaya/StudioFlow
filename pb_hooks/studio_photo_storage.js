@@ -50,10 +50,10 @@ function setFolder(record, path) {
 // job order from before folder names were saved (either legacy spelling, if it holds photos).
 // The record ID is added only as a last resort: a duplicate job order number from the old
 // numbering, or a path another job order already owns. A payment is never refused over this.
-function assignFolder(app, registration) {
+function assignFolder(app, registration, newlyNumbered) {
   if (registration.getString("photo_folder")) return;
   let path;
-  try { path = photoFolder(app, registration); } catch (_) { path = pathFor(app, registration) + "_" + registration.id; }
+  try { path = photoFolder(app, registration, newlyNumbered); } catch (_) { path = pathFor(app, registration) + "_" + registration.id; }
   setFolder(registration, path);
 }
 
@@ -84,12 +84,13 @@ function saveDocument(relative, name, bytes) {
   }
 }
 
-function photoFolder(app, registration) {
+function photoFolder(app, registration, newlyNumbered = false) {
   const saved = registration.getString("photo_folder");
   if (saved) return saved;
 
   const jobOrder = registration.getString("job_order_no");
-  if (!jobOrder || app.findRecordsByFilter("registrations", "job_order_no = {:job}", "", 2, 0, { job: jobOrder }).length !== 1) {
+  const matches = jobOrder ? app.findRecordsByFilter("registrations", "job_order_no = {:job}", "", 2, 0, { job: jobOrder }) : [];
+  if (!jobOrder || (newlyNumbered ? matches.length !== 0 : matches.length !== 1 || matches[0].id !== registration.id)) {
     throw new ApiError(409, "This legacy job order cannot be matched to a unique photo folder.");
   }
   const paths = [...new Set([pathFor(app, registration), pathFor(app, registration, true)])];

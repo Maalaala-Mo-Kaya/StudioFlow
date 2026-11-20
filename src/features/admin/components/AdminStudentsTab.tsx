@@ -182,7 +182,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
     isOpen: boolean;
     id: string;
     name: string;
-    jobOrderNo: string;
+    jobOrderNo: string | null;
     paidAmount: number;
   }>({
     isOpen: false,
@@ -208,7 +208,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
   const handleRestore = async (reg: Registration) => {
     try {
       await onRestoreRegistration(reg.id);
-      toast.success(`JO № ${reg.job_order_no} restored.`);
+      toast.success('Registration restored.');
     } catch (err: unknown) {
       toast.error(errorMessage(err, 'Failed to restore the job order'));
     }
@@ -224,7 +224,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
     try {
       await onCancelRegistration(deleteModalState.id, cancelReason.trim());
       setCancelReason('');
-      toast.success(`Registration JO № ${deleteModalState.jobOrderNo} cancelled`);
+      toast.success('Registration cancelled.');
     } catch (err: unknown) {
       toast.error(errorMessage(err, 'Failed to cancel registration'));
       throw err;
@@ -316,7 +316,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
     status: (reg: Registration) => <RegistrationStatusBadge status={reg.status} />,
     actions: (reg: Registration) => (
       <div className="flex items-center justify-end gap-1.5">
-        <button
+        {reg.job_order_no && <button
           type="button"
           onClick={() => void import('../../receipts/receiptPdf')
             .then((pdf) => pdf.downloadJobOrderPdfFor(reg, 'Administrator'))
@@ -328,7 +328,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
         >
           <FileDown className="w-3 h-3 text-gold" />
           <span>PDF</span>
-        </button>
+        </button>}
         <button
           type="button"
           onClick={() => setEditingStudent(reg)}
@@ -453,7 +453,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
       {/* Confirmation Modal */}
       <ConfirmModal
         isOpen={deleteModalState.isOpen}
-        title={`Cancel Registration: JO № ${deleteModalState.jobOrderNo}`}
+        title={deleteModalState.jobOrderNo ? `Cancel Job Order № ${deleteModalState.jobOrderNo}` : 'Cancel Registration'}
         message={(
           <div className="space-y-3">
             <p>

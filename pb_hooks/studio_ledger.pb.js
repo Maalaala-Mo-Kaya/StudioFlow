@@ -123,6 +123,7 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/cancel", (e) => {
     reg.set("cancel_reason", reason);
     ledgerRules.applyTotals(reg, ledgerRules.ledger(tx, reg));
     tx.save(reg);
+    require(__hooks + "/studio_numbering.js").exposeNumbers(reg);
     return reg;
   });
   require(__hooks + "/studio_station_events.js").notify(e.app);
@@ -147,7 +148,9 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/restore", (e) => {
     reg.set("restored_at", new DateTime());
     reg.set("restored_by", ledgerRules.actorName(account));
     ledgerRules.applyTotals(reg, totals);
+    require(__hooks + "/studio_numbering.js").handoffToPhotography(tx, reg);
     tx.save(reg);
+    require(__hooks + "/studio_numbering.js").exposeNumbers(reg);
     return reg;
   });
   require(__hooks + "/studio_station_events.js").notify(e.app);

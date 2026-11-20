@@ -128,6 +128,7 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
       require(__hooks + "/studio_mua_reporting.js").logCompletion(tx, record, artist, account, completedAt);
       record.set("makeup_state", "completed");
       record.set("makeup_completed_at", completedAt);
+      require(__hooks + "/studio_numbering.js").handoffToPhotography(tx, record, completedAt);
       team.log(tx, record, artistId, account, "complete");
     }
     tx.save(record);
@@ -139,7 +140,7 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
 onRecordAfterCreateSuccess((e) => {
   e.next();
   require(__hooks + "/studio_station_events.js").notify(e.app);
-}, "registrations", "mua_service_types");
+}, "registrations", "packages", "add_ons", "mua_service_types");
 
 onRecordAfterUpdateSuccess((e) => {
   e.next();
@@ -149,4 +150,4 @@ onRecordAfterUpdateSuccess((e) => {
 onRecordAfterDeleteSuccess((e) => {
   e.next();
   require(__hooks + "/studio_station_events.js").notify(e.app);
-}, "registrations", "packages", "users");
+}, "registrations", "packages", "add_ons", "users", "mua_service_types");

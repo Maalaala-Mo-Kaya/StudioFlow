@@ -150,6 +150,7 @@ export interface Package {
 }
 
 export interface AddOn {
+  default_when_no_mua?: boolean;
   revenue_category?: RevenueCategory | '';
   id: string;
   code?: string;
@@ -163,6 +164,7 @@ export interface AddOn {
 }
 
 export interface RegistrationAddOn {
+  auto_applied?: boolean;
   revenue_category?: RevenueCategory | '';
   id?: string;
   code?: string;
@@ -185,9 +187,9 @@ export interface MasterListItem {
 
 export interface Registration {
   id: string;
-  job_order_no: string;
+  job_order_no: string | null;
   pictorial_date?: string;
-  queue_number: number;
+  queue_number: number | null;
   family_name: string;
   given_name: string;
   middle_name?: string;

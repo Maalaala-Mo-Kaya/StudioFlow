@@ -37,8 +37,8 @@ interface AdminPackagesTabProps {
   ) => Promise<void>;
   onTogglePackageActive: (id: string, current: boolean) => Promise<void>;
   onDeletePackage: (id: string) => Promise<void>;
-  onAddAddOn: (name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind, revenue: RevenueCategory | '') => Promise<void>;
-  onUpdateAddOn: (id: string, name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind, revenue: RevenueCategory | '') => Promise<void>;
+  onAddAddOn: (name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind, revenue: RevenueCategory | '', defaultWhenNoMua: boolean) => Promise<void>;
+  onUpdateAddOn: (id: string, name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind, revenue: RevenueCategory | '', defaultWhenNoMua: boolean) => Promise<void>;
   onToggleAddOnActive: (id: string, current: boolean) => Promise<void>;
   onDeleteAddOn: (id: string) => Promise<void>;
 }
@@ -95,6 +95,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [newAddonRequiresMua, setNewAddonRequiresMua] = useState(false);
   const [newAddonMuaTypes, setNewAddonMuaTypes] = useState<string[]>([]);
   const [newAddonRevenue, setNewAddonRevenue] = useState<RevenueCategory | ''>('studio');
+  const [newAddonDefault, setNewAddonDefault] = useState(false);
   const [newAddonKind, setNewAddonKind] = useState<PackageKind>('both');
 
   // Editing Add-on State
@@ -105,6 +106,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [editAddonRequiresMua, setEditAddonRequiresMua] = useState(false);
   const [editAddonMuaTypes, setEditAddonMuaTypes] = useState<string[]>([]);
   const [editAddonRevenue, setEditAddonRevenue] = useState<RevenueCategory | ''>('');
+  const [editAddonDefault, setEditAddonDefault] = useState(false);
   const [editAddonKind, setEditAddonKind] = useState<PackageKind>('both');
 
   // Confirmation Modal State
@@ -162,13 +164,15 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     setEditAddonRequiresMua(!!add.requires_mua);
     setEditAddonMuaTypes(add.mua_service_types ?? []);
     setEditAddonRevenue(add.revenue_category || '');
+    setEditAddonDefault(!!add.default_when_no_mua);
     setEditAddonKind(addOnKind(add));
   };
 
   const handleSaveAddonEdit = async () => {
     if (!editingAddonId) return;
     try {
-      await onUpdateAddOn(editingAddonId, editAddonName, editAddonCode, editAddonAmount, editAddonRequiresMua, editAddonMuaTypes, editAddonKind, editAddonRevenue);
+      await onUpdateAddOn(editingAddonId, editAddonName, editAddonCode, editAddonAmount,
+        editAddonRequiresMua, editAddonMuaTypes, editAddonKind, editAddonRevenue, editAddonDefault);
       toast.success(`Add-on "${editAddonName}" updated successfully`);
       setEditingAddonId(null);
     } catch (err: unknown) {
@@ -180,7 +184,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     e.preventDefault();
     if (!newAddonName.trim()) return;
     try {
-      await onAddAddOn(newAddonName, newAddonCode, newAddonAmount, newAddonRequiresMua, newAddonMuaTypes, newAddonKind, newAddonRevenue);
+      await onAddAddOn(newAddonName, newAddonCode, newAddonAmount,
+        newAddonRequiresMua, newAddonMuaTypes, newAddonKind, newAddonRevenue, newAddonDefault);
       toast.success(`Add-on "${newAddonName}" added to catalog`);
       setNewAddonName('');
       setNewAddonCode('');
@@ -188,6 +193,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
       setNewAddonRequiresMua(false);
       setNewAddonMuaTypes([]);
       setNewAddonRevenue('studio');
+      setNewAddonDefault(false);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to create add-on');
     }
@@ -541,8 +547,13 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
           </div>
           <div className="sm:col-span-4">
             <RevenueInput value={newAddonRevenue} onChange={(value) => { setNewAddonRevenue(value); if (value !== 'mua') { setNewAddonRequiresMua(false); setNewAddonMuaTypes([]); } }} />
-            {newAddonRevenue === 'mua' && <MuaRequirementInput checked={newAddonRequiresMua} onChange={setNewAddonRequiresMua}
+            {newAddonRevenue === 'mua' && <MuaRequirementInput checked={newAddonRequiresMua} onChange={(checked) => {
+              setNewAddonRequiresMua(checked);
+              if (checked) setNewAddonDefault(false);
+            }}
               categories={serviceTypes} selected={newAddonMuaTypes} onSelect={setNewAddonMuaTypes} />}
+            <DefaultAddOnInput checked={newAddonDefault} onChange={setNewAddonDefault}
+              disabled={newAddonRevenue === 'mua' && newAddonRequiresMua} />
           </div>
         </form>
 
@@ -596,8 +607,13 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                   </div>
                   <PackageKindInput value={editAddonKind} onChange={setEditAddonKind} />
                   <RevenueInput value={editAddonRevenue} onChange={(value) => { setEditAddonRevenue(value); if (value !== 'mua') { setEditAddonRequiresMua(false); setEditAddonMuaTypes([]); } }} />
-                  {editAddonRevenue === 'mua' && <MuaRequirementInput checked={editAddonRequiresMua} onChange={setEditAddonRequiresMua}
+                  {editAddonRevenue === 'mua' && <MuaRequirementInput checked={editAddonRequiresMua} onChange={(checked) => {
+                    setEditAddonRequiresMua(checked);
+                    if (checked) setEditAddonDefault(false);
+                  }}
                     categories={serviceTypes} selected={editAddonMuaTypes} onSelect={setEditAddonMuaTypes} />}
+                  <DefaultAddOnInput checked={editAddonDefault} onChange={setEditAddonDefault}
+                    disabled={editAddonRevenue === 'mua' && editAddonRequiresMua} />
                   <div className="flex gap-2 justify-end pt-1">
                     <button
                       type="button"
@@ -627,6 +643,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     )}
                     <div className="mt-1 flex flex-wrap gap-1">
                       <MuaRequirementBadge required={add.requires_mua} />
+                      {add.default_when_no_mua && <span className="border border-gold bg-gold-wash px-2 py-0.5 text-[10px] font-bold uppercase text-gold-soft">No-MUA default</span>}
                       <span className="text-[10px] font-bold uppercase">{revenueLabels[add.revenue_category || '']}</span>
                       <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[addOnKind(add)]}</span>
                     </div>
@@ -747,6 +764,22 @@ function MuaRequirementBadge({ required }: { required?: boolean }) {
     }`}>
       {required ? 'MUA Required' : 'No MUA Required'}
     </span>
+  );
+}
+
+function DefaultAddOnInput({ checked, onChange, disabled }: {
+  checked: boolean; onChange: (checked: boolean) => void; disabled: boolean;
+}) {
+  return (
+    <fieldset className="mt-2 border border-neutral-400 bg-panel px-3 py-2" disabled={disabled}>
+      <legend className="px-1 text-[10px] font-black uppercase">Default addon rule</legend>
+      <label className="flex items-center gap-2 text-[11px] font-bold">
+        <input type="checkbox" className="size-4 shrink-0 accent-gold" checked={checked}
+          onChange={(event) => onChange(event.target.checked)} />
+        Automatically apply if the client has no Makeup / Grooming service
+      </label>
+      {disabled && <p className="mt-1 text-[10px] text-neutral-600">Available for add-ons that do not require MUA service.</p>}
+    </fieldset>
   );
 }
 

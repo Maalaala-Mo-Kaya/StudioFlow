@@ -10,7 +10,7 @@ export interface StationStudent {
   course: string;
   packageName: string;
   photographyComplete: boolean;
-  queueNumber: number;
+  queueNumber: number | null;
 }
 
 export const stationCard = 'bg-panel border-2 border-line shadow-lux p-4 sm:p-5';

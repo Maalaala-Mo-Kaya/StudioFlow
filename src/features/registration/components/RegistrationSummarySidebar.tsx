@@ -14,6 +14,7 @@ interface RegistrationSummarySidebarProps {
   packages: Package[];
   selectedPackageId: string | null;
   addOnsList: AddOn[];
+  defaultAddOn?: AddOn;
   selectedAddOns: string[];
   totalAmount: number;
   paymentType: 'full' | 'downpayment';
@@ -36,6 +37,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
   packages,
   selectedPackageId,
   addOnsList,
+  defaultAddOn,
   selectedAddOns,
   totalAmount,
   paymentType,
@@ -50,8 +52,11 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
   const selectedPkg = packages.find((p) => p.id === selectedPackageId);
 
   const activeAddOns = addOnsList.filter((a) => selectedAddOns.includes(a.id));
+  if (defaultAddOn) activeAddOns.push(defaultAddOn);
 
-  const amountDueNow = selectedPkg && paymentType === 'downpayment' ? Math.ceil(totalAmount * 0.5) : totalAmount;
+  const amountDueNow = selectedPkg && paymentType === 'downpayment'
+    ? Math.min(totalAmount, Math.round(Math.round(totalAmount * 100) / 200))
+    : totalAmount;
   const remainingBalance = totalAmount - amountDueNow;
 
   const fullName = [
@@ -135,9 +140,10 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
                 <div className="flex items-center gap-1.5 text-neutral-300 truncate">
                   <Sparkles className="w-3 h-3 text-gold shrink-0" />
                   <span className="truncate">{addon.name}</span>
+                  {addon.id === defaultAddOn?.id && <span className="shrink-0 text-gold-soft">Automatic</span>}
                 </div>
                 <span className="font-black text-gold-soft shrink-0 ml-2">
-                  +{formatCurrency(addon.amount)}
+                  +{formatCurrency(addon.amount, { exact: true })}
                 </span>
               </div>
             ))}
@@ -239,7 +245,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
         {isSubmitting ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin" />
-            <span>Submitting Job Order...</span>
+            <span>Submitting Registration…</span>
           </>
         ) : (
           <>
@@ -251,7 +257,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
 
       <div className="text-center text-[10px] text-neutral-500 font-mono flex items-center justify-center gap-1.5 pt-1">
         <ShieldCheck className="w-3.5 h-3.5 text-gold" />
-        <span>Instant FCFS Queue Allocation</span>
+        <span>Job Order issued after payment</span>
       </div>
     </aside>
   );

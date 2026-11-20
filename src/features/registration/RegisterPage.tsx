@@ -44,10 +44,10 @@ export const RegisterPage: React.FC = () => {
 
         <p className="text-xs sm:text-sm text-neutral-300 mt-4 max-w-3xl leading-relaxed">
           {form.isWalkIn
-            ? 'Tell us about your session, select your package, and sign below to generate your official Job Order and studio queue number.'
+            ? 'Tell us about your session, select your package, and sign below to submit your registration.'
             : form.clientKind === 'school'
-              ? 'Complete your academic profile, select your portrait package, and sign below to generate your official Job Order and studio queue number.'
-              : 'Fill in your details, select your package, and sign below to generate your official Job Order and studio queue number.'}
+              ? 'Complete your academic profile, select your portrait package, and sign below to submit your registration.'
+              : 'Fill in your details, select your package, and sign below to submit your registration.'}
         </p>
       </div>
       <RegistrationStepProgress />
@@ -138,13 +138,15 @@ export const RegisterPage: React.FC = () => {
               selectedPackageId={form.selectedPackageId}
               onSelectPackage={form.setSelectedPackageId}
               addOnsList={form.addOnsList}
+              defaultAddOn={form.defaultAddOn}
               selectedAddOns={form.selectedAddOns}
               onToggleAddOn={form.toggleAddOn}
               paymentType={form.paymentType}
               onPaymentTypeChange={form.setPaymentType}
               totalAmount={form.totalAmount}
               errors={form.errors}
-              emptyMessage={form.clientKind ? undefined : 'Choose the type of client above to see the packages.'}
+              emptyMessage={form.catalogError || (form.catalogLoading ? 'Loading packages and add-ons…'
+                : form.clientKind ? undefined : 'Choose the type of client above to see the packages.')}
             />
 
             {form.asksLook && (
@@ -173,7 +175,7 @@ export const RegisterPage: React.FC = () => {
               >
                 <span>
                   {form.isSubmitting
-                    ? 'Recording Official Job Order...'
+                    ? 'Submitting Registration…'
                     : 'Submit Registration'}
                 </span>
                 <ArrowRight className="w-4 h-4" />
@@ -195,6 +197,7 @@ export const RegisterPage: React.FC = () => {
             packages={form.packages}
             selectedPackageId={form.selectedPackageId}
             addOnsList={form.addOnsList}
+            defaultAddOn={form.defaultAddOn}
             selectedAddOns={form.selectedAddOns}
             totalAmount={form.totalAmount}
             paymentType={form.paymentType}

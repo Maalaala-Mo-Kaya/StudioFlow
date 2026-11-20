@@ -11,6 +11,7 @@ interface PackageSelectionSectionProps {
   selectedPackageId: string | null;
   onSelectPackage: (id: string) => void;
   addOnsList: AddOn[];
+  defaultAddOn?: AddOn;
   selectedAddOns: string[];
   onToggleAddOn: (id: string) => void;
   paymentType: 'full' | 'downpayment';
@@ -26,6 +27,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   selectedPackageId,
   onSelectPackage,
   addOnsList,
+  defaultAddOn,
   selectedAddOns,
   onToggleAddOn,
   paymentType,
@@ -265,6 +267,17 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
         </div>
       )}
 
+      {defaultAddOn && (
+        <div className="mt-4 border border-gold bg-gold-wash p-3.5" aria-live="polite">
+          <p className="text-[10px] font-black uppercase tracking-wider text-gold-soft">Default service applied</p>
+          <div className="flex items-start justify-between gap-3 text-sm font-bold text-ink">
+            <span>{defaultAddOn.name}</span>
+            <span className="shrink-0 font-mono">{formatCurrency(defaultAddOn.amount, { exact: true })}</span>
+          </div>
+          <p className="mt-1 text-xs text-neutral-600">Automatically included because no Makeup / Grooming service was selected.</p>
+        </div>
+      )}
+
       {/* Payment Preference & Live Total */}
       <div className="mt-6 p-5 bg-obsidian text-white border-2 border-line flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="w-full sm:w-auto">
@@ -304,7 +317,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
             Total Job Order
           </span>
           <span className="font-mono text-2xl sm:text-3xl font-black text-gold">
-            {selectedPackageId ? formatCurrency(totalAmount) : '₱0.00'}
+            {selectedPackageId ? formatCurrency(totalAmount, { exact: true }) : '₱0.00'}
           </span>
         </div>
       </div>

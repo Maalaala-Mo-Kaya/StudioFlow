@@ -90,6 +90,7 @@ function clearClientRecords(dbFile, clearRosters) {
       for (const t of [...CLIENT_TABLES, ...(clearRosters ? ['master_lists'] : [])]) {
         if (tables.has(t)) db.exec(`DELETE FROM "${t}"`);
       }
+      if (tables.has('studio_number_sequences')) db.exec('DELETE FROM studio_number_sequences');
       if (tables.has('camera_stations')) {
         db.exec(`UPDATE camera_stations SET active_registration = '', session_started = '', session_imported = 0,
           session_skip = NULL, waiting_count = 0, last_scan = '', last_import = '', last_error = '', scan_lock = 0`);

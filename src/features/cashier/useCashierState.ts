@@ -377,7 +377,8 @@ export function useCashierState() {
       const fullName = `${r.given_name} ${r.family_name}`.toLowerCase();
       const jobNo = (r.job_order_no || '').toLowerCase();
       const school = clientSummary(r, true).toLowerCase();
-      const matchesSearch = !q || fullName.includes(q) || jobNo.includes(q) || school.includes(q);
+      const matchesSearch = !q || fullName.includes(q) || jobNo.includes(q) || school.includes(q)
+        || r.id.toLowerCase().includes(q) || r.student_id?.toLowerCase().includes(q);
 
       if (!matchesSearch) return false;
 
