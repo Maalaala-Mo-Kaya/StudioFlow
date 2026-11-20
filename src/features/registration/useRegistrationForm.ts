@@ -14,7 +14,6 @@ import type {
 import type { ClientKind } from '../../types';
 import { splitFullName } from '../../utils/formatters';
 import { useStudioSettings } from '../../hooks/useStudioSettings';
-import type { MakeupLook } from '../../constants/makeupLook';
 import {
   emailPattern, mobilePattern, packageRequiredMessage, registrationFields, validationProps,
   type RegistrationErrors,
@@ -68,7 +67,6 @@ export function useRegistrationForm() {
 
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
-  const [makeupLook, setMakeupLook] = useState<MakeupLook | ''>('');
   const [makeupLookNote, setMakeupLookNote] = useState('');
   const [paymentType, setPaymentType] = useState<'full' | 'downpayment'>('full');
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -266,17 +264,10 @@ export function useRegistrationForm() {
     ), 0)
     : 0;
 
-  // Preferred makeup look: asked when the package or an add-on brings makeup / grooming,
-  // unless it is switched off for this type of client, school or session (Admin → Client Types).
+  // Show the optional artist note only when the selected order includes an MUA service.
   const bringsMakeup = !!selectedPackage && (!!selectedPackage.requires_mua
     || kindAddOns.some((item) => chosenAddOns.includes(item.id) && item.requires_mua));
-  // Same rule as the server (pb_hooks/studio_makeup_look.js `asked`). Written inline on purpose:
-  // moving it into a helper call made React Compiler drop this hook's memoized callbacks.
-  const lookSchoolOff = !!organizations.find((school) => school.id === selectedOrgId)?.makeup_look_off;
-  const lookOn = isWalkIn
-    ? !!studio.settings?.makeup_look_walkin && !selectedSession?.makeup_look_off
-    : clientKind === 'school' && !!studio.settings?.makeup_look_school && !lookSchoolOff;
-  const asksLook = bringsMakeup && lookOn;
+  const asksLook = bringsMakeup;
 
   // Signature Handler
   const handleSignatureChange = useCallback((blob: Blob | null, dataUrl?: string | null) => {
@@ -324,7 +315,6 @@ export function useRegistrationForm() {
     if (cleanMobile && !mobilePattern.test(cleanMobile.replace(/[ -]/g, ''))) {
       fieldErrors.mobile_number = 'Enter a valid Philippine mobile number, such as 0917-000-0000.';
     }
-    if (asksLook && !makeupLook) fieldErrors.makeup_look = 'Choose your preferred look.';
     if (!termsAccepted) fieldErrors.terms_accepted = 'Agree to the Terms & Conditions to proceed.';
     if (!selectedPackage || !signatureBlob || Object.keys(fieldErrors).length) {
       if (!selectedPackage) fieldErrors.package = packageRequiredMessage;
@@ -368,7 +358,6 @@ export function useRegistrationForm() {
       formData.append('package', selectedPackage.id);
       formData.append('add_ons', JSON.stringify(selectedAddOnObjects));
       if (asksLook) {
-        formData.append('makeup_look', makeupLook);
         formData.append('makeup_look_note', makeupLookNote.trim());
       }
       formData.append('paid_amount', '0');
@@ -434,7 +423,6 @@ export function useRegistrationForm() {
     setEmail('');
     setSelectedPackageId(null);
     setSelectedAddOns([]);
-    setMakeupLook('');
     setMakeupLookNote('');
     setPaymentType('full');
     setTermsAccepted(false);
@@ -507,8 +495,6 @@ export function useRegistrationForm() {
     selectedAddOns: chosenAddOns,
     toggleAddOn,
     asksLook,
-    makeupLook,
-    setMakeupLook: changeField('makeup_look', setMakeupLook),
     makeupLookNote,
     setMakeupLookNote,
     paymentType,

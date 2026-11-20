@@ -111,7 +111,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const prepared = await create('packages', {
     code: 'PKG-D', name: 'Package D', amount: 1000, is_active: true, photo_selection_limit: 2, requires_mua: true,
   });
-  const makeup = await create('add_ons', { code: 'EXTRA', name: 'Studio upgrade', amount: 100, is_active: true, requires_mua: true });
+  const makeup = await create('add_ons', { code: 'EXTRA', name: 'Touch up', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true });
   const patchCatalog = (collection, item, body) => send(records(collection, item.id), { token: admin, method: 'PATCH', body })
     .then(({ payload }) => payload);
   async function createStaff(username, role) {
@@ -552,7 +552,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     mua_service_types: [makeupType.id],
   });
   const duplicateMakeup = await create('add_ons', {
-    code: 'TOUCH', name: 'Touch up', amount: 100, is_active: true, requires_mua: true,
+    code: 'TOUCH', name: 'Touch up', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true,
     mua_service_types: [makeupType.id],
   });
   const multi = await register(multiPackage, [{ id: duplicateMakeup.id }]);
@@ -929,29 +929,27 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     .map((folder) => folder.name).includes('camera'), true);
   await send(records('camera_stations', camera.id), { token: photographer, method: 'DELETE', status: 404 });
 
-  // Preferred makeup look: required at the kiosk when the order brings makeup and the question is on.
+  // MUA note: the preferred-look choices are retired, but the optional note remains.
   const lookPackage = await create('packages', {
     code: 'LOOK', name: 'Look Portrait', amount: 1000, is_active: true, requires_mua: true, mua_service_types: [groomingType.id],
   });
   const lookAddOn = await create('add_ons', {
-    code: 'LOOK-ADD', name: 'Look grooming', amount: 100, is_active: true, requires_mua: true, mua_service_types: [groomingType.id],
+    code: 'LOOK-ADD', name: 'Look grooming', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true, mua_service_types: [groomingType.id],
   });
-  const missingLook =await register(lookPackage, [], 400, { makeup_look: '' });
-  assert.equal(missingLook.data.makeup_look.message, 'Choose your preferred look.');
-  assert.ok((await register(lookPackage, [], 400, { makeup_look: 'glam' })).data.makeup_look);
   assert.ok((await register(lookPackage, [], 400, { makeup_look_note: 'x'.repeat(201) })).data.makeup_look_note);
   const lookClient = await register(lookPackage, [], 200, { makeup_look: 'grooming', makeup_look_note: '  no lipstick  ' });
-  assert.deepEqual([lookClient.makeup_look, lookClient.makeup_look_note], ['grooming', 'no lipstick']);
-  // No makeup in the order: the look is not kept.
+  assert.deepEqual([lookClient.makeup_look, lookClient.makeup_look_note], ['', 'no lipstick']);
+  // No makeup in the order: the note is not kept.
   const noMakeup = await register(standard, [], 200, { makeup_look: 'full', makeup_look_note: 'ignored' });
   assert.deepEqual([noMakeup.makeup_look, noMakeup.makeup_look_note], ['', '']);
-  // An add-on that brings makeup asks it too.
-  assert.ok((await register(standard, [{ id: lookAddOn.id }], 400, { makeup_look: '' })).data.makeup_look);
-  // The MUA station shows the look and the note.
+  // An MUA add-on keeps its optional note without a preferred-look choice.
+  const addOnNote = await register(standard, [{ id: lookAddOn.id }], 200, { makeup_look: '', makeup_look_note: 'sensitive skin' });
+  assert.equal(addOnNote.makeup_look_note, 'sensitive skin');
+  // The MUA station shows the note and no preferred look.
   await pay(lookClient, 1000);
   const lookRow = (await queue(artists[1])).find((row) => row.id === lookClient.id);
-  assert.deepEqual([lookRow.look, lookRow.lookNote], ['grooming', 'no lipstick']);
-  // Switched off for this school: not asked, and not kept if sent.
+  assert.deepEqual([lookRow.look, lookRow.lookNote], ['', 'no lipstick']);
+  // Historical client-type look settings remain readable, but no longer gate registration.
   await patchCatalog('organizations', school, { makeup_look_off: true });
   const skipped = await register(lookPackage, [], 200, { makeup_look: '' });
   assert.equal((await register(lookPackage, [], 200, { makeup_look: 'full' })).makeup_look, '');

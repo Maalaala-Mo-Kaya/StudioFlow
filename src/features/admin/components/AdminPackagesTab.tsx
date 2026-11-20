@@ -540,9 +540,9 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
             <PackageKindInput value={newAddonKind} onChange={setNewAddonKind} />
           </div>
           <div className="sm:col-span-4">
-            <RevenueInput value={newAddonRevenue} onChange={setNewAddonRevenue} />
-            <MuaRequirementInput checked={newAddonRequiresMua} onChange={setNewAddonRequiresMua}
-              categories={serviceTypes} selected={newAddonMuaTypes} onSelect={setNewAddonMuaTypes} />
+            <RevenueInput value={newAddonRevenue} onChange={(value) => { setNewAddonRevenue(value); if (value !== 'mua') { setNewAddonRequiresMua(false); setNewAddonMuaTypes([]); } }} />
+            {newAddonRevenue === 'mua' && <MuaRequirementInput checked={newAddonRequiresMua} onChange={setNewAddonRequiresMua}
+              categories={serviceTypes} selected={newAddonMuaTypes} onSelect={setNewAddonMuaTypes} />}
           </div>
         </form>
 
@@ -595,9 +595,9 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     </div>
                   </div>
                   <PackageKindInput value={editAddonKind} onChange={setEditAddonKind} />
-                  <RevenueInput value={editAddonRevenue} onChange={setEditAddonRevenue} />
-                  <MuaRequirementInput checked={editAddonRequiresMua} onChange={setEditAddonRequiresMua}
-                    categories={serviceTypes} selected={editAddonMuaTypes} onSelect={setEditAddonMuaTypes} />
+                  <RevenueInput value={editAddonRevenue} onChange={(value) => { setEditAddonRevenue(value); if (value !== 'mua') { setEditAddonRequiresMua(false); setEditAddonMuaTypes([]); } }} />
+                  {editAddonRevenue === 'mua' && <MuaRequirementInput checked={editAddonRequiresMua} onChange={setEditAddonRequiresMua}
+                    categories={serviceTypes} selected={editAddonMuaTypes} onSelect={setEditAddonMuaTypes} />}
                   <div className="flex gap-2 justify-end pt-1">
                     <button
                       type="button"

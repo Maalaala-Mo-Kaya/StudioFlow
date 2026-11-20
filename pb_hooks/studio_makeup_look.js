@@ -35,4 +35,8 @@ function clear(registration) {
   registration.set("makeup_look_note", "");
 }
 
-module.exports = { asked, check, clear, looks };
+function clearLook(registration) {
+  registration.set("makeup_look", "");
+}
+
+module.exports = { asked, check, clear, clearLook, looks };

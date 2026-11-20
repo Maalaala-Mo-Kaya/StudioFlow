@@ -31,6 +31,18 @@ onRecordCreateRequest((e) => {
   return e.next();
 }, "mua_service_types");
 
+// Studio-revenue add-ons must never create an MUA queue requirement.
+function normalizeAddonMuaRequirement(e) {
+  if (e.record.getString("revenue_category") !== "mua") {
+    e.record.set("requires_mua", false);
+    e.record.set("mua_service_types", []);
+  }
+  return e.next();
+}
+
+onRecordCreateRequest(normalizeAddonMuaRequirement, "add_ons");
+onRecordUpdateRequest(normalizeAddonMuaRequirement, "add_ons");
+
 onRecordUpdateRequest((e) => {
   if ("payout_rate" in (e.requestInfo().body || {})) {
     const rate = e.record.getFloat("payout_rate");

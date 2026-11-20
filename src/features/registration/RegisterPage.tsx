@@ -149,8 +149,6 @@ export const RegisterPage: React.FC = () => {
 
             {form.asksLook && (
               <MakeupLookSection
-                value={form.makeupLook}
-                onChange={form.setMakeupLook}
                 note={form.makeupLookNote}
                 onNoteChange={form.setMakeupLookNote}
                 errors={form.errors}

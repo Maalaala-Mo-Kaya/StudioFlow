@@ -92,12 +92,13 @@ onRecordCreateRequest((e) => {
     invalid("package", "This package is not offered for this type of client. Choose another package.");
   }
 
-  // Preferred makeup look: only when the order includes makeup / grooming and the kiosk asks
-  // this client (Admin → Client Types, per school / session type). Otherwise it is cleared.
+  // The preferred-look UI is retired. Keep historical values, but validate only the
+  // optional artist note for new MUA orders. Orders without MUA services are cleared.
   const lookRules = require(__hooks + "/studio_makeup_look.js");
   const workflow = require(__hooks + "/studio_workflow.js");
-  if (pkg && workflow.purchasedServices(e.app, record).length && lookRules.asked(e.app, record)) {
-    const problem = lookRules.check(record, true);
+  if (pkg && workflow.purchasedServices(e.app, record).length) {
+    lookRules.clearLook(record);
+    const problem = lookRules.check(record, false);
     if (problem) invalid(problem.field, problem.message);
   } else {
     lookRules.clear(record);
