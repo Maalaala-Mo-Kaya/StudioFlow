@@ -36,7 +36,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
 // Client records: removed in "keep" mode. Order matters only for readability (no SQL foreign keys).
-const CLIENT_TABLES = ['refunds', 'payments', 'mua_completions', 'registrations'];
+const CLIENT_TABLES = ['refunds', 'payments', 'mua_completions', 'mua_assignment_events', 'registrations'];
 
 function fail(message) {
   console.error('\n[STOPPED] ' + message);
@@ -69,7 +69,7 @@ function counts(dbFile) {
   try {
     const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
     const n = (t) => (tables.has(t) ? db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n : 0);
-    return Object.fromEntries(['registrations', 'payments', 'refunds', 'mua_completions', 'master_lists', 'organizations', 'courses',
+    return Object.fromEntries(['registrations', 'payments', 'refunds', 'mua_completions', 'mua_assignment_events', 'master_lists', 'organizations', 'courses',
       'packages', 'add_ons', 'mua_service_types', 'users', 'camera_stations'].map((t) => [t, n(t)]));
   } finally { db.close(); }
 }
@@ -135,7 +135,7 @@ async function main() {
     console.log('\nDatabase: ' + dbFile);
     console.log('Photos:   ' + photoRoot + (fs.existsSync(photoRoot) ? '' : '  (not found)'));
     console.log('\nNow in the database:');
-    console.log(`  Client records : ${before.registrations} job orders, ${before.payments} payments, ${before.refunds} refunds, ${before.mua_completions} makeup logs, ${before.master_lists} roster rows`);
+    console.log(`  Client records : ${before.registrations} job orders, ${before.payments} payments, ${before.refunds} refunds, ${before.mua_completions} makeup logs, ${before.mua_assignment_events} assignment events, ${before.master_lists} roster rows`);
     console.log(`  Setup          : ${before.organizations} schools, ${before.courses} courses, ${before.packages} packages, ${before.add_ons} add-ons, ${before.mua_service_types} makeup services, ${before.users} staff accounts, ${before.camera_stations} cameras`);
 
     let mode = option('mode');
@@ -178,7 +178,7 @@ async function main() {
     if (mode === 'keep') {
       const ids = clearClientRecords(dbFile, rosters);
       // Uploaded files (signatures) live under storage/<collection id>/<record id>/.
-      for (const name of ['registrations', 'payments', 'refunds', 'mua_completions', ...(rosters ? ['master_lists'] : [])]) {
+      for (const name of [...CLIENT_TABLES, ...(rosters ? ['master_lists'] : [])]) {
         if (ids[name]) fs.rmSync(path.join(dataDir, 'storage', ids[name]), { recursive: true, force: true });
       }
       console.log('[OK] Client records removed; setup kept.');
@@ -203,7 +203,7 @@ async function main() {
 
     const after = counts(dbFile);
     console.log('\nAfter reset:');
-    console.log(`  Client records : ${after.registrations} job orders, ${after.payments} payments, ${after.refunds} refunds, ${after.mua_completions} makeup logs, ${after.master_lists} roster rows`);
+    console.log(`  Client records : ${after.registrations} job orders, ${after.payments} payments, ${after.refunds} refunds, ${after.mua_completions} makeup logs, ${after.mua_assignment_events} assignment events, ${after.master_lists} roster rows`);
     console.log(`  Setup          : ${after.organizations} schools, ${after.courses} courses, ${after.packages} packages, ${after.add_ons} add-ons, ${after.users} staff accounts, ${after.camera_stations} cameras`);
     console.log('\nNumbering starts at: Job Order 00001, receipt OR-000001, queue #001.');
     console.log('\nBefore handing over:');

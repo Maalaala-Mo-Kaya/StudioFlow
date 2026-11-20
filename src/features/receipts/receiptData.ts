@@ -4,6 +4,7 @@ import { formatJobOrderNo } from '../../utils/formatters';
 import { getRegistrationAddOns, sumAddOnAmounts } from '../../utils/registrationAddOns';
 import type { PaymentRecord, RefundRecord, Registration, StudioSettings } from '../../types';
 import { eventDateLabel, isWalkIn } from '../../utils/clientInfo';
+import { discountCents, revenueMovements, revenueTerms } from '../../utils/revenue';
 
 export interface ReceiptData {
   registration: Registration;
@@ -98,7 +99,29 @@ export function profileLine(reg: Registration): string {
  */
 export function soldPackagePrice(reg: Registration): number {
   const cents = (value: number | undefined) => Math.round((value || 0) * 100);
-  return (cents(reg.total_amount) - Math.round(sumAddOnAmounts(getRegistrationAddOns(reg.add_ons)) * 100) - cents(reg.other_fees)) / 100;
+  return (cents(reg.total_amount) + discountCents(reg) - Math.round(sumAddOnAmounts(getRegistrationAddOns(reg.add_ons)) * 100) - cents(reg.other_fees)) / 100;
+}
+
+export function orderExtras(reg: Registration): [string, number][] {
+  const addOns = getRegistrationAddOns(reg.add_ons);
+  return [
+    ...addOns.map((item): [string, number] => [item.name + (item.revenue_category === 'mua' ? ' (MUA)' : ''), item.amount]),
+    ...(reg.other_fees ? [['Other fees', reg.other_fees] as [string, number]] : []),
+    ...(discountCents(reg) ? [[`Discount (${reg.revenue_discount?.reason})`, -discountCents(reg) / 100] as [string, number]] : []),
+  ];
+}
+
+export function receiptRevenueLine(data: ReceiptData, payment?: PaymentRecord, currency = true) {
+  const reg = data.registration;
+  const split = payment
+    ? revenueMovements(reg, data.payments, data.refunds).movements.get('p:' + payment.id)
+    : revenueTerms(reg);
+  if (!split) return '';
+  const format = (value: number) => (currency ? '' : 'PHP ') + peso(value / 100, currency);
+  return [
+    `Studio ${format(split.studio)}`, `MUA ${format(split.mua)}`,
+    ...(split.unallocated ? [`Unallocated ${format(split.unallocated)}`] : []),
+  ].join(' / ');
 }
 
 export const isCounted = (payment: PaymentRecord) => (payment.status || 'completed') === 'completed';

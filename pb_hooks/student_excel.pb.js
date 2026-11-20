@@ -76,6 +76,8 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
         addOns: readJson(record, "add_ons"),
         due: cents(record.getFloat("total_amount")),
         otherFees: cents(record.getFloat("other_fees")),
+        revenueTerms: readJson(record, "revenue_terms"),
+        discount: readJson(record, "revenue_discount"),
       };
     });
     refunds = tx.findAllRecords("refunds").map((record) => ({
@@ -93,7 +95,7 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
   const paymentsByRegistration = new Map();
   for (const payment of payments) {
     // A refund or void marks the original transaction as reversed in the ledger.
-    if (payment.status === "refunded" || payment.status === "voided") continue;
+    if (payment.status && payment.status !== "completed") continue;
     const totals = paymentsByRegistration.get(payment.registration) || { full: 0, additional: 0, down: 0, refunded: 0 };
     if (payment.type === "full" || payment.type === "balance_settlement") totals.full += payment.amount;
     else if (payment.type === "initial") totals.down += payment.amount;
@@ -135,9 +137,10 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
     const packageId = record.packageId || snapshot?.id || "";
     const pkg = packagesById.get(packageId);
     const hasSnapshot = snapshot?.id === packageId;
+    const discount = (record.discount?.studio || 0) + (record.discount?.mua || 0);
     const packageAmount = hasSnapshot && Number.isFinite(snapshot.amount)
       ? cents(snapshot.amount)
-      : record.due - record.otherFees - addOnTotal;
+      : record.due + discount - record.otherFees - addOnTotal;
     if (packageId && !packageColumns.has(packageId)) {
       packageColumns.set(packageId, pkg || {
         id: packageId,
@@ -164,6 +167,8 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
       packageAmount,
       addOns: Object.fromEntries(charges),
       otherFees: record.otherFees,
+      discount,
+      revenueTerms: record.revenueTerms,
       due: record.due,
       payments: paymentsByRegistration.get(record.id) || { full: 0, additional: 0, down: 0, refunded: 0 },
     };

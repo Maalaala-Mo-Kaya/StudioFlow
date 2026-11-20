@@ -4,7 +4,7 @@ import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import type {
   Organization, Level, Course, SchoolCourse, AssignSchoolCourse, Package, AddOn,
-  Registration, MasterListItem, StaffUser, StaffRole,
+  Registration, MasterListItem, StaffUser, StaffRole, RevenueCategory,
   ProductionStatus, ProductionUpdateResult, PhotoStatus, PaymentRecord, RefundRecord,
 } from '../../types';
 import { parseRosterCsv, exportRegistrationsToCsv } from '../../utils/csv';
@@ -58,6 +58,7 @@ export function useAdminData() {
   const [newPkgPhotoLimit, setNewPkgPhotoLimit] = useState(0);
   const [newPkgRequiresMua, setNewPkgRequiresMua] = useState(false);
   const [newPkgKind, setNewPkgKind] = useState<PackageKind>('school');
+  const [newPkgRevenue, setNewPkgRevenue] = useState<RevenueCategory>('studio');
   const [newPkgMuaTypes, setNewPkgMuaTypes] = useState<string[]>([]);
   const [newPkgInclusions, setNewPkgInclusions] = useState('');
 
@@ -175,6 +176,7 @@ export function useAdminData() {
         requires_mua: newPkgRequiresMua,
         mua_service_types: newPkgMuaTypes,
         client_kind: newPkgKind,
+        revenue_category: newPkgRevenue,
         inclusions: JSON.stringify(inclusions),
         is_active: true,
       });
@@ -185,9 +187,12 @@ export function useAdminData() {
       setNewPkgPhotoLimit(0);
       setNewPkgRequiresMua(false);
       setNewPkgMuaTypes([]);
+      setNewPkgRevenue('studio');
+      toast.success('Package created.');
       loadAllData();
     } catch (err) {
       console.error('Failed to add package:', err);
+      toast.error('Failed to create the package.');
     }
   };
 
@@ -420,7 +425,7 @@ export function useAdminData() {
   // --- Package & Add-on Mutations (T020) ---
   const handleUpdatePackage = async (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; mua_service_types: string[]; client_kind: PackageKind }
+    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; mua_service_types: string[]; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
   ) => {
     try {
       await pb.collection('packages').update(id, {
@@ -432,6 +437,7 @@ export function useAdminData() {
         requires_mua: data.requires_mua,
         mua_service_types: data.mua_service_types,
         client_kind: data.client_kind,
+        revenue_category: data.revenue_category,
       });
       loadAllData();
     } catch (err) {
@@ -462,7 +468,7 @@ export function useAdminData() {
     }
   };
 
-  const handleAddAddOn = async (name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind) => {
+  const handleAddAddOn = async (name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind, revenueCategory: RevenueCategory | '') => {
     if (!name.trim()) return;
     try {
       await pb.collection('add_ons').create({
@@ -472,6 +478,7 @@ export function useAdminData() {
         requires_mua: requiresMua,
         mua_service_types: serviceTypes,
         client_kind: clientKind,
+        revenue_category: revenueCategory,
         is_active: true,
       });
       loadAllData();
@@ -489,6 +496,7 @@ export function useAdminData() {
     requiresMua: boolean,
     serviceTypes: string[],
     clientKind: PackageKind,
+    revenueCategory: RevenueCategory | '',
   ) => {
     try {
       await pb.collection('add_ons').update(id, {
@@ -498,6 +506,7 @@ export function useAdminData() {
         requires_mua: requiresMua,
         mua_service_types: serviceTypes,
         client_kind: clientKind,
+        revenue_category: revenueCategory,
       });
       loadAllData();
     } catch (err) {
@@ -654,6 +663,8 @@ export function useAdminData() {
     setNewPkgPhotoLimit,
     newPkgRequiresMua,
     newPkgKind,
+    newPkgRevenue,
+    setNewPkgRevenue,
     setNewPkgKind,
     setNewPkgRequiresMua,
     newPkgMuaTypes,

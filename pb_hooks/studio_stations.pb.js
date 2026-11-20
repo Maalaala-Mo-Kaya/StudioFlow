@@ -7,18 +7,20 @@ routerAdd("GET", "/api/studioflow/queue-count", (e) => {
 
 routerAdd("GET", "/api/studioflow/makeup", (e) => {
   const workflow = require(__hooks + "/studio_workflow.js");
+  const team = require(__hooks + "/studio_mua_team.js");
   const account = workflow.staff(e.app, e.auth, ["admin", "mua"]);
-  const admin = account.getString("role") === "admin";
+  const perms = team.permissions(team.settings(e.app), account);
   const waiting = "status = 'paid' && paid_amount > 0 && makeup_service != '' && makeup_state = ''";
   const assigned = "(makeup_state = 'claimed' || makeup_state = 'in_progress')";
-  const filter = admin ? `(${waiting}) || ${assigned} || makeup_state = 'completed'`
-    // Admins still see cancelled assignments so they can release them; artists do not.
-    : `(${waiting}) || (${assigned} && makeup_artist = {:artist} && status != 'cancelled')`;
+  const showCompleted = !perms.canClaim || e.request.url.query().get("completed") === "1";
+  const personal = `makeup_artist = {:artist} && ((${assigned} && status != 'cancelled')${showCompleted ? " || makeup_state = 'completed'" : ""})`;
+  const filter = perms.manage ? `(${waiting}) || ${assigned} || makeup_state = 'completed'`
+    : perms.canClaim ? `(${waiting}) || (${personal})` : personal;
   const registrations = e.app.findRecordsByFilter("registrations", filter, "created,queue_number,id", 0, 0, { artist: account.id });
   e.response.header().set("Cache-Control", "private, no-store");
   return e.json(200, registrations.map((record) => {
     const artistId = record.getString("makeup_artist");
-    const artist = admin ? workflow.catalogItem(e.app, "users", artistId) : null;
+    const artist = perms.manage ? workflow.catalogItem(e.app, "users", artistId) : null;
     return {
       ...workflow.summary(e.app, record),
       service: record.getString("makeup_service"),
@@ -38,22 +40,43 @@ routerAdd("GET", "/api/studioflow/makeup", (e) => {
 
 routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
   const workflow = require(__hooks + "/studio_workflow.js");
+  const team = require(__hooks + "/studio_mua_team.js");
   const action = e.request.pathValue("action");
-  if (!["claim", "start", "complete", "release"].includes(action)) throw new NotFoundError();
+  if (!["assign", "claim", "start", "complete", "release"].includes(action)) throw new NotFoundError();
   const input = new DynamicModel({ artistId: "", version: "", onBehalf: false });
   e.bindBody(input);
   // Older MUA tabs omit the version. Treat those requests as version zero so
   // they can never act on a new assignment after an admin release.
-  const requestedVersion = input.version || (action === "release" || input.onBehalf ? "" : "0");
+  const requestedVersion = input.version || (["release", "assign"].includes(action) || input.onBehalf ? "" : "0");
   if (!/^\d+$/.test(requestedVersion)) {
     throw new BadRequestError("Reload the makeup queue page before updating this assignment.");
   }
   const stateAfter = workflow.withRegistration(e.app, e.request.pathValue("id"), (tx, record) => {
     const onBehalf = input.onBehalf && (action === "start" || action === "complete");
-    const account = workflow.staff(tx, e.auth, action === "release" || onBehalf ? ["admin"] : ["mua"]);
+    const managerAction = ["assign", "release"].includes(action);
+    const account = workflow.staff(tx, e.auth, onBehalf ? ["admin"] : managerAction ? ["admin", "mua"] : ["mua"]);
+    const perms = team.permissions(team.settings(tx), account);
+    if (managerAction && !perms.manage) throw new ForbiddenError("Only Admin or the Parent MUA can manage assignments.");
+    if (action === "claim" && !perms.canClaim) throw new ForbiddenError("Clients must be assigned from the team queue.");
     const state = record.getString("makeup_state");
     const artistId = record.getString("makeup_artist");
     const version = record.getInt("makeup_version");
+    const eligible = record.getString("status") === "paid" && record.getFloat("paid_amount") > 0 && !!record.getString("makeup_service");
+    if (action === "assign") {
+      const target = team.availableArtist(tx, input.artistId);
+      if (!target) throw new BadRequestError("Select an enabled MUA account.");
+      if (target.id === perms.parentId && !perms.allowSelf) throw new ForbiddenError("Admin has disabled Parent MUA self-assignment.");
+      if (!eligible || state === "completed") throw new ApiError(409, "This order is no longer available for assignment.");
+      if (artistId === target.id && workflow.activeMakeup.includes(state)
+        && [version, version - 1].includes(Number(requestedVersion))) return state;
+      if (requestedVersion !== String(version)) throw new ApiError(409, "The assignment changed. Refresh the queue and try again.");
+      record.set("makeup_version", version + 1);
+      record.set("makeup_artist", target.id);
+      record.set("makeup_state", "claimed");
+      team.log(tx, record, target.id, account, artistId ? "reassign" : "assign", artistId);
+      tx.save(record);
+      return "claimed";
+    }
     if (requestedVersion !== String(version)) {
       throw new ApiError(409, "The assignment changed. Reload the makeup queue page and try again.");
     }
@@ -63,6 +86,7 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
         record.set("makeup_state", "");
         record.set("makeup_artist", "");
         record.set("makeup_version", version + 1);
+        team.log(tx, record, artistId, account, "release", artistId);
         tx.save(record);
         return "waiting";
       }
@@ -80,7 +104,7 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
       throw new ForbiddenError("Only the assigned makeup artist can update this student.");
     }
     if (state === "completed" && action === "complete") return state;
-    if (record.getString("status") !== "paid" || record.getFloat("paid_amount") <= 0 || !record.getString("makeup_service")) {
+    if (!eligible) {
       throw new ApiError(409, "This student is no longer eligible for makeup or grooming.");
     }
     if (action === "claim") {
@@ -88,10 +112,12 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
       if (state || artistId) throw new ApiError(409, "This student is no longer waiting.");
       record.set("makeup_artist", account.id);
       record.set("makeup_state", "claimed");
+      team.log(tx, record, account.id, account, "assign");
     } else if (action === "start") {
       if (state === "in_progress") return state;
       if (state !== "claimed") throw new ApiError(409, "The assignment is no longer waiting to start.");
       record.set("makeup_state", "in_progress");
+      team.log(tx, record, artistId, account, "start");
     } else {
       if (state !== "in_progress") throw new ApiError(409, "Start makeup or grooming before marking it complete.");
       const artist = onBehalf ? workflow.catalogItem(tx, "users", artistId) : account;
@@ -102,6 +128,7 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
       require(__hooks + "/studio_mua_reporting.js").logCompletion(tx, record, artist, account, completedAt);
       record.set("makeup_state", "completed");
       record.set("makeup_completed_at", completedAt);
+      team.log(tx, record, artistId, account, "complete");
     }
     tx.save(record);
     return record.getString("makeup_state");

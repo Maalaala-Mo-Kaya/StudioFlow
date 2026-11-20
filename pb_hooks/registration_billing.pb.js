@@ -23,9 +23,13 @@ onRecordCreate((e) => {
   const base = pkg ? pkg.getFloat("amount") : 0;
   e.record.set("package_snapshot", pkg ? {
     id: pkg.id, code: pkg.getString("code"), name: pkg.getString("name"), amount: base,
+    revenue_category: pkg.getString("revenue_category"),
   } : null);
   const total = pricing.cents(base) + pricing.addOnCents(pricing.savedAddOns(e.record)) + pricing.cents(e.record.getFloat("other_fees"));
   e.record.set("total_amount", total / 100);
+  e.record.set("revenue_terms", require(__hooks + "/studio_revenue.js").terms(e.record, total));
+  e.record.set("revenue_review", null);
+  e.record.set("revenue_discount", null);
   e.record.set("balance", Math.max(0, total - pricing.cents(e.record.getFloat("paid_amount"))) / 100);
   return e.next();
 }, "registrations");
@@ -63,27 +67,39 @@ onRecordUpdateRequest((e) => {
 
   const packageId = e.record.getString("package");
   const packageChanged = Boolean(packageId) && packageId !== original.getString("package");
-  let total = null;
+  const originalDiscount = require(__hooks + "/studio_workflow.js").json(original, "revenue_discount");
+  const subtotal = cents(original.getFloat("total_amount")) + (originalDiscount?.studio || 0) + (originalDiscount?.mua || 0);
+  let total = subtotal;
   if (packageChanged) {
     const pkg = e.app.findRecordById("packages", packageId);
     const base = pkg.getFloat("amount");
     e.record.set("package_snapshot", {
       id: pkg.id, code: pkg.getString("code"), name: pkg.getString("name"), amount: base,
+      revenue_category: pkg.getString("revenue_category"),
     });
     total = cents(base) + pricing.addOnCents(addOns) + fees;
   } else {
     e.record.set("package_snapshot", original.get("package_snapshot"));
     // Same package: keep the price it was sold at and swap only what changed.
     if (feesChanged || addOnsChanged) {
-      total = cents(original.getFloat("total_amount")) - pricing.addOnCents(previousAddOns) - cents(original.getFloat("other_fees"))
+      total = subtotal - pricing.addOnCents(previousAddOns) - cents(original.getFloat("other_fees"))
         + pricing.addOnCents(addOns) + fees;
     }
   }
-  if (total !== null) {
-    e.record.set("total_amount", total / 100);
+  const itemsChanged = packageChanged || addOnsChanged || feesChanged;
+  const body = e.requestInfo().body || {};
+  if (itemsChanged || "review_mua_amount" in body || "order_discount" in body) {
+    if (("order_discount" in body) && ["cancelled", "released"].includes(original.getString("status"))) {
+      throw new BadRequestError("Discounts can only be changed on active, unreleased orders.");
+    }
+    const final = require(__hooks + "/studio_revenue.js").changes(e, original, total, itemsChanged);
+    e.record.set("total_amount", final / 100);
     // Balance and payment status from the receipts and refunds (a cancelled order still owes nothing).
     const ledgerRules = require(__hooks + "/studio_ledger.js");
     ledgerRules.applyTotals(e.record, ledgerRules.ledger(e.app, e.record));
+  } else {
+    e.record.set("total_amount", original.getFloat("total_amount"));
+    for (const field of ["revenue_terms", "revenue_review", "revenue_discount"]) e.record.set(field, original.get(field));
   }
   return e.next();
 }, "registrations");
@@ -98,5 +114,12 @@ const checkCatalogPrice = (e) => {
   }
   return e.next();
 };
+onRecordCreateRequest((e) => {
+  const value = e.requestInfo().body?.amount;
+  if ((typeof value !== "number" && (typeof value !== "string" || !value.trim())) || !Number.isFinite(Number(value))) {
+    throw new BadRequestError("Enter a price. Use zero for a free item.");
+  }
+  return e.next();
+}, "packages", "add_ons");
 onRecordCreateRequest(checkCatalogPrice, "packages", "add_ons");
 onRecordUpdateRequest(checkCatalogPrice, "packages", "add_ons");

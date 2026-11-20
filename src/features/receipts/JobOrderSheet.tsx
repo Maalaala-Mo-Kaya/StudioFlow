@@ -2,8 +2,8 @@ import React from 'react';
 import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
-import { getRegistrationAddOns } from '../../utils/registrationAddOns';
 import {
+  orderExtras, receiptRevenueLine,
   isCounted, jobOrderMarks, methodLabel, soldPackagePrice, paymentTypeLabel, peso, receiptDate, receiptLabel, signatureUrl, statusLabel, visiblePayments, profileCells,
   type ReceiptData,
 } from './receiptData';
@@ -31,13 +31,8 @@ export const JobOrderSheet: React.FC<{ data: ReceiptData; cashierName: string }>
 const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'customer' | 'studio' }> = ({ data, cashierName, copy }) => {
   const { registration: reg, payments } = data;
   const isCustomer = copy === 'customer';
-  const pkg = reg.expand?.package;
-  const addOns = getRegistrationAddOns(reg.add_ons);
-  // Add-ons, then other fees, as [label, amount] lines.
-  const extras: Array<[string, number]> = [
-    ...addOns.map((item): [string, number] => [item.name, item.amount]),
-    ...(reg.other_fees ? [['Other fees', reg.other_fees] as [string, number]] : []),
-  ];
+  const pkg = reg.package_snapshot || reg.expand?.package;
+  const extras = orderExtras(reg);
   const { rows, hidden } = visiblePayments(payments, MAX_ROWS);
   const latest = [...payments].reverse().find(isCounted);
   const settled = reg.balance <= 0 && reg.paid_amount > 0;
@@ -137,6 +132,7 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
 
         <div className="w-[2.2in] shrink-0 self-start border-2 border-[#0a0a0a] p-[6px] font-mono space-y-[2px]">
           <Line label="Total Billed" value={peso(reg.total_amount)} />
+          <p className="text-[7px] leading-tight">{receiptRevenueLine(data)}</p>
           {/* paid_amount is net of refunds; show the refund so the payment history still adds up. */}
           {(reg.refunded_amount ?? 0) > 0 && <Line label="Less refunds" value={`−${peso(reg.refunded_amount)}`} />}
           {refundNumbers.length > 0 && (

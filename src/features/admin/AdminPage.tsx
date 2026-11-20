@@ -91,6 +91,8 @@ export const AdminPage: React.FC = () => {
               onNewPkgRequiresMuaChange={admin.setNewPkgRequiresMua}
               newPkgKind={admin.newPkgKind}
               onNewPkgKindChange={admin.setNewPkgKind}
+              newPkgRevenue={admin.newPkgRevenue}
+              onNewPkgRevenueChange={admin.setNewPkgRevenue}
               newPkgMuaTypes={admin.newPkgMuaTypes}
               onNewPkgMuaTypesChange={admin.setNewPkgMuaTypes}
               newPkgInclusions={admin.newPkgInclusions}

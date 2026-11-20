@@ -29,3 +29,6 @@ dist-ssr
 pb_data
 pb_public
 
+
+# Manuels Reports being ignored, cause he's a lazy guy and doesn't want to commit them to prod
+docs/PROJECT_AUDIT_REPORT.md

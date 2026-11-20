@@ -123,7 +123,17 @@ export interface StudioSettings {
   makeup_look_walkin?: boolean;
 }
 
+export type RevenueCategory = 'studio' | 'mua';
+
+/** Centavos, as saved on a job order. */
+export interface RevenueSplit {
+  studio: number;
+  mua: number;
+  unallocated: number;
+}
+
 export interface Package {
+  revenue_category?: RevenueCategory | '';
   id: string;
   code: string;
   name: string;
@@ -139,6 +149,7 @@ export interface Package {
 }
 
 export interface AddOn {
+  revenue_category?: RevenueCategory | '';
   id: string;
   code?: string;
   name: string;
@@ -151,6 +162,7 @@ export interface AddOn {
 }
 
 export interface RegistrationAddOn {
+  revenue_category?: RevenueCategory | '';
   id?: string;
   code?: string;
   name: string;
@@ -193,8 +205,12 @@ export interface Registration {
   mobile_number: string;
   email?: string;
   package: string;
+  package_snapshot?: { id: string; code: string; name: string; amount?: number; revenue_category?: RevenueCategory | '' } | null;
   add_ons?: RegistrationAddOn[];
   other_fees?: number;
+  revenue_terms?: RevenueSplit | null;
+  revenue_review?: { mua: number; reason: string; by: string; at: string } | null;
+  revenue_discount?: { studio: number; mua: number; reason: string; by: string; at: string } | null;
   total_amount: number;
   paid_amount: number;
   balance: number;
@@ -215,6 +231,8 @@ export interface Registration {
   makeup_look?: string;
   makeup_look_note?: string;
   makeup_state?: '' | 'claimed' | 'in_progress' | 'completed';
+  makeup_artist?: string;
+  makeup_completed_at?: string;
   claimed_by?: string;
   released_at?: string;
   /** Server-owned: total refunded. paid_amount is already net of refunds. */

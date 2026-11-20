@@ -1,4 +1,4 @@
-import { Workbook, type Worksheet } from 'exceljs';
+import ExcelJS, { type Worksheet } from 'exceljs';
 import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { clientDetail, clientGroup } from '../../utils/clientInfo';
@@ -30,7 +30,7 @@ const ORDER_STATUS: Record<string, string> = {
 };
 
 const toDate = (value: string) => new Date(value.replace(' ', 'T'));
-const when = (value: string) => {
+const when = (value = '') => {
   const date = toDate(value);
   return Number.isFinite(date.getTime()) ? dateTime.format(date) : '';
 };
@@ -71,7 +71,7 @@ function totalRowStyle(sheet: Worksheet, rowNumber: number) {
 }
 
 export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = new Date()) {
-  const workbook = new Workbook();
+  const workbook = new ExcelJS.Workbook();
   workbook.calcProperties.fullCalcOnLoad = true;
   workbook.creator = STUDIO_INFO.name;
   const range = periodText(period, now);
@@ -105,7 +105,7 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
     ].filter(Boolean).join('. ');
     ordersSheet.addRow({
       jo: reg.job_order_no || '', made: when(reg.created), client: clientName(reg), group: clientGroup(reg, true),
-      detail: clientDetail(reg, true), pkg: reg.expand?.package?.code || '', status: ORDER_STATUS[reg.status] ?? reg.status,
+      detail: clientDetail(reg, true), pkg: reg.package_snapshot?.code || reg.expand?.package?.code || '', status: ORDER_STATUS[reg.status] ?? reg.status,
       total: order.total, billed: order.billed, paid: order.paid, refunded: order.refunded, balance: order.balance,
       overpaid: order.overpaid, note: notes,
     });
@@ -199,6 +199,27 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
   setupPrint(refundsSheet, 'Refunds', 4);
 
   // ---- Summary (first sheet) --------------------------------------------------------------
+  const revenueSheet = workbook.addWorksheet('Revenue');
+  revenueSheet.columns = [
+    { width: 17 }, { width: 19 }, { width: 14 },
+    ...Array.from({ length: 4 }, () => ({ width: 20, style: { numFmt: PESO } })),
+    { width: 20 }, { width: 19 },
+  ];
+  revenueSheet.getCell('A1').value = 'Revenue allocation movements';
+  revenueSheet.getCell('A2').value = 'Mixed partial and unverified cash stays unallocated. Settlement or refunds can move cash between categories.';
+  revenueSheet.getRow(4).values = ['Document', 'Date', 'Job Order', 'Studio', 'Other Payment - MUA', 'Unallocated', 'Cash movement',
+    'Assigned MUA ID', 'MUA completed at'];
+  headerRowStyle(revenueSheet, 4);
+  for (const { payment, registration, revenue, counted } of audit.payments) {
+    if (counted) revenueSheet.addRow([payment.receipt_no || payment.id, when(payment.created), registration?.job_order_no,
+      revenue.studio, revenue.mua, revenue.unallocated, payment.amount, registration?.makeup_artist, when(registration?.makeup_completed_at)]);
+  }
+  for (const { refund, registration, revenue } of audit.refunds) {
+    revenueSheet.addRow([refund.refund_no || refund.id, when(refund.created), registration?.job_order_no,
+      revenue.studio, revenue.mua, revenue.unallocated, -refund.amount, registration?.makeup_artist, when(registration?.makeup_completed_at)]);
+  }
+  const lastRevenue = revenueSheet.rowCount;
+  setupPrint(revenueSheet, 'Revenue allocation', 4);
   summary.columns = [{ width: 46 }, { width: 18 }, { width: 62 }];
   summary.getCell('A1').value = `${STUDIO_INFO.name} · Audit Report`;
   summary.getCell('A1').font = { bold: true, size: 16 };
@@ -214,6 +235,14 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
       'Total on the Refunds sheet (money given back in this period)'],
     ['net', 'NET COLLECTIONS (cash to account for)', { formula: '', result: audit.totals.netCollections },
       'Payments received − Refunds given', true],
+    ...([
+      ['studio', 'Studio revenue', 'D'],
+      ['mua', 'Other Payment - MUA', 'E'],
+      ['unallocated', 'Unallocated cash', 'F'],
+    ] as const).map(([key, label, column]): Line => [
+      key, label, { formula: lastRevenue >= 5 ? `SUM(Revenue!${column}5:${column}${lastRevenue})` : '0', result: audit.totals.revenue[key] },
+      'Net allocation movements from the Revenue sheet',
+    ]),
     ['gross', 'Gross invoiced (job orders made)', { formula: `${orders}!I${ordersTotalRow}`, result: audit.totals.gross },
       'Total of "Counted in gross" on the Job Orders sheet. A cancelled order counts only for money it still holds.', true],
     ['paid', '   Paid on these job orders', { formula: `${orders}!J${ordersTotalRow}`, result: audit.totals.paidOnOrders },
@@ -258,6 +287,9 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
   summary.getCell(`A${rowNumber}`).font = { bold: true };
   const netOnOrders = `(${cellOf.paid}-${cellOf.refunded})`;
   const checks: Array<[string, string, boolean]> = [
+    ['Net collections − Studio, MUA and unallocated',
+      `${cellOf.net}-SUM(${cellOf.studio},${cellOf.mua},${cellOf.unallocated})`,
+      Math.round((audit.totals.netCollections - audit.totals.revenue.studio - audit.totals.revenue.mua - audit.totals.revenue.unallocated) * 100) === 0],
     ['Gross − (Paid − Refunded on these job orders + Outstanding − Refund due)',
       `${cellOf.gross}-(${netOnOrders}+${cellOf.outstanding}${cellOf.overpaid ? `-${cellOf.overpaid}` : ''})`,
       audit.ordersBalanced],
@@ -286,7 +318,7 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
     summary.getCell(`A${rowNumber}`).font = { bold: true, size: 12 };
     rowNumber += 1;
     // Separate small table: Name | Orders | Billed | Collected | Balance across columns A-E.
-    summary.getRow(rowNumber).values = ['Name', 'Orders', 'Counted in gross', 'Net collected', 'Balance'];
+    summary.getRow(rowNumber).values = ['Name', 'Orders', 'Studio billed', 'Studio revenue', 'Studio not allocated'];
     headerRowStyle(summary, rowNumber);
     const first = rowNumber + 1;
     for (const group of groups.filter((item) => item.count || item.billed || item.collected || item.balance)) {
@@ -308,8 +340,8 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
   };
   summary.getColumn(4).width = 16;
   summary.getColumn(5).width = 16;
-  breakdown('By School / Client (totals equal Gross, Net collections and Outstanding above)', audit.bySchool);
-  breakdown('By Package', audit.byPackage);
+  breakdown('Studio by School / Client', audit.bySchool);
+  breakdown('Studio by Package', audit.byPackage);
 
   rowNumber += 2;
   summary.getCell(`A${rowNumber}`).value = 'Prepared by: ______________________________          Checked by: ______________________________';

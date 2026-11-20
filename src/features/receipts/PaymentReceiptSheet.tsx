@@ -1,4 +1,5 @@
 import React from 'react';
+import { receiptRevenueLine } from './receiptData';
 import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
@@ -97,8 +98,9 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
       </div>
 
       <div className="mt-[4px] space-y-[3px] font-mono">
+        {!isCustomer && !status && <p className="text-[7px]">Allocation movement · {receiptRevenueLine(data, payment)}</p>}
         {isCash && <Row label="Cash / Change" value={`${peso(payment.cash_tendered)} / ${peso(payment.change_amount)}`} />}
-        <Row label="Remaining Balance" value={peso(after)} strong tone={after > 0 ? '#c8102e' : undefined} />
+        <Row label="Balance at Issue" value={peso(after)} strong tone={after > 0 ? '#c8102e' : undefined} />
       </div>
 
       <div className={`mt-[5px] border-2 border-[#0a0a0a] py-[2px] text-center text-[9.5px] font-black uppercase tracking-[0.16em] ${

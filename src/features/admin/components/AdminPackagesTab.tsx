@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, Edit3, Trash2, Sparkles } from 'lucide-react';
-import type { Package, AddOn, MuaServiceType } from '../../../types';
+import type { Package, AddOn, MuaServiceType, RevenueCategory } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
 import { PackageInclusionsEditor } from './PackageInclusionsEditor';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
@@ -24,6 +24,8 @@ interface AdminPackagesTabProps {
   onNewPkgRequiresMuaChange: (val: boolean) => void;
   newPkgKind: PackageKind;
   onNewPkgKindChange: (val: PackageKind) => void;
+  newPkgRevenue: RevenueCategory;
+  onNewPkgRevenueChange: (value: RevenueCategory) => void;
   newPkgMuaTypes: string[];
   onNewPkgMuaTypesChange: (ids: string[]) => void;
   newPkgInclusions: string;
@@ -31,12 +33,12 @@ interface AdminPackagesTabProps {
   onAddPackage: (e: React.FormEvent) => void;
   onUpdatePackage: (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; mua_service_types: string[]; client_kind: PackageKind }
+    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; mua_service_types: string[]; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
   ) => Promise<void>;
   onTogglePackageActive: (id: string, current: boolean) => Promise<void>;
   onDeletePackage: (id: string) => Promise<void>;
-  onAddAddOn: (name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind) => Promise<void>;
-  onUpdateAddOn: (id: string, name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind) => Promise<void>;
+  onAddAddOn: (name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind, revenue: RevenueCategory | '') => Promise<void>;
+  onUpdateAddOn: (id: string, name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[], clientKind: PackageKind, revenue: RevenueCategory | '') => Promise<void>;
   onToggleAddOnActive: (id: string, current: boolean) => Promise<void>;
   onDeleteAddOn: (id: string) => Promise<void>;
 }
@@ -56,6 +58,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   onNewPkgRequiresMuaChange,
   newPkgKind,
   onNewPkgKindChange,
+  newPkgRevenue,
+  onNewPkgRevenueChange,
   newPkgMuaTypes,
   onNewPkgMuaTypesChange,
   newPkgInclusions,
@@ -80,6 +84,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [editPkgPhotoLimit, setEditPkgPhotoLimit] = useState(0);
   const [editPkgRequiresMua, setEditPkgRequiresMua] = useState(false);
   const [editPkgMuaTypes, setEditPkgMuaTypes] = useState<string[]>([]);
+  const [editPkgRevenue, setEditPkgRevenue] = useState<RevenueCategory | ''>('');
   const [editPkgKind, setEditPkgKind] = useState<PackageKind>('school');
   const [editPkgInclusionsArray, setEditPkgInclusionsArray] = useState<string[]>([]);
 
@@ -89,6 +94,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [newAddonAmount, setNewAddonAmount] = useState(250);
   const [newAddonRequiresMua, setNewAddonRequiresMua] = useState(false);
   const [newAddonMuaTypes, setNewAddonMuaTypes] = useState<string[]>([]);
+  const [newAddonRevenue, setNewAddonRevenue] = useState<RevenueCategory | ''>('studio');
   const [newAddonKind, setNewAddonKind] = useState<PackageKind>('both');
 
   // Editing Add-on State
@@ -98,6 +104,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [editAddonAmount, setEditAddonAmount] = useState(0);
   const [editAddonRequiresMua, setEditAddonRequiresMua] = useState(false);
   const [editAddonMuaTypes, setEditAddonMuaTypes] = useState<string[]>([]);
+  const [editAddonRevenue, setEditAddonRevenue] = useState<RevenueCategory | ''>('');
   const [editAddonKind, setEditAddonKind] = useState<PackageKind>('both');
 
   // Confirmation Modal State
@@ -121,6 +128,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     setEditPkgPhotoLimit(pkg.photo_selection_limit ?? 0);
     setEditPkgRequiresMua(!!pkg.requires_mua);
     setEditPkgMuaTypes(pkg.mua_service_types ?? []);
+    setEditPkgRevenue(pkg.revenue_category || '');
     setEditPkgKind((pkg.client_kind || 'school') as PackageKind);
     setEditPkgInclusionsArray(parsePackageInclusions(pkg.inclusions));
   };
@@ -137,6 +145,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
         requires_mua: editPkgRequiresMua,
         mua_service_types: editPkgMuaTypes,
         client_kind: editPkgKind,
+        revenue_category: editPkgRevenue,
       });
       toast.success(`Package "${editPkgName}" updated successfully`);
       setEditingPkgId(null);
@@ -152,13 +161,14 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     setEditAddonAmount(add.amount);
     setEditAddonRequiresMua(!!add.requires_mua);
     setEditAddonMuaTypes(add.mua_service_types ?? []);
+    setEditAddonRevenue(add.revenue_category || '');
     setEditAddonKind(addOnKind(add));
   };
 
   const handleSaveAddonEdit = async () => {
     if (!editingAddonId) return;
     try {
-      await onUpdateAddOn(editingAddonId, editAddonName, editAddonCode, editAddonAmount, editAddonRequiresMua, editAddonMuaTypes, editAddonKind);
+      await onUpdateAddOn(editingAddonId, editAddonName, editAddonCode, editAddonAmount, editAddonRequiresMua, editAddonMuaTypes, editAddonKind, editAddonRevenue);
       toast.success(`Add-on "${editAddonName}" updated successfully`);
       setEditingAddonId(null);
     } catch (err: unknown) {
@@ -170,13 +180,14 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     e.preventDefault();
     if (!newAddonName.trim()) return;
     try {
-      await onAddAddOn(newAddonName, newAddonCode, newAddonAmount, newAddonRequiresMua, newAddonMuaTypes, newAddonKind);
+      await onAddAddOn(newAddonName, newAddonCode, newAddonAmount, newAddonRequiresMua, newAddonMuaTypes, newAddonKind, newAddonRevenue);
       toast.success(`Add-on "${newAddonName}" added to catalog`);
       setNewAddonName('');
       setNewAddonCode('');
       setNewAddonAmount(250);
       setNewAddonRequiresMua(false);
       setNewAddonMuaTypes([]);
+      setNewAddonRevenue('studio');
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to create add-on');
     }
@@ -272,6 +283,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
             </div>
 
             <PackageKindInput value={newPkgKind} onChange={onNewPkgKindChange} />
+            <RevenueInput value={newPkgRevenue} onChange={(value) => onNewPkgRevenueChange(value || 'studio')} />
             <PhotoLimitInput value={newPkgPhotoLimit} onChange={onNewPkgPhotoLimitChange} />
             <MuaRequirementInput checked={newPkgRequiresMua} onChange={onNewPkgRequiresMuaChange}
               categories={serviceTypes} selected={newPkgMuaTypes} onSelect={onNewPkgMuaTypesChange} />
@@ -359,6 +371,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
 
                       <PhotoLimitInput value={editPkgPhotoLimit} onChange={setEditPkgPhotoLimit} />
                       <PackageKindInput value={editPkgKind} onChange={setEditPkgKind} />
+                      <RevenueInput value={editPkgRevenue} onChange={setEditPkgRevenue} />
                       <MuaRequirementInput checked={editPkgRequiresMua} onChange={setEditPkgRequiresMua}
                         categories={serviceTypes} selected={editPkgMuaTypes} onSelect={setEditPkgMuaTypes} />
 
@@ -438,6 +451,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                       <div className="mt-2 flex flex-wrap gap-1">
                         <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[(pkg.client_kind || 'school') as PackageKind]}</span>
                         <MuaRequirementBadge required={pkg.requires_mua} />
+                        <span className="text-[10px] font-bold uppercase">{revenueLabels[pkg.revenue_category || '']}</span>
                         {!!pkg.photo_selection_limit && (
                           <span className="px-2 py-0.5 text-[10px] bg-gold-wash border border-neutral-300">Up to {pkg.photo_selection_limit} selected photos</span>
                         )}
@@ -526,6 +540,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
             <PackageKindInput value={newAddonKind} onChange={setNewAddonKind} />
           </div>
           <div className="sm:col-span-4">
+            <RevenueInput value={newAddonRevenue} onChange={setNewAddonRevenue} />
             <MuaRequirementInput checked={newAddonRequiresMua} onChange={setNewAddonRequiresMua}
               categories={serviceTypes} selected={newAddonMuaTypes} onSelect={setNewAddonMuaTypes} />
           </div>
@@ -580,6 +595,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     </div>
                   </div>
                   <PackageKindInput value={editAddonKind} onChange={setEditAddonKind} />
+                  <RevenueInput value={editAddonRevenue} onChange={setEditAddonRevenue} />
                   <MuaRequirementInput checked={editAddonRequiresMua} onChange={setEditAddonRequiresMua}
                     categories={serviceTypes} selected={editAddonMuaTypes} onSelect={setEditAddonMuaTypes} />
                   <div className="flex gap-2 justify-end pt-1">
@@ -611,6 +627,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     )}
                     <div className="mt-1 flex flex-wrap gap-1">
                       <MuaRequirementBadge required={add.requires_mua} />
+                      <span className="text-[10px] font-bold uppercase">{revenueLabels[add.revenue_category || '']}</span>
                       <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[addOnKind(add)]}</span>
                     </div>
                   </div>
@@ -674,6 +691,20 @@ function PhotoLimitInput({ value, onChange }: { value: number; onChange: (value:
         className="mt-1 w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-panel font-bold" />
     </label>
   );
+}
+
+const revenueLabels = { studio: 'Studio revenue', mua: 'Other Payment — MUA', '': 'Revenue review needed' };
+
+function RevenueInput({ value, onChange }: { value: RevenueCategory | ''; onChange: (value: RevenueCategory | '') => void }) {
+  return <label className="block text-xs font-bold">
+    Revenue classification
+    <select className="mt-1 block min-h-10 w-full border border-line bg-panel px-2"
+      value={value} onChange={(event) => onChange(event.target.value as RevenueCategory | '')}>
+      {!value && <option value="" disabled>{revenueLabels['']}</option>}
+      <option value="studio">{revenueLabels.studio}</option>
+      <option value="mua">{revenueLabels.mua}</option>
+    </select>
+  </label>;
 }
 
 function MuaRequirementInput({ checked, onChange, categories, selected, onSelect }: {

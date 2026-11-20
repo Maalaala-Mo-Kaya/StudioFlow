@@ -130,7 +130,8 @@ export function buildOverallRows({ registrations, payments, refunds = [], organi
     const extras = addOns.reduce((sum, item) => sum + cents(item.amount), cents(reg.other_fees));
     const due = Math.max(0, Number.isFinite(reg.total_amount) ? cents(reg.total_amount) : cents(pkg?.amount) + extras);
     // The package at the price it was sold for (total − add-ons − other fees), not today's catalog price.
-    const packageAmount = pkg ? (Number.isFinite(reg.total_amount) ? due - extras : cents(pkg.amount)) : null;
+    const discount = (reg.revenue_discount?.studio ?? 0) + (reg.revenue_discount?.mua ?? 0);
+    const packageAmount = pkg ? (Number.isFinite(reg.total_amount) ? due + discount - extras : cents(pkg.amount)) : null;
     const packageColumn: PackageColumn | undefined = pkg
       ? reportPackageFor(pkg, mapping) ?? `catalog:${pkg.id}`
       : undefined;

@@ -24,6 +24,7 @@ import { MuaPerformancePanel } from './MuaPerformancePanel';
 import { clientGroup, clientSummary } from '../../../utils/clientInfo';
 import { overviewMetrics, type OverviewMetrics } from '../overviewMetrics';
 import { buildAudit, isCountedPayment, type AuditGroup } from '../auditData';
+import { allocateRevenue, revenuePesos, revenueTerms } from '../../../utils/revenue';
 import { studioDayStartUtc, studioMonthStartUtc } from '../../../utils/studioDay';
 
 const transactionDate = new Intl.DateTimeFormat('en-PH', {
@@ -109,6 +110,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       orderRefunds,
       cancelled,
       collected: net / 100,
+      revenue: revenuePesos(allocateRevenue(net, revenueTerms(registration))),
       refunded: refunded / 100,
       balance: cancelled ? 0 : Math.max(0, total - net) / 100,
       overpaid: overpaid / 100,
@@ -123,7 +125,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
     [registrations, payments, refunds, since, organizations, packages],
   );
   const isReconciled = audit.ordersBalanced && audit.paymentsBalanced;
-  // Lists show only schools / packages with something in the period; totals equal the cards.
+  // School and package groups report Studio activity only.
   const hasActivity = (group: AuditGroup) => Boolean(group.count || group.billed || group.collected || group.balance);
   const activeSchools = audit.bySchool.filter(hasActivity);
   const hiddenSchools = audit.bySchool.length - activeSchools.length;
@@ -180,8 +182,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       cell: ({ registration }) => formatClientName(registration), cellClassName: 'font-bold uppercase' },
     { id: 'school', header: 'School / Client', sortable: true, accessor: ({ registration }) => clientGroup(registration),
       cell: ({ registration }) => clientGroup(registration) || 'ORG', cellClassName: 'text-neutral-600' },
-    { id: 'package', header: 'Package', sortable: true, accessor: ({ registration }) => registration.expand?.package?.code,
-      cell: ({ registration }) => registration.expand?.package?.code || 'PKG' },
+    { id: 'package', header: 'Package', sortable: true, accessor: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code,
+      cell: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code || 'PKG' },
     { id: 'billed', header: 'Billed', sortable: true, accessor: ({ registration }) => registration.total_amount, align: 'right',
       cell: ({ registration }) => formatCurrency(registration.total_amount), cellClassName: 'font-bold' },
     { id: 'collected', header: 'Collected (net)', sortable: true, accessor: ({ collected }) => collected, align: 'right',
@@ -191,6 +193,12 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           {refunded > 0 && <div className="text-[9px] font-normal text-neutral-500">after {formatCurrency(refunded, { exact: true })} refunded</div>}
         </>
       ), cellClassName: 'font-bold text-emerald-700' },
+    { id: 'studio', header: 'Studio revenue', sortable: true, accessor: ({ revenue }) => revenue.studio, align: 'right',
+      cell: ({ revenue }) => formatCurrency(revenue.studio, { exact: true }) },
+    { id: 'mua', header: 'Other Payment — MUA', sortable: true, accessor: ({ revenue }) => revenue.mua, align: 'right',
+      cell: ({ revenue }) => formatCurrency(revenue.mua, { exact: true }) },
+    { id: 'unallocated', header: 'Unallocated cash', sortable: true, accessor: ({ revenue }) => revenue.unallocated, align: 'right',
+      cell: ({ revenue }) => formatCurrency(revenue.unallocated, { exact: true }) },
     { id: 'balance', header: 'Balance', sortable: true, accessor: ({ balance }) => balance, align: 'right', cellClassName: 'font-black',
       cell: ({ balance }) => balance > 0 ? <span className="text-red-600">{formatCurrency(balance)}</span> : <span className="text-emerald-700">₱0.00</span> },
     { id: 'status', header: 'Settlement Status', sortable: true, align: 'center',
@@ -414,6 +422,19 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       </div>
 
       {/* Accounting Reconciliation Banner */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        {([
+          ['Studio revenue', audit.totals.revenue.studio],
+          ['Other Payment — MUA', audit.totals.revenue.mua],
+          ['Unallocated cash', audit.totals.revenue.unallocated],
+        ] as const).map(([label, amount]) => <div key={label} className="border-2 border-line bg-panel p-4">
+          <p className="text-xs font-black uppercase text-gold-soft">{label}</p>
+          <p className="font-mono text-xl font-black">{formatCurrency(amount, { exact: true })}</p>
+        </div>)}
+        <p className="text-xs text-neutral-600 sm:col-span-3">
+          Net of refunds. Mixed partial payments, excess cash, and charges awaiting review stay unallocated. Settlement and refunds can move cash between categories.
+        </p>
+      </div>
       <div className={`p-3.5 border-2 font-mono text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
         isReconciled
           ? 'bg-emerald-50 border-emerald-600 text-emerald-900'
@@ -425,7 +446,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             {!isReconciled
               ? `Discrepancy (${PERIOD_LABELS[period]}): the totals do not add up. Export the audit report and check the Summary sheet.`
               : period === 'all'
-                ? `Ledger Balanced: Gross (${formatCurrency(audit.totals.gross, { exact: true })}) = Collections (${formatCurrency(audit.totals.collections, { exact: true })}) + Balances (${formatCurrency(audit.totals.outstanding, { exact: true })})`
+                ? 'All-time collections and outstanding balances reconcile with the ledger.'
                 : `${PERIOD_LABELS[period]} Balanced: Gross (${formatCurrency(audit.totals.gross, { exact: true })}) = Paid (${formatCurrency(audit.totals.paidOnOrders, { exact: true })}) + Balances (${formatCurrency(audit.totals.outstanding, { exact: true })}) · Collections (${formatCurrency(audit.totals.collections, { exact: true })}) include ${formatCurrency(audit.totals.collectionsOnEarlierOrders, { exact: true })} for older job orders`}
           </span>
         </div>
@@ -448,7 +469,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           <div className="flex items-center justify-between pb-3 border-b-2 border-line mb-3">
             <h3 className="font-black text-xs uppercase tracking-wider flex items-center gap-1.5">
               <Building className="w-4 h-4 text-gold" />
-              <span>Collections by School</span>
+              <span>Studio Revenue by School</span>
             </h3>
             <span className="font-mono text-[10px] text-neutral-500">{PERIOD_LABELS[period]}</span>
           </div>
@@ -461,10 +482,10 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                   <span className="text-neutral-500 text-[11px] block truncate max-w-[200px]">{s.name}</span>
                 </div>
                 <div className="text-right">
-                  <div className="font-black text-ink">{formatCurrency(s.collected)}</div>
+                  <div className="font-black text-ink">{formatCurrency(s.collected, { exact: true })}</div>
                   {s.balance > 0 ? (
                     <span className="text-[10px] text-red-600 font-bold block">
-                      Bal: {formatCurrency(s.balance)}
+                      Studio charges not allocated: {formatCurrency(s.balance)}
                     </span>
                   ) : (
                     <span className="text-[10px] text-emerald-600 font-bold block">{s.count ? 'No balance' : 'Payments only'}</span>
@@ -476,8 +497,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
               <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
                 <span>TOTAL</span>
                 <div className="text-right">
-                  <div className="text-ink">{formatCurrency(audit.totals.collections, { exact: true })}</div>
-                  <span className="text-[10px] text-red-600 block">Bal: {formatCurrency(audit.totals.outstanding, { exact: true })}</span>
+                  <div className="text-ink">{formatCurrency(audit.totals.revenue.studio, { exact: true })}</div>
                 </div>
               </div>
             )}
@@ -492,9 +512,9 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           <div className="flex items-center justify-between pb-3 border-b-2 border-line mb-3">
             <h3 className="font-black text-xs uppercase tracking-wider flex items-center gap-1.5">
               <PackageIcon className="w-4 h-4 text-gold" />
-              <span>Revenue by Package</span>
+              <span>Studio Revenue by Package</span>
             </h3>
-            <span className="font-mono text-[10px] text-neutral-500">{PERIOD_LABELS[period]} · job orders made</span>
+            <span className="font-mono text-[10px] text-neutral-500">{PERIOD_LABELS[period]}</span>
           </div>
           <div className="divide-y divide-neutral-200">
             {activePackages.length === 0 && <p className="py-3 text-xs text-neutral-500">No job orders {periodWords}.</p>}
@@ -505,16 +525,16 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                   <span className="text-neutral-500 text-[11px] block truncate max-w-[200px]">{pkg.name}</span>
                 </div>
                 <div className="text-right">
-                  <div className="font-black text-ink">{formatCurrency(pkg.billed)}</div>
+                  <div className="font-black text-ink">{formatCurrency(pkg.collected, { exact: true })}</div>
                   <span className="text-[10px] text-neutral-500 block">{pkg.count} order{pkg.count === 1 ? '' : 's'}</span>
                 </div>
               </div>
             ))}
             {activePackages.length > 0 && (
               <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
-                <span>TOTAL (= Gross Invoiced)</span>
+                <span>TOTAL</span>
                 <div className="text-right">
-                  <div className="text-ink">{formatCurrency(audit.totals.gross, { exact: true })}</div>
+                  <div className="text-ink">{formatCurrency(audit.totals.revenue.studio, { exact: true })}</div>
                   <span className="text-[10px] text-neutral-500 block">{audit.totals.activeOrders} orders</span>
                 </div>
               </div>

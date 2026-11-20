@@ -16,9 +16,13 @@ import { getRegistrationAddOns, sumAddOnAmounts } from '../../../utils/registrat
 import { isWalkIn } from '../../../utils/clientInfo';
 import { useStudioSettings } from '../../../hooks/useStudioSettings';
 import { MAKEUP_LOOKS, MAKEUP_LOOK_NOTE_MAX } from '../../../constants/makeupLook';
+import { discountCents, revenueTerms } from '../../../utils/revenue';
 
 export type RegistrationEdits = Omit<Partial<Registration>, 'add_ons'> & {
   mua_correction?: 'required' | 'waived';
+  review_mua_amount?: number;
+  review_revenue_reason?: string;
+  order_discount?: { studio: number; mua: number; reason: string };
   /** Add-on choices only: the server prices them from the catalog (ones already on the order keep their price). */
   add_ons?: Array<{ id?: string; code?: string; name?: string }>;
 };
@@ -73,6 +77,11 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [makeupLook, setMakeupLook] = useState(reg.makeup_look || '');
   const [makeupLookNote, setMakeupLookNote] = useState(reg.makeup_look_note || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reviewAmount, setReviewAmount] = useState('');
+  const [reviewReason, setReviewReason] = useState('');
+  const [studioDiscount, setStudioDiscount] = useState((reg.revenue_discount?.studio ?? 0) / 100);
+  const [muaDiscount, setMuaDiscount] = useState((reg.revenue_discount?.mua ?? 0) / 100);
+  const [discountReason, setDiscountReason] = useState(reg.revenue_discount?.reason ?? '');
 
   // Add-ons: the ones on the order keep the price they were sold at; new ones show today's catalog price.
   // The server prices them again from the catalog, so only their ids are sent.
@@ -99,11 +108,16 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const cents = (value: number | undefined) => Math.round((value || 0) * 100);
   const selectedPkg = packages.find((p) => p.id === packageId);
   const packageChanged = Boolean(selectedPkg) && packageId !== reg.package;
-  const priceChanged = packageChanged || addOnsChanged;
+  const discountChanged = studioDiscount !== (reg.revenue_discount?.studio ?? 0) / 100
+    || muaDiscount !== (reg.revenue_discount?.mua ?? 0) / 100
+    || ((studioDiscount > 0 || muaDiscount > 0) && discountReason.trim() !== (reg.revenue_discount?.reason ?? ''));
+  const itemsChanged = packageChanged || addOnsChanged;
+  const priceChanged = itemsChanged || discountChanged;
   // Same rule as the server: a new package is priced from the catalog; otherwise only the add-ons are swapped.
-  const totalCents = packageChanged && selectedPkg
+  const subtotal = packageChanged && selectedPkg
     ? cents(selectedPkg.amount) + cents(sumAddOnAmounts(addOns)) + cents(reg.other_fees)
-    : cents(reg.total_amount) - cents(sumAddOnAmounts(savedAddOns)) + cents(sumAddOnAmounts(addOns));
+    : cents(reg.total_amount) + discountCents(reg) - cents(sumAddOnAmounts(savedAddOns)) + cents(sumAddOnAmounts(addOns));
+  const totalCents = subtotal - cents(studioDiscount) - cents(muaDiscount);
   const currentTotal = totalCents / 100;
   const paid = reg.paid_amount || 0;
   const currentBalance = !priceChanged ? reg.balance : isCancelled ? 0 : Math.max(0, currentTotal - paid);
@@ -134,6 +148,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
           course: courseId,
         }),
         package: packageId,
+        ...(!itemsChanged && reviewAmount !== '' ? { review_mua_amount: Number(reviewAmount), review_revenue_reason: reviewReason.trim() } : {}),
+        ...(canEditAddOns && discountChanged ? { order_discount: { studio: studioDiscount, mua: muaDiscount, reason: discountReason.trim() } } : {}),
         ...(addOnsChanged ? { add_ons: addOns.map((item) => (item.id ? { id: item.id } : { code: item.code, name: item.name })) } : {}),
         pictorial_date: pictorialDate ? `${pictorialDate} 00:00:00.000Z` : '',
         status,
@@ -171,6 +187,32 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <fieldset className="border border-line p-3 space-y-2">
+            <legend className="px-1 font-black uppercase">Revenue review and discounts</legend>
+            {reg.revenue_review && <p>Verified by {reg.revenue_review.by} · {reg.revenue_review.reason}</p>}
+            {(revenueTerms(reg).unallocated > 0 || reg.revenue_review) && !itemsChanged && <>
+              <p>Check the original paperwork. Enter the verified MUA subtotal before discounts. Enter zero only if the paperwork confirms all charges were Studio.</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label>Verified MUA subtotal (₱)<input className="block w-full border border-line p-2" type="number" min="0" step="0.01"
+                  value={reviewAmount} onChange={(event) => setReviewAmount(event.target.value)} /></label>
+                <label>Evidence or reason<input className="block w-full border border-line p-2" required={reviewAmount !== ''} minLength={3} maxLength={500}
+                  value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} /></label>
+              </div>
+            </>}
+            {canEditAddOns && <>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label>Studio discount (₱)<input className="block w-full border border-line p-2" type="number" min="0" step="1"
+                  value={studioDiscount} onChange={(event) => setStudioDiscount(Number(event.target.value))} /></label>
+                <label>MUA discount (₱)<input className="block w-full border border-line p-2" type="number" min="0" step="1"
+                  value={muaDiscount} onChange={(event) => setMuaDiscount(Number(event.target.value))} /></label>
+              </div>
+              {(studioDiscount > 0 || muaDiscount > 0) && <label className="block">Discount reason
+                <input className="block w-full border border-line p-2" required minLength={3} maxLength={500}
+                  value={discountReason} onChange={(event) => setDiscountReason(event.target.value)} />
+              </label>}
+              {priceChanged && <p>New total {formatCurrency(currentTotal, { exact: true })} · Balance {formatCurrency(currentBalance, { exact: true })}</p>}
+            </>}
+          </fieldset>
           {/* Row 1: Name Fields */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>

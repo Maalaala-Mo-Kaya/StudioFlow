@@ -45,27 +45,33 @@ const when = (value: string) => {
  * Downloads every job order as CSV, with Paid and Balance worked out from the payment
  * records (same rules as the Audit Export) and a totals row at the end.
  */
-export function exportRegistrationsToCsv(registrations: Registration[], payments: PaymentRecord[], refunds: RefundRecord[] = []): void {
+export function buildRegistrationsCsv(registrations: Registration[], payments: PaymentRecord[], refunds: RefundRecord[] = []) {
   const audit = buildAudit(registrations, payments, refunds);
   const headers = [
     'Job Order No', 'Queue No', 'Family Name', 'Given Name', 'School / Client', 'Course / Session', 'Section', 'Mobile',
     'Package', 'Job Order Total', 'Counted In Gross', 'Paid', 'Refunded', 'Net Paid', 'Balance', 'Status', 'Payment Status', 'Prepared By',
-    'Date Registered (PH time)', 'Note',
+    'Date Registered (PH time)', 'Note', 'Studio revenue', 'Other Payment - MUA', 'Unallocated cash',
   ];
-  const rows = audit.orders.map(({ registration: r, total, billed, paid, refunded, net, balance, cancelled, overpaid }) => [
+  const rows = audit.orders.map(({ registration: r, total, billed, paid, refunded, net, balance, cancelled, overpaid, revenue }) => [
     cell(r.job_order_no), cell(r.queue_number || ''), cell(r.family_name), cell(r.given_name),
     cell(clientGroup(r, true)), cell(clientDetail(r, true)), cell(r.section), cell(r.mobile_number),
-    cell(r.expand?.package?.code), money(total), money(billed), money(paid), money(refunded), money(net), money(balance),
+    cell(r.package_snapshot?.code || r.expand?.package?.code), money(total), money(billed), money(paid), money(refunded), money(net), money(balance),
     cell(r.status), cell(r.payment_status), cell(r.prepared_by), cell(when(r.created)),
     cell([cancelled && 'Cancelled: only money still held counts', overpaid > 0 && `Refund due ${money(overpaid)}`].filter(Boolean).join('; ')),
+    money(revenue.studio), money(revenue.mua), money(revenue.unallocated),
   ]);
   const { totals } = audit;
   const totalRow = [
     cell('TOTAL'), '', '', '', '', '', '', '', cell(`${totals.activeOrders} active, ${totals.cancelledOrders} cancelled`),
     '', money(totals.gross), money(totals.paidOnOrders), money(totals.refundedOnOrders),
     money(totals.paidOnOrders - totals.refundedOnOrders), money(totals.outstanding), '', '', '', '', '',
+    money(totals.revenue.studio), money(totals.revenue.mua), money(totals.revenue.unallocated),
   ];
-  const csvContent = [headers.map(cell).join(','), ...rows.map((row) => row.join(',')), totalRow.join(',')].join('\r\n');
+  return [headers.map(cell).join(','), ...rows.map((row) => row.join(',')), totalRow.join(',')].join('\r\n');
+}
+
+export function exportRegistrationsToCsv(registrations: Registration[], payments: PaymentRecord[], refunds: RefundRecord[] = []): void {
+  const csvContent = buildRegistrationsCsv(registrations, payments, refunds);
   // The byte-order mark lets Excel read ₱ and accented names correctly.
   const blob = new Blob(['﻿' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);

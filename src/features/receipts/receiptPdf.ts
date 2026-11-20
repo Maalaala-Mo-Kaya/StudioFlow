@@ -3,8 +3,8 @@ import type { PaymentRecord, RefundRecord, Registration } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { pb } from '../../db/pocketbase';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
-import { getRegistrationAddOns } from '../../utils/registrationAddOns';
 import {
+  orderExtras, receiptRevenueLine,
   isCounted, jobOrderMarks, soldPackagePrice, loadReceiptData, loadRefundSignature, methodLabel, paymentTypeLabel, peso, receiptDate, receiptLabel, refundAcknowledgment, refundFigures, signatureUrl, statusLabel,
   visiblePayments, profileCells, profileLine,
   type ReceiptData, type ReceiptPaper, type RefundSlipData,
@@ -128,13 +128,9 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   y += 0.06;
   const col = w / 4;
   const rowH = 0.27;
-  const pkg = reg.expand?.package;
-  const addOns = getRegistrationAddOns(reg.add_ons);
+  const pkg = reg.package_snapshot || reg.expand?.package;
   // Add-ons, then other fees: listed one per line below the client grid (the client shows them at each station).
-  const extras: Array<[string, number]> = [
-    ...addOns.map((item): [string, number] => [item.name, item.amount]),
-    ...(reg.other_fees ? [['Other fees', reg.other_fees] as [string, number]] : []),
-  ];
+  const extras = orderExtras(reg);
   const cells: Array<[string, string, number, boolean?]> = [
     ['CLIENT NAME', `${reg.family_name}, ${reg.given_name}${reg.middle_name ? ' ' + reg.middle_name : ''}`.toUpperCase(), 2, true],
     ['MOBILE', reg.mobile_number || '—', 1],
@@ -229,6 +225,7 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
     put(doc, value, right - 0.07, ly, { size, bold: true, mono: true, color, align: 'right' });
   };
   line('TOTAL BILLED', php(reg.total_amount), y + 0.15, 8);
+  put(doc, receiptRevenueLine(data, undefined, false), x, y - 0.035, { size: 5.5, color: GREY, width: tableW });
   // paid_amount is net of refunds; show the refund on its own line so the figures add up.
   // (Plain "-": the built-in PDF fonts have no minus sign.)
   if ((reg.refunded_amount ?? 0) > 0) {
@@ -377,11 +374,14 @@ function drawReceiptSlip(doc: jsPDF, data: ReceiptData, payment: PaymentRecord, 
     row('CASH / CHANGE', `${php(payment.cash_tendered)} / ${php(payment.change_amount)}`, y);
     y += 0.15;
   }
-  row('REMAINING BALANCE', php(after), y, 9, after > 0 ? RED : INK);
+  row('BALANCE AT ISSUE', php(after), y, 9, after > 0 ? RED : INK);
 
   y += 0.08;
   box(doc, x, y, w, 0.17, after <= 0 ? 2 : 1);
   put(doc, after <= 0 ? 'FULLY SETTLED' : 'BALANCE DUE BEFORE RELEASE', mid, y + 0.118, { size: 7.5, bold: true, align: 'center' });
+  if (!isCustomer && !status) {
+    put(doc, `Allocation movement: ${receiptRevenueLine(data, payment, false)}`, x, y + 0.28, { size: 5.5, color: GREY, width: w });
+  }
 
   const lineY = H - 0.36;
   if (isCustomer) {

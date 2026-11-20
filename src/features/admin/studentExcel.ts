@@ -1,7 +1,9 @@
-import { Workbook, type Row } from 'exceljs';
+import ExcelJS, { type Row, type Workbook } from 'exceljs';
 import { formatCurrency } from '../../utils/formatters';
 import { downloadBlob } from '../../utils/downloadBlob';
 import { STUDIO_INFO } from '../../constants/studio';
+import type { RevenueSplit } from '../../types';
+import { allocateRevenue, revenueKeys } from '../../utils/revenue';
 
 interface CatalogColumn {
   id: string;
@@ -35,6 +37,8 @@ interface StudentExcelRow {
   addOns: Record<string, number>;
   /** Other fees on the job order, in centavos (part of TOTAL DUE). */
   otherFees?: number;
+  discount?: number;
+  revenueTerms?: RevenueSplit | null;
   /** Job order total, in centavos. */
   due: number;
   /** Counted payments (voided excluded) and refunds given back, in centavos. */
@@ -74,10 +78,15 @@ const financialColumns = [
   { key: 'refunded', header: 'REFUNDED' },
   { key: 'total', header: 'TOTAL PAYMENT (less refunds)' },
   { key: 'balance', header: 'BALANCE' },
+  { key: 'studio', header: 'STUDIO REVENUE' },
+  { key: 'mua', header: 'OTHER PAYMENT - MUA' },
+  { key: 'unallocated', header: 'UNALLOCATED CASH' },
 ];
 const PESO = '"₱"#,##0.00;-"₱"#,##0.00';
 /** Column key for other fees (shown only when an order in the export has some). */
 const OTHER_FEES = 'otherFees';
+const DISCOUNT = 'discount';
+const totalsKeys = financialColumns.map(({ key }) => key);
 const peso = { numFmt: PESO };
 const studioDate = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -147,7 +156,7 @@ function writeCancelledSheet(workbook: Workbook, title: string, orders: StudentE
     views: [{ state: 'frozen', xSplit: 5, ySplit: 1 }],
     properties: { tabColor: { argb: 'FF9B2C2C' } },
   });
-  const money = ['due', 'paid', 'refunded', 'kept'] as const;
+  const money = ['due', 'paid', 'refunded', 'kept', ...revenueKeys] as const;
   sheet.columns = [
     { key: 'date', header: 'DATE OF PICTORIAL / EVENT', width: 16, style: { numFmt: 'dd-mmm-yy' } },
     { key: 'jobOrder', header: 'STUDIO #', width: 12, style: { numFmt: '@' } },
@@ -163,6 +172,8 @@ function writeCancelledSheet(workbook: Workbook, title: string, orders: StudentE
     { key: 'paid', header: 'PAID', width: 17, style: peso },
     { key: 'refunded', header: 'REFUNDED', width: 17, style: peso },
     { key: 'kept', header: 'MONEY KEPT (paid less refunds)', width: 17, style: peso },
+    ...financialColumns.filter(({ key }) => key === 'studio' || key === 'mua' || key === 'unallocated')
+      .map((column) => ({ ...column, width: 17, style: peso })),
   ];
   const header = sheet.getRow(1);
   header.height = 48;
@@ -176,11 +187,13 @@ function writeCancelledSheet(workbook: Workbook, title: string, orders: StudentE
 
   const sorted = [...orders].sort((a, b) =>
     (a.cancellation?.at || '').localeCompare(b.cancellation?.at || '') || a.jobOrder.localeCompare(b.jobOrder));
-  const sums = { due: 0, paid: 0, refunded: 0, kept: 0 };
+  const sums = { due: 0, paid: 0, refunded: 0, kept: 0, studio: 0, mua: 0, unallocated: 0 };
   for (const order of sorted) {
     const paid = order.payments.full + order.payments.additional + order.payments.down;
     const refunded = order.payments.refunded ?? 0;
-    const amounts = { due: order.due, paid, refunded, kept: paid - refunded };
+    const kept = paid - refunded;
+    const amounts = { ...allocateRevenue(kept, order.revenueTerms ?? { studio: 0, mua: 0, unallocated: order.due }),
+      due: order.due, paid, refunded, kept };
     for (const key of money) sums[key] += amounts[key];
     const row = sheet.addRow({
       date: pictorialDate(order.date),
@@ -227,7 +240,7 @@ export function buildStudentWorkbook(
   range: DateRange = {},
   now = new Date(),
 ) {
-  const workbook = new Workbook();
+  const workbook = new ExcelJS.Workbook();
   workbook.calcProperties.fullCalcOnLoad = true;
   workbook.creator = STUDIO_INFO.name;
   const packageColumns = packages.map((pkg) => ({
@@ -255,7 +268,9 @@ export function buildStudentWorkbook(
   // so package + add-ons + other fees always add up to TOTAL DUE on every row.
   const otherFeesColumns = rows.some((row) => (row.otherFees ?? 0) > 0)
     ? [{ key: OTHER_FEES, header: 'OTHER FEES', width: 16, style: peso }] : [];
-  const catalogColumns = [...packageColumns, ...addOnColumns, ...otherFeesColumns];
+  const discountColumns = rows.some((row) => (row.discount ?? 0) > 0)
+    ? [{ key: DISCOUNT, header: 'DISCOUNT', width: 16, style: peso }] : [];
+  const catalogColumns = [...packageColumns, ...addOnColumns, ...otherFeesColumns, ...discountColumns];
   const moneyColumns = [...catalogColumns, ...financialColumns];
   const definitions = [
     ...studentColumns,
@@ -329,7 +344,9 @@ export function buildStudentWorkbook(
         if (student.packageId) charges[`package:${student.packageId}`] = student.packageAmount;
         for (const [id, amount] of Object.entries(student.addOns)) charges[`addon:${id}`] = amount;
         if ((student.otherFees ?? 0) > 0) charges[OTHER_FEES] = student.otherFees ?? 0;
-        const amountsInRow = { ...charges, due: student.due, full, additional, down, refunded, total, balance };
+        if (student.discount) charges[DISCOUNT] = -student.discount;
+        const revenue = allocateRevenue(total, student.revenueTerms ?? { studio: 0, mua: 0, unallocated: student.due });
+        const amountsInRow = { ...charges, ...revenue, due: student.due, full, additional, down, refunded, total, balance };
         for (const [column, amount] of Object.entries(amountsInRow)) {
           amounts.set(column, (amounts.get(column) ?? 0) + amount);
           grand.set(column, (grand.get(column) ?? 0) + amount);
@@ -392,6 +409,7 @@ export function buildStudentWorkbook(
         .map((block) => `COUNT(${letter(column)}${block.first}:${letter(column)}${block.last})`);
       const count = students.filter((student) => (column === OTHER_FEES
         ? (student.otherFees ?? 0) > 0
+        : column === DISCOUNT ? (student.discount ?? 0) > 0
         : column === `package:${student.packageId}`
           || Object.prototype.hasOwnProperty.call(student.addOns, column.replace(/^addon:/, '')))).length;
       cell.value = counted.length ? { formula: counted.join('+'), result: count } : 0;
@@ -443,14 +461,14 @@ export function buildStudentWorkbook(
     // Summary: one line per school sheet, linked to that sheet's TOTAL row, plus cancelled orders.
     summary.columns = [
       { key: 'code', width: 14 }, { key: 'name', width: 38 }, { key: 'count', width: 10 },
-      ...['due', 'full', 'additional', 'down', 'refunded', 'total', 'balance'].map((key) => ({ key, width: 17, style: peso })),
+      ...totalsKeys.map((key) => ({ key, width: 17, style: peso })),
     ];
     summary.getCell('A1').value = `${STUDIO_INFO.name} · Overall Summary`;
     summary.getCell('A1').font = { bold: true, size: 14 };
     summary.getCell('A2').value = `Job orders dated ${period} (pictorial date, or registration date when there is none). Payments: everything received for these job orders.`;
     summary.getCell('A3').value = `Exported ${stamp.format(now)}`;
     const head = summary.getRow(5);
-    head.values = ['CODE', 'SCHOOL / CLIENTS', 'CLIENTS', 'TOTAL DUE', 'FULL PAYMENT', 'ADDITIONAL PAYMENT', 'DOWN PAYMENT', 'REFUNDED', 'TOTAL PAYMENT (less refunds)', 'BALANCE'];
+    head.values = ['CODE', 'SCHOOL / CLIENTS', 'CLIENTS', ...financialColumns.map(({ header }) => header)];
     head.font = { bold: true };
     head.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
     head.eachCell((cell) => { cell.border = { bottom: { style: 'medium' } }; });
@@ -459,7 +477,7 @@ export function buildStudentWorkbook(
     for (const { code, name, result } of totals) {
       const line = summary.addRow({ code, name });
       line.getCell('count').value = { formula: ref(result.sheet, result.countCell), result: result.count };
-      for (const key of ['due', 'full', 'additional', 'down', 'refunded', 'total', 'balance']) {
+      for (const key of totalsKeys) {
         const column = result.columns[key];
         line.getCell(key).value = { formula: ref(result.sheet, `${column.letter}${result.row}`), result: column.result };
       }
@@ -472,16 +490,23 @@ export function buildStudentWorkbook(
         code: 'CANCELLED', name: `Cancelled job orders (${cancelled.length}): money kept after refunds, nothing owed (see CANCELLED sheet)`, count: 0,
         full: keptPart('full'), additional: keptPart('additional'), down: keptPart('down'), balance: 0,
       });
-      const linked = (column: 'kept' | 'refunded', result: number) =>
+      const linked = (column: keyof typeof cancelledTotals.letters, result: number) =>
         ({ formula: ref(cancelledTotals.sheet, `${cancelledTotals.letters[column]}${cancelledTotals.row}`), result });
       line.getCell('due').value = linked('kept', kept);
       line.getCell('refunded').value = linked('refunded', keptPart('refunded'));
       line.getCell('total').value = linked('kept', kept);
+      for (const key of revenueKeys) {
+        const result = cancelled.reduce((sum, order) => {
+          const net = order.payments.full + order.payments.additional + order.payments.down - (order.payments.refunded ?? 0);
+          return sum + allocateRevenue(net, order.revenueTerms ?? { studio: 0, mua: 0, unallocated: order.due })[key];
+        }, 0) / 100;
+        line.getCell(key).value = linked(key, result);
+      }
     }
     const lastLine = summary.rowCount;
     summary.addRow([]);
     const grand = summary.addRow({ code: 'GRAND TOTAL' });
-    for (const key of ['count', 'due', 'full', 'additional', 'down', 'refunded', 'total', 'balance']) {
+    for (const key of ['count', ...totalsKeys]) {
       const column = summary.getColumn(key).letter;
       const result = Array.from({ length: lastLine - firstLine + 1 }, (_, index) => summary.getRow(firstLine + index).getCell(key).value)
         .reduce<number>((sum, value) => sum + (typeof value === 'number' ? value

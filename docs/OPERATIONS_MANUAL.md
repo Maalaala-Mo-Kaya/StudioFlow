@@ -146,6 +146,27 @@ Use this once testing is finished and before the studio starts real work. It rem
 
 ## 6. Financial Reconciliation & Audit Rules (T049 / AC023)
 
+### Studio and MUA revenue
+
+In **Admin → Packages & Add-ons**, choose **Studio revenue** or **Other Payment — MUA** for each catalog item. StudioFlow saves that choice with the sold price. Existing catalog entries display **Revenue review needed** until an admin classifies them. Use separate catalog items for charges owned by different parties.
+
+**Analytics & Overview** shows net Studio revenue, Other Payment — MUA, unallocated cash, total collections, and outstanding balances. The Studio revenue groups by school and package exclude MUA and unallocated amounts. The three revenue buckets add up to payments less refunds. The audit workbook shows those amounts by receipt and refund. The Overall workbook and CSV show the allocation by Job Order.
+
+The current brief does not specify who receives a mixed-order downpayment first. A payment for a single verified category goes to that category as collected. For an order with multiple categories or unreviewed charges, partial cash stays unallocated until the total is covered. Settlement allocates the saved category amounts and can move earlier cash out of unallocated. If a refund or void leaves a mixed order partially paid, the unsupported amount returns to unallocated. Cash above the current amount due also stays unallocated. A period report can therefore show a negative unallocated movement when a later settlement allocates cash from earlier dates.
+
+Use **Clients Directory → Edit Client → Revenue review and discounts** to reconcile a historical order from original paperwork. Enter the verified MUA subtotal before discounts and record the evidence or reason. The rest of the verified subtotal is Studio. The review records who saved it and when. If the package, add-ons, or fees change, verify the revised order again. The revised order terms drive the revenue report, while actual receipt and refund amounts and their dates stay in the ledger.
+
+To apply a discount, enter the whole-peso reduction against the Studio or MUA portion and record a reason. An order can include a free service at a zero catalog price. An entirely zero-value order cannot enter the paid queue under the current payment requirement. For an incorrect receipt, void it with a reason and record the replacement. The ledger shows the recalculated balance and the printed receipt retains its balance at issue.
+
+### Parent and Child MUAs
+
+In **Admin → Staff Accounts → Makeup Artist Team**, choose one enabled MUA as **Parent MUA**, set **Allow Parent MUA to Accept Clients**, and save. The other MUA accounts are Children while a Parent is configured. With no Parent, the station uses the shared self-claim queue.
+
+Paid orders that require MUA work appear under **Unassigned Clients**. The Parent assigns them to an enabled Child, or to the Parent account when the toggle is on. Admin can also manage assignments under **Makeup & Photo Selection**. A Child can start and complete their own work. Reassigning active work returns it to pending for the new artist and logs the handoff. Changing the Parent or turning self-assignment off preserves existing work.
+
+The current queue assigns the purchased MUA services on a Job Order together. Completion records each distinct service category for the performing artist and counts the client once in the artist's daily total. The report uses Asia/Manila dates. Financial allocation follows the sale and ledger. The Job Order links to assignment history and completion records for attribution, even if payment arrived first.
+
+
 * **How the figures are counted** (cards, school / package lists and the Audit Export all use the same rules):
   * **Collections** = payments received in the period, not counting voided or refunded ones.
   * **Gross invoiced** = totals of the job orders made in the period. A cancelled order counts only for the money already received from it (e.g. a kept downpayment); the rest is no longer owed.

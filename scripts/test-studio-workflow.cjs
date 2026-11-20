@@ -1007,6 +1007,187 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await documents(docsClient, [[jobPdf, pdf('x')]], photographer, 403);
   await documents(together[1], [[`JO-${together[1].job_order_no}.pdf`, pdf('unpaid')]], cashier, 409);
 
+  await t.test('revenue allocation and managed MUA queue', async (featureTest) => {
+    // Financial tests use the same implementation as Analytics and the workbooks, with real PocketBase records.
+    const vite = await (await import('vite')).createServer({
+      root: repo, configFile: false, appType: 'custom', cacheDir: join(home, 'vite-test-cache'),
+      optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true, watch: null, ws: false },
+    });
+    featureTest.after(() => vite.close());
+    const { buildAudit } = await vite.ssrLoadModule('/src/features/admin/auditData.ts');
+    const { buildAuditWorkbook } = await vite.ssrLoadModule('/src/features/admin/auditWorkbook.ts');
+    const { buildStudentWorkbook } = await vite.ssrLoadModule('/src/features/admin/studentExcel.ts');
+    const { receiptRevenueLine, orderExtras } = await vite.ssrLoadModule('/src/features/receipts/receiptData.ts');
+    const { buildRegistrationsCsv } = await vite.ssrLoadModule('/src/utils/csv.ts');
+    const studio = await create('packages', {
+      code: 'STUDIO-1500', name: 'Portrait', amount: 1500, is_active: true, revenue_category: 'studio',
+    });
+    const pureMua = await create('packages', {
+      code: 'MUA-300', name: 'Makeup session', amount: 300, is_active: true, requires_mua: true, revenue_category: 'mua',
+    });
+    const muaAddOn = await create('add_ons', {
+      code: 'MUA-300', name: 'Makeup session', amount: 300, is_active: true, requires_mua: true,
+      mua_service_types: [makeupType.id], revenue_category: 'mua',
+    });
+    const groomingAddOn = await create('add_ons', {
+      code: 'MUA-150', name: 'Grooming session', amount: 150, is_active: true, requires_mua: true,
+      mua_service_types: [groomingType.id], revenue_category: 'mua',
+    });
+    const recordsFor = async (collection, job) => (await send(
+      records(collection) + '?filter=' + encodeURIComponent(`registration = "${job.id}"`), { token: admin },
+    )).payload.items;
+    const auditFor = async (job) => {
+      const current = (await registrations(job)).payload;
+      return buildAudit([current], await recordsFor('payments', job), await recordsFor('refunds', job));
+    };
+    const studioOnly = await register(studio);
+    await pay(studioOnly, 1500);
+    assert.deepEqual((await auditFor(studioOnly)).totals.revenue, { studio: 1500, mua: 0, unallocated: 0 });
+    const muaOnly = await register(pureMua);
+    await pay(muaOnly, 300);
+    assert.deepEqual((await auditFor(muaOnly)).totals.revenue, { studio: 0, mua: 300, unallocated: 0 });
+    const mixed = await register(studio, [{ id: muaAddOn.id, revenue_category: 'studio', amount: 0 }, { id: groomingAddOn.id }], 200,
+      { revenue_terms: JSON.stringify({ studio: 0, mua: 1, unallocated: 0 }) });
+    assert.deepEqual(mixed.revenue_terms, { studio: 150000, mua: 45000, unallocated: 0 });
+    const mixedFirst = await pay(mixed, 975, 'initial');
+    assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 0, mua: 0, unallocated: 975 });
+    const mixedLast = await pay(mixed, 975, 'additional');
+    const settled = await auditFor(mixed);
+    assert.equal(settled.totals.netCollections, 1950);
+    assert.equal(settled.totals.outstanding, 0);
+    assert.deepEqual(settled.totals.revenue, { studio: 1500, mua: 450, unallocated: 0 });
+    assert.equal(settled.bySchool[0].collected, 1500);
+    assert.equal(settled.byPackage[0].collected, 1500);
+    const periodAudit = buildAudit([settled.orders[0].registration], [
+      { ...mixedFirst, created: '2026-11-20 15:59:00.000Z' },
+      { ...mixedLast, created: '2026-11-20 16:00:00.000Z' },
+    ], [], '2026-11-20 16:00:00.000Z');
+    assert.deepEqual(periodAudit.totals.revenue, { studio: 1500, mua: 450, unallocated: -975 });
+    assert.equal(periodAudit.totals.netCollections, 975);
+    const auditBook = buildAuditWorkbook(settled, { label: 'All time' });
+    const excel = await import('exceljs');
+    const auditReadback = new excel.default.Workbook();
+    await auditReadback.xlsx.load(await auditBook.xlsx.writeBuffer());
+    const allocationRows = auditReadback.getWorksheet('Revenue').getRows(5, 2).map((row) => row.values.slice(4, 8));
+    assert.deepEqual(allocationRows, [[0, 0, 975, 975], [1500, 450, -975, 975]]);
+    const receipt = { registration: settled.orders[0].registration, payments: [mixedFirst, mixedLast], refunds: [], terms: [] };
+    assert.equal(receiptRevenueLine(receipt, mixedLast), 'Studio ₱1,500.00 / MUA ₱450.00 / Unallocated ₱-975.00');
+    assert.deepEqual(buildRegistrationsCsv([receipt.registration], receipt.payments).split('\r\n')
+      .slice(1).map((line) => line.split(',').slice(-3)), [['1500.00', '450.00', '0.00'], ['1500.00', '450.00', '0.00']]);
+
+    // Sold prices and ownership are independent from later catalog edits.
+    await patchCatalog('packages', studio, { amount: 1800, revenue_category: 'mua' });
+    await patchCatalog('add_ons', groomingAddOn, { amount: 180, revenue_category: 'studio', is_active: false });
+    await register(studio, [{ id: groomingAddOn.id }], 400);
+    assert.deepEqual((await auditFor(mixed)).totals.revenue, settled.totals.revenue);
+    await patchCatalog('packages', studio, { amount: 1500, revenue_category: 'studio' });
+    await send(records('add_ons', groomingAddOn.id), { token: admin, method: 'DELETE', status: 204 });
+    assert.deepEqual((await auditFor(mixed)).totals.revenue, settled.totals.revenue);
+    await registrations(mixed, cashier, { order_discount: { studio: 0, mua: 50, reason: 'staff discount' } }, 403);
+    await registrations(mixed, admin, { order_discount: { studio: 0, mua: 50, reason: '' } }, 400);
+    const discounted = (await registrations(mixed, admin, {
+      order_discount: { studio: 0, mua: 150, reason: 'Complimentary grooming' },
+    })).payload;
+    assert.deepEqual(discounted.revenue_terms, { studio: 150000, mua: 30000, unallocated: 0 });
+    assert.deepEqual([discounted.total_amount, discounted.balance], [1800, 0]);
+    assert.deepEqual(orderExtras(discounted).at(-1), ['Discount (Complimentary grooming)', -150]);
+    assert.equal((await auditFor(mixed)).orders[0].overpaid, 150);
+    await refundRoute({ registrationId: mixed.id, amount: 150, method: 'cash', reason: 'Approved complimentary service' });
+    assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
+
+    const discountReport = (await send(api + '/student-excel', { token: admin })).payload;
+    const exportRow = discountReport.rows.find((row) => row.jobOrder === mixed.job_order_no);
+    assert.deepEqual([exportRow.packageAmount, exportRow.discount, exportRow.due], [150000, 15000, 180000]);
+    const discountBook = buildStudentWorkbook({ ...discountReport, rows: [exportRow] });
+    const discountSheet = discountBook.worksheets[0];
+    const discountHeaders = discountSheet.getRow(1).values;
+    for (const [heading, amount] of [['STUDIO REVENUE', 1500], ['OTHER PAYMENT - MUA', 300], ['DISCOUNT', -150]]) {
+      assert.equal(discountSheet.getRow(2).getCell(discountHeaders.indexOf(heading)).value, amount, heading);
+    }
+    await send(records('payments', mixedLast.id), { token: admin, method: 'PATCH', body: { amount: 825 }, status: 403 });
+    await send(`${api}/payments/${mixedLast.id}/void`, { method: 'POST', token: admin, body: { reason: 'Incorrect receipt amount' } });
+    assert.equal((await registrations(mixed)).payload.balance, 975);
+    await pay(mixed, 975, 'additional');
+    assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
+    assert.equal((await registrations(mixed)).payload.balance, 0);
+    const free = await create('add_ons', { code: 'FREE', name: 'Free MUA service', amount: 0, is_active: true, revenue_category: 'mua' });
+    const withFree = await register(studio, [{ id: free.id }]);
+    await pay(withFree, 1500);
+    assert.deepEqual((await auditFor(withFree)).totals.revenue, { studio: 1500, mua: 0, unallocated: 0 });
+
+    const legacyJob = { id: legacyId };
+    assert.deepEqual((await auditFor(legacyJob)).totals.revenue, { studio: 0, mua: 0, unallocated: 1000 });
+    await registrations(legacyJob, admin, { review_mua_amount: 2000, review_revenue_reason: 'Original invoice' }, 400);
+    const reviewed = (await registrations(legacyJob, admin, { review_mua_amount: 0, review_revenue_reason: 'Original invoice confirms studio' })).payload;
+    assert.deepEqual(reviewed.revenue_terms, { studio: 150000, mua: 0, unallocated: 0 });
+    assert.deepEqual((await auditFor(legacyJob)).totals.revenue, { studio: 1000, mua: 0, unallocated: 0 });
+
+    // A paid mixed order joins the Parent's waiting queue; assignment is separate from completion and revenue.
+    const parent = artists[2];
+    const child = artists[3];
+    const replacement = artists[4];
+    const disabled = artists[5];
+    const setTeam = (actor, parentId, allowSelf, status = 200) => send(api + '/makeup-team', {
+      method: 'POST', token: actor.token || actor, body: { parentId, allowSelf }, status,
+    });
+    const getTeam = (actor) => send(api + '/makeup-team', { token: actor.token || actor }).then((response) => response.payload);
+    await send(records('users', disabled.id), { token: admin, method: 'PATCH', body: { disabled: true } });
+    await setTeam(child, child.id, true, 403);
+    await setTeam(admin, chooser.id, true, 400);
+    await setTeam(admin, parent.id, false);
+    assert.equal((await getTeam(parent)).manage, true);
+    assert.equal((await getTeam(child)).manage, false);
+    assert.ok((await queue(parent)).some((row) => row.id === mixed.id && row.state === 'waiting'));
+    assert.ok(!(await queue(child)).some((row) => row.id === mixed.id));
+    await contest(mixed, child, 'claim', 403);
+    await contest(mixed, child, 'assign', 403, { artistId: replacement.id });
+    await contest(mixed, parent, 'assign', 403, { artistId: parent.id });
+    await contest(mixed, parent, 'assign', 400, { artistId: disabled.id });
+    const winning = await Promise.all([
+      contest(mixed, parent, 'assign', null, { artistId: child.id }),
+      contest(mixed, admin, 'assign', null, { artistId: replacement.id }),
+    ]);
+    assert.deepEqual(winning.map(({ status }) => status).sort(), [200, 409]);
+    const firstArtist = winning[0].status === 200 ? child : replacement;
+    const nextArtist = firstArtist === child ? replacement : child;
+    await contest(mixed, parent, 'assign', 200, { artistId: firstArtist.id }); // retry of version zero
+    assert.ok((await queue(firstArtist)).some((row) => row.id === mixed.id && row.state === 'claimed'));
+    assert.ok(!(await queue(nextArtist)).some((row) => row.id === mixed.id));
+    assert.ok(!(await report()).rows.flatMap((row) => row.details).some((detail) => detail.jobId === mixed.id));
+    await contest(mixed, firstArtist, 'start', 200, { version: '1' });
+    await contest(mixed, parent, 'assign', 200, { artistId: nextArtist.id, version: '1' });
+    await contest(mixed, firstArtist, 'complete', 409, { version: '1' });
+    assert.ok((await queue(nextArtist)).some((row) => row.id === mixed.id && row.state === 'claimed'));
+    await contest(mixed, nextArtist, 'start', 200, { version: '2' });
+    await contest(mixed, nextArtist, 'complete', 200, { version: '2' });
+    await contest(mixed, nextArtist, 'complete', 200, { version: '2' });
+    await contest(mixed, parent, 'assign', 409, { artistId: firstArtist.id, version: '2' });
+    const performed = (await report()).rows.find((row) => row.id === nextArtist.id).details.filter((row) => row.jobId === mixed.id);
+    assert.deepEqual(performed.map((row) => row.serviceName), ['Grooming']); // Makeup category was deactivated earlier in this test.
+    assert.ok((await getTeam(parent)).artists.find((artist) => artist.id === nextArtist.id).completed > 0);
+    const history = (await send(records('mua_assignment_events') + '?sort=created&filter='
+      + encodeURIComponent(`job_id = "${mixed.id}"`), { token: admin })).payload.items;
+    assert.deepEqual(history.map((event) => event.action), ['assign', 'start', 'reassign', 'start', 'complete']);
+    assert.equal(history[2].previous_artist_id, firstArtist.id);
+    assert.equal(history[2].actor_id, parent.id);
+    assert.equal(history[4].artist_id, nextArtist.id);
+    await setTeam(admin, parent.id, true);
+    await contest(muaOnly, parent, 'assign', 200, { artistId: parent.id });
+    await setTeam(admin, parent.id, false);
+    await contest(muaOnly, parent, 'start', 200, { version: '1' });
+    await setTeam(admin, replacement.id, false);
+    await contest(muaOnly, parent, 'complete', 200, { version: '1' });
+    assert.equal((await getTeam(parent)).manage, false);
+    assert.equal((await getTeam(replacement)).manage, true);
+    assert.ok((await report()).rows.some((row) => row.id === parent.id && row.details.some((detail) => detail.jobId === muaOnly.id)));
+    await shoot(mixed, 'shooting');
+    await send(records('packages', studio.id), { token: admin, method: 'DELETE', status: 204 });
+    const retained = await auditFor(mixed);
+    assert.equal(retained.orders[0].registration.package_snapshot.name, 'Portrait');
+    assert.equal(retained.byPackage[0].key, studio.id);
+    assert.deepEqual(retained.totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
+  });
+
   // Both export formats use the same row matrix as the dashboard.
   const { muaReportTable } = await import('../src/features/admin/muaPerformance.ts');
   const { buildMuaWorkbook, muaReportCsv } = await import('../src/features/admin/muaPerformanceExport.ts');

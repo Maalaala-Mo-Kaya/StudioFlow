@@ -35,15 +35,18 @@ function offeredTo(item, clientKind) {
 function priceAddOns(app, selections, previous = [], clientKind = "school") {
   if (!Array.isArray(selections)) throw new BadRequestError("Invalid add-on selection.");
   const kept = new Map(previous.filter((item) => item?.id).map((item) => [item.id, item]));
+  const legacy = previous.filter((item) => item && !item.id);
   let catalog = null;
   const used = new Set();
   return selections.map((selection) => {
     if (!selection || typeof selection !== "object") throw new BadRequestError("Invalid add-on selection.");
-    if (selection.id && kept.has(selection.id)) {
-      if (used.has(selection.id)) throw new BadRequestError("Each add-on can only be selected once.");
-      used.add(selection.id);
-      const item = kept.get(selection.id);
-      return { id: item.id, code: item.code || "", name: item.name, amount: item.amount };
+    const existing = selection.id ? kept.get(selection.id)
+      : legacy.find((item) => selection.code ? item.code === selection.code : item.name === selection.name);
+    if (existing) {
+      const key = existing.id || "legacy:" + (existing.code || existing.name);
+      if (used.has(key)) throw new BadRequestError("Each add-on can only be selected once.");
+      used.add(key);
+      return existing;
     }
     catalog ??= app.findAllRecords("add_ons");
     // Older registration clients submit a code or name instead of an id.
@@ -58,7 +61,10 @@ function priceAddOns(app, selections, previous = [], clientKind = "school") {
     }
     if (used.has(item.id)) throw new BadRequestError("Each add-on can only be selected once.");
     used.add(item.id);
-    return { id: item.id, code: item.getString("code"), name: item.getString("name"), amount: item.getFloat("amount") };
+    return {
+      id: item.id, code: item.getString("code"), name: item.getString("name"), amount: item.getFloat("amount"),
+      revenue_category: item.getString("revenue_category"),
+    };
   });
 }
 

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { UserPlus, Trash2, Eye, EyeOff, KeyRound } from 'lucide-react';
 import { ResetPasswordModal } from './ResetPasswordModal';
 import type { StaffUser, StaffRole } from '../../../types';
+import { MuaTeamSettings } from './MuaTeamSettings';
 import { PROTECTED_SYSTEM_USERNAMES } from '../../../constants/studio';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useAuth } from '../../../context/AuthContext';
@@ -246,6 +247,8 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
           ))}
         </div>
       </div>
+
+      <MuaTeamSettings />
 
       {resetTarget && (
         <ResetPasswordModal

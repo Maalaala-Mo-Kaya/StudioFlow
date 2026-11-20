@@ -1,5 +1,6 @@
-import type { Organization, Package, PaymentRecord, RefundRecord, Registration } from '../../types';
+import type { Organization, Package, PaymentRecord, RefundRecord, Registration, RevenueSplit } from '../../types';
 import { isWalkIn } from '../../utils/clientInfo';
+import { countedPayment, emptyRevenue, revenueKeys, revenueMovements, revenuePesos, revenueTerms } from '../../utils/revenue';
 
 /**
  * One set of money rules for the admin overview cards, the school / package lists, the
@@ -20,6 +21,7 @@ export const WALKIN_KEY = '__walkin';
 export const UNKNOWN_PACKAGE = '__none';
 
 export interface AuditOrder {
+  revenue: RevenueSplit;
   registration: Registration;
   cancelled: boolean;
   /** The order's full price (job order total). */
@@ -39,6 +41,7 @@ export interface AuditOrder {
 }
 
 export interface AuditPayment {
+  revenue: RevenueSplit;
   payment: PaymentRecord;
   registration?: Registration;
   counted: boolean;
@@ -47,6 +50,7 @@ export interface AuditPayment {
 }
 
 export interface AuditRefund {
+  revenue: RevenueSplit;
   refund: RefundRecord;
   registration?: Registration;
   earlierOrder: boolean;
@@ -82,6 +86,7 @@ export interface AuditData {
     refunds: number;
     /** Collections − Refunds. */
     netCollections: number;
+    revenue: RevenueSplit;
     collectionsOnEarlierOrders: number;
     refundsOnEarlierOrders: number;
     activeOrders: number;
@@ -103,7 +108,7 @@ const pesos = (value: number) => value / 100;
 const createdTime = (value: string) => Date.parse(value.replace(' ', 'T'));
 const inPeriod = (created: string, since?: string) => !since || created >= since;
 /** A payment counts unless it was voided (or marked refunded under the old method). */
-export const isCountedPayment = (payment: PaymentRecord) => payment.status !== 'voided' && payment.status !== 'refunded';
+export const isCountedPayment = countedPayment;
 
 export function buildAudit(
   registrations: Registration[],
@@ -113,6 +118,18 @@ export function buildAudit(
   catalog: { organizations?: Organization[]; packages?: Package[] } = {},
 ): AuditData {
   const regById = new Map(registrations.map((reg) => [reg.id, reg]));
+  const groupByOrder = <T extends { registration: string }>(rows: T[]) => {
+    const groups = new Map<string, T[]>();
+    for (const row of rows) {
+      if (!groups.has(row.registration)) groups.set(row.registration, []);
+      groups.get(row.registration)!.push(row);
+    }
+    return groups;
+  };
+  const paymentGroups = groupByOrder(payments);
+  const refundGroups = groupByOrder(refunds);
+  const allocations = new Map([...new Set([...paymentGroups.keys(), ...refundGroups.keys()])].map((id) =>
+    [id, revenueMovements(regById.get(id), paymentGroups.get(id) ?? [], refundGroups.get(id) ?? [])]));
   const paidById = new Map<string, number>();
   for (const payment of payments) {
     if (isCountedPayment(payment)) paidById.set(payment.registration, (paidById.get(payment.registration) ?? 0) + cents(payment.amount));
@@ -132,6 +149,7 @@ export function buildAudit(
       const net = paid - refunded;
       return {
         registration, cancelled, total, paid, refunded, net,
+        revenue: allocations.get(registration.id)?.net ?? emptyRevenue(),
         billed: cancelled ? Math.max(0, net) : total,
         balance: cancelled ? 0 : Math.max(0, total - net),
         overpaid: cancelled ? 0 : Math.max(0, net - total),
@@ -145,6 +163,7 @@ export function buildAudit(
     .sort((a, b) => createdTime(a.created) - createdTime(b.created) || a.id.localeCompare(b.id))
     .map((payment) => ({
       payment,
+      revenue: allocations.get(payment.registration)?.movements.get('p:' + payment.id) ?? emptyRevenue(),
       registration: regById.get(payment.registration),
       counted: isCountedPayment(payment),
       earlierOrder: Boolean(since) && !periodOrderIds.has(payment.registration),
@@ -154,6 +173,7 @@ export function buildAudit(
     .sort((a, b) => createdTime(a.created) - createdTime(b.created) || a.id.localeCompare(b.id))
     .map((refund) => ({
       refund,
+      revenue: allocations.get(refund.registration)?.movements.get('r:' + refund.id) ?? emptyRevenue(),
       registration: regById.get(refund.registration),
       earlierOrder: Boolean(since) && !periodOrderIds.has(refund.registration),
     }));
@@ -174,7 +194,7 @@ export function buildAudit(
 
   // Breakdowns: schools (and walk-ins) and packages, each with a row for everything so totals match.
   const groupOf = (reg?: Registration) => (!reg || isWalkIn(reg) ? WALKIN_KEY : reg.organization || WALKIN_KEY);
-  const packageOf = (reg?: Registration) => reg?.package || UNKNOWN_PACKAGE;
+  const packageOf = (reg?: Registration) => reg?.package_snapshot?.id || reg?.package || UNKNOWN_PACKAGE;
   const schools = new Map<string, AuditGroup>();
   for (const org of catalog.organizations ?? []) {
     schools.set(org.id, { key: org.id, code: org.code || 'ORG', name: org.name, count: 0, billed: 0, collected: 0, balance: 0 });
@@ -199,7 +219,7 @@ export function buildAudit(
     const key = packageOf(reg);
     let group = packagesByKey.get(key);
     if (!group) {
-      const pkg = reg?.expand?.package;
+      const pkg = reg?.package_snapshot || reg?.expand?.package;
       group = { key, code: pkg?.code || '—', name: pkg?.name || 'No package / removed package', count: 0, billed: 0, collected: 0, balance: 0 };
       packagesByKey.set(key, group);
     }
@@ -208,17 +228,16 @@ export function buildAudit(
   for (const row of orderRows) {
     for (const group of [schoolGroup(row.registration), packageGroup(row.registration)]) {
       if (!row.cancelled) group.count += 1;
-      group.billed += row.billed;
-      group.balance += row.balance;
+      const studio = revenueTerms(row.registration).studio;
+      group.billed += row.cancelled ? row.revenue.studio : studio;
+      group.balance += row.cancelled ? 0 : Math.max(0, studio - row.revenue.studio);
     }
   }
-  for (const row of countedPayments) {
-    schoolGroup(row.registration).collected += cents(row.payment.amount);
-    packageGroup(row.registration).collected += cents(row.payment.amount);
-  }
-  for (const row of refundRows) {
-    schoolGroup(row.registration).collected -= cents(row.refund.amount);
-    packageGroup(row.registration).collected -= cents(row.refund.amount);
+  const revenue = emptyRevenue();
+  for (const row of [...countedPayments, ...refundRows]) {
+    schoolGroup(row.registration).collected += row.revenue.studio;
+    packageGroup(row.registration).collected += row.revenue.studio;
+    for (const key of revenueKeys) revenue[key] += row.revenue[key];
   }
   const toPesos = (group: AuditGroup): AuditGroup => ({
     ...group, billed: pesos(group.billed), collected: pesos(group.collected), balance: pesos(group.balance),
@@ -235,9 +254,10 @@ export function buildAudit(
     orders: orderRows.map((row) => ({
       ...row, total: pesos(row.total), billed: pesos(row.billed), paid: pesos(row.paid), refunded: pesos(row.refunded),
       net: pesos(row.net), balance: pesos(row.balance), overpaid: pesos(row.overpaid),
+      revenue: revenuePesos(row.revenue),
     })),
-    payments: paymentRows,
-    refunds: refundRows,
+    payments: paymentRows.map((row) => ({ ...row, revenue: revenuePesos(row.revenue) })),
+    refunds: refundRows.map((row) => ({ ...row, revenue: revenuePesos(row.revenue) })),
     totals: {
       gross: pesos(gross),
       paidOnOrders: pesos(paidOnOrders),
@@ -247,6 +267,7 @@ export function buildAudit(
       collections: pesos(collections),
       refunds: pesos(refundTotal),
       netCollections: pesos(collections - refundTotal),
+      revenue: revenuePesos(revenue),
       collectionsOnEarlierOrders: pesos(collectionsOnEarlierOrders),
       refundsOnEarlierOrders: pesos(refundsOnEarlierOrders),
       activeOrders: orderRows.filter((row) => !row.cancelled).length,
