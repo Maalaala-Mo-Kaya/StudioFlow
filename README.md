@@ -1,6 +1,6 @@
 <div align="center">
 
-# StudioFlow V2
+# StudioFlow
 
 ### Offline-First Graduation Pictorial & Studio Workflow Automation
 
