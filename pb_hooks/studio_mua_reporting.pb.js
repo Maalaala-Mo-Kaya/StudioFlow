@@ -22,7 +22,7 @@ routerAdd("GET", "/api/studioflow/mua-service-types", (e) => {
   require(__hooks + "/studio_workflow.js").staff(e.app, e.auth, ["admin"]);
   e.response.header().set("Cache-Control", "private, no-store");
   return e.json(200, e.app.findAllRecords("mua_service_types")
-    .map((record) => ({ id: record.id, name: record.getString("name"), is_active: record.getBool("is_active") }))
+    .map((record) => ({ id: record.id, name: record.getString("name"), is_active: record.getBool("is_active"), payout_rate: record.getFloat("payout_rate") || 0 }))
     .sort((a, b) => a.name.localeCompare(b.name)));
 }, $apis.requireAuth("users"));
 
@@ -32,6 +32,19 @@ onRecordCreateRequest((e) => {
 }, "mua_service_types");
 
 onRecordUpdateRequest((e) => {
+  if ("payout_rate" in (e.requestInfo().body || {})) {
+    const rate = e.record.getFloat("payout_rate");
+    if (!Number.isFinite(rate) || rate < 0) throw new BadRequestError("Payout rate must be a nonnegative amount.");
+    e.record.set("payout_rate", Math.round(rate * 100) / 100);
+  }
+  e.record.set("name", e.record.getString("name").trim());
+  return e.next();
+}, "mua_service_types");
+
+onRecordCreateRequest((e) => {
+  const rate = e.record.getFloat("payout_rate");
+  if (!Number.isFinite(rate) || rate < 0) throw new BadRequestError("Payout rate must be a nonnegative amount.");
+  e.record.set("payout_rate", Math.round(rate * 100) / 100);
   e.record.set("name", e.record.getString("name").trim());
   return e.next();
 }, "mua_service_types");

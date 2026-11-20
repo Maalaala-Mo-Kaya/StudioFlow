@@ -165,7 +165,7 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
   }
 
   return (
-    <StationLayout title="Makeup / Grooming Queue" refresh={() => { refresh(); refreshTeam(); }} embedded={embedded}>
+    <StationLayout title="Makeup / Grooming" refresh={() => { refresh(); refreshTeam(); }} embedded={embedded}>
       {error && <p role="alert" className="text-sm font-bold text-red-700">{error}</p>}
       {teamError && <p role="alert" className="text-sm font-bold text-red-700">{teamError}</p>}
       {data && !team && !teamError && <p role="status" className="text-sm">Loading MUA team…</p>}

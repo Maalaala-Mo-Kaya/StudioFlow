@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useToast } from '../../../context/ToastContext';
 import { useWorkflowData, workflowError } from '../../../hooks/useWorkflowData';
 import { stationButton, stationCard } from '../../workflow/StationLayout';
-import { muaReportTable, type MuaPerformanceReport } from '../muaPerformance';
+import { muaEarningsTable, muaReportTable, type MuaPerformanceReport } from '../muaPerformance';
 
 const studioTime = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
 const sourceLabels: Record<string, string> = {
@@ -13,6 +13,7 @@ export function MuaPerformancePanel() {
   const [date, setDate] = useState('');
   const [selected, setSelected] = useState<{ id: string; date: string }>();
   const [exporting, setExporting] = useState(false);
+  const [tab, setTab] = useState<'performance' | 'earnings'>('performance');
   const { toast } = useToast();
   const { data: report, error } = useWorkflowData<MuaPerformanceReport>(`/mua-performance?date=${encodeURIComponent(date)}`);
   const table = report && muaReportTable(report);
@@ -23,7 +24,7 @@ export function MuaPerformancePanel() {
     setExporting(true);
     try {
       const { downloadMuaReport } = await import('../muaPerformanceExport');
-      await downloadMuaReport(report, format);
+      await downloadMuaReport(report, format, tab);
     } catch (failure) {
       toast.error(workflowError(failure));
     } finally { setExporting(false); }
@@ -62,6 +63,13 @@ export function MuaPerformancePanel() {
       {!report && !error && <p role="status" className="text-sm">Loading daily report…</p>}
       {report && table && (
         <>
+          <div role="tablist" aria-label="MUA analytics views" className="flex flex-wrap gap-2 border-b-2 border-line pb-2">
+            {(['performance', 'earnings'] as const).map((key) => <button key={key} type="button" role="tab" aria-selected={tab === key}
+              className={`${stationButton} ${tab === key ? 'bg-obsidian !text-gold border-b-4 border-b-gold' : 'bg-panel !text-ink'}`} onClick={() => setTab(key)}>
+              {key === 'performance' ? 'Performance' : 'Earnings'}
+            </button>)}
+          </div>
+          {tab === 'earnings' ? <EarningsTable report={report} /> : <>
           {!report.rows.length && <p className="text-sm">No completions recorded for this date.</p>}
           <div className="overflow-x-auto border border-line" tabIndex={0} role="region" aria-label="Daily MUA counts">
             <table className="min-w-full whitespace-nowrap text-sm">
@@ -112,8 +120,19 @@ export function MuaPerformancePanel() {
               </ul>
             </section>
           )}
+          </>}
         </>
       )}
     </section>
   );
+}
+
+function EarningsTable({ report }: { report: MuaPerformanceReport }) {
+  const table = muaEarningsTable(report);
+  return <div className="overflow-x-auto border border-line" tabIndex={0} role="region" aria-label="Daily MUA earnings">
+    <table className="min-w-full whitespace-nowrap text-sm"><thead className="bg-obsidian text-gold"><tr>{table.headers.slice(1).map((name, index) => <th key={name} scope="col" className={`px-3 py-2 uppercase ${index > 0 ? 'text-right' : 'text-left'}`}>{name}</th>)}</tr></thead>
+      <tbody className="divide-y divide-neutral-200">{table.rows.map((row, index) => <tr key={`${row[1]}-${index}`}>{row.slice(1).map((value, cell) => cell === 0 ? <th key={cell} scope="row" className="px-3 py-2 text-left">{value}</th> : <td key={cell} className="px-3 py-2 text-right font-mono">{value}</td>)}</tr>)}</tbody>
+      <tfoot className="border-t border-line bg-gold-wash font-black"><tr>{table.total.slice(1).map((value, index) => index === 0 ? <th key={index} scope="row" className="px-3 py-2 text-left">{value}</th> : <td key={index} className="px-3 py-2 text-right font-mono">{value}</td>)}</tr></tfoot>
+    </table>
+  </div>;
 }

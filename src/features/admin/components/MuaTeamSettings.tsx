@@ -8,7 +8,7 @@ import { stationButton } from '../../workflow/StationLayout';
 export function MuaTeamSettings() {
   const { data, error, refresh } = useWorkflowData<MuaTeam>('/makeup-team');
   return <section className="border-2 border-line bg-panel p-5 lg:col-span-2">
-    <h3 className="mb-3 text-sm font-black uppercase tracking-wider">Makeup Artist Team</h3>
+    <h3 className="mb-4 border-b-2 border-line pb-3 text-sm font-black uppercase tracking-wider">Makeup Artist Team</h3>
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     {!data && !error && <p role="status" className="text-sm">Loading MUA settings…</p>}
     {data && <TeamForm key={`${data.parentId}:${data.allowSelf}`} team={data} refresh={refresh} />}

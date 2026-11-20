@@ -38,7 +38,7 @@ export const ThemeToggle: React.FC = () => {
       aria-checked={isLight}
       aria-label={isLight ? 'Switch to night theme' : 'Switch to day theme'}
       title={isLight ? 'Night mode' : 'Day mode'}
-      className="group relative flex h-9 w-[4.5rem] shrink-0 items-center rounded-full border border-gold/50 bg-obsidian-2 p-1 cursor-pointer transition-colors hover:border-gold"
+      className="group relative flex h-9 w-[4.5rem] shrink-0 items-center rounded-full border border-gold/50 bg-obsidian-2 p-1 cursor-pointer transition-colors hover:border-gold focus-visible:outline-2 focus-visible:outline-gold focus-visible:outline-offset-2"
     >
       <span
         aria-hidden="true"
@@ -46,8 +46,8 @@ export const ThemeToggle: React.FC = () => {
           isLight ? 'translate-x-[2.25rem]' : 'translate-x-0'
         }`}
       />
-      <Moon aria-hidden="true" className={`relative z-10 ml-1.5 size-4 transition-colors ${isLight ? 'text-neutral-500' : 'text-on-gold'}`} />
-      <Sun aria-hidden="true" className={`relative z-10 ml-auto mr-1.5 size-4 transition-colors ${isLight ? 'text-on-gold' : 'text-neutral-500'}`} />
+      <Moon aria-hidden="true" className={`relative z-10 ml-1.5 size-4 transition-colors ${isLight ? 'text-gold-soft' : 'text-on-gold'}`} />
+      <Sun aria-hidden="true" className={`relative z-10 ml-auto mr-1.5 size-4 transition-colors ${isLight ? 'text-on-gold' : 'text-gold-soft'}`} />
     </button>
   );
 };

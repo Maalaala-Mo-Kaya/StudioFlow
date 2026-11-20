@@ -17,7 +17,7 @@ function logCompletion(app, job, artist, actor, completedAt) {
       let entry = categorySources.get(type.id);
       if (!entry) {
         const category = type.id === uncategorized.id ? null : workflow.catalogItem(app, "mua_service_types", type.id);
-        entry = { name: category?.getString("name") || type.name, sources: [] };
+        entry = { name: category?.getString("name") || type.name, payoutRate: category?.getFloat("payout_rate") || 0, sources: [] };
         categorySources.set(type.id, entry);
       }
       entry.sources.push(source);
@@ -34,7 +34,7 @@ function logCompletion(app, job, artist, actor, completedAt) {
       artist_id: artist.id, artist_name: staffName(artist),
       actor_id: actor.id, actor_name: staffName(actor), actor_role: actor.getString("role"),
       service_id: serviceId, service_name: entry.name, sources: entry.sources,
-      package_id: pkg?.id || job.getString("package"), package_name: pkg?.name || "",
+      package_id: pkg?.id || job.getString("package"), package_name: pkg?.name || "", payout_rate: entry.payoutRate,
       local_date: studioDate(completedAt), completed_at: completedAt,
     };
     for (const [field, value] of Object.entries(values)) record.set(field, value);
@@ -54,17 +54,20 @@ function dailyReport(app, date, today) {
     const serviceName = log.getString("service_name");
     const jobId = log.getString("job_id");
     columns.set(serviceId, serviceName);
-    const row = artists.get(id) || { id, jobs: new Set(), counts: {}, details: [] };
+    const row = artists.get(id) || { id, jobs: new Set(), counts: {}, earnings: {}, totalEarnings: 0, details: [] };
     row.name = log.getString("artist_name");
     row.jobs.add(jobId);
     row.counts[serviceId] = (row.counts[serviceId] || 0) + 1;
+    const payout = log.getFloat("payout_rate") || 0;
+    row.earnings[serviceId] = (row.earnings[serviceId] || 0) + payout;
+    row.totalEarnings += payout;
     row.details.push({
       id: log.id, jobId, jobOrder: log.getString("job_order"), studentId: log.getString("student_id"),
       studentName: log.getString("student_name"), artistName: row.name,
       actorId: log.getString("actor_id"), actorName: log.getString("actor_name"), actorRole: log.getString("actor_role"),
       serviceId, serviceName, sources: workflow.json(log, "sources"),
       packageId: log.getString("package_id"), packageName: log.getString("package_name"),
-      completedAt: log.getString("completed_at"),
+      completedAt: log.getString("completed_at"), payoutRate: payout,
     });
     artists.set(id, row);
     allJobs.add(jobId);
@@ -75,7 +78,7 @@ function dailyReport(app, date, today) {
       columns.set(type.id, type.getString("name"));
     }
     for (const artist of app.findRecordsByFilter("users", "role = 'mua'", "name,id", 0, 0)) {
-      const row = artists.get(artist.id) || { id: artist.id, jobs: new Set(), counts: {}, details: [] };
+      const row = artists.get(artist.id) || { id: artist.id, jobs: new Set(), counts: {}, earnings: {}, totalEarnings: 0, details: [] };
       row.name = staffName(artist);
       artists.set(artist.id, row);
     }

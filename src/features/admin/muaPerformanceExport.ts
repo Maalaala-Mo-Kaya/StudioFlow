@@ -1,8 +1,8 @@
 import { downloadBlob } from '../../utils/downloadBlob.ts';
-import { muaReportTable, type MuaPerformanceReport } from './muaPerformance.ts';
+import { muaEarningsTable, muaReportTable, type MuaPerformanceReport } from './muaPerformance.ts';
 
-export function muaReportCsv(report: MuaPerformanceReport) {
-  const { headers, rows, total } = muaReportTable(report);
+export function muaReportCsv(report: MuaPerformanceReport, tab: 'performance' | 'earnings' = 'performance') {
+  const { headers, rows, total } = tab === 'earnings' ? muaEarningsTable(report) : muaReportTable(report);
   const csvCell = (value: string | number) => {
     if (typeof value === 'number') return String(value);
     // Spreadsheet apps may evaluate a staff or service name as a formula.
@@ -12,9 +12,9 @@ export function muaReportCsv(report: MuaPerformanceReport) {
   return [headers, ...rows, total].map((row) => row.map(csvCell).join(',')).join('\r\n');
 }
 
-export async function buildMuaWorkbook(report: MuaPerformanceReport) {
+export async function buildMuaWorkbook(report: MuaPerformanceReport, tab: 'performance' | 'earnings' = 'performance') {
   const { default: { Workbook } } = await import('exceljs');
-  const { headers, rows, total } = muaReportTable(report);
+  const { headers, rows, total } = tab === 'earnings' ? muaEarningsTable(report) : muaReportTable(report);
   const workbook = new Workbook();
   const sheet = workbook.addWorksheet('MUA Performance', {
     views: [{ state: 'frozen', xSplit: 2, ySplit: 1 }],
@@ -40,12 +40,12 @@ export async function buildMuaWorkbook(report: MuaPerformanceReport) {
   return workbook;
 }
 
-export async function downloadMuaReport(report: MuaPerformanceReport, format: 'csv' | 'xlsx') {
-  const filename = `StudioFlow-MUA-${report.date}.${format}`;
+export async function downloadMuaReport(report: MuaPerformanceReport, format: 'csv' | 'xlsx', tab: 'performance' | 'earnings' = 'performance') {
+  const filename = `StudioFlow-MUA-${tab}-${report.date}.${format}`;
   if (format === 'csv') {
-    downloadBlob(new Blob(['\uFEFF', muaReportCsv(report)], { type: 'text/csv;charset=utf-8' }), filename);
+    downloadBlob(new Blob(['\uFEFF', muaReportCsv(report, tab)], { type: 'text/csv;charset=utf-8' }), filename);
   } else {
-    const workbook = await buildMuaWorkbook(report);
+    const workbook = await buildMuaWorkbook(report, tab);
     const bytes = await workbook.xlsx.writeBuffer();
     downloadBlob(new Blob([new Uint8Array(bytes)], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

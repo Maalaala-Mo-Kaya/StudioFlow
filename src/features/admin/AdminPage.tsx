@@ -14,6 +14,7 @@ import { ChooserPage } from '../workflow/ChooserPage';
 import { stationButton } from '../workflow/StationLayout';
 import { CameraSettings } from '../camera/CameraSettings';
 import { AdminClientTypesTab } from './components/AdminClientTypesTab';
+import { MuaTeamSettings } from './components/MuaTeamSettings';
 
 export const AdminPage: React.FC = () => {
   const admin = useAdminData();
@@ -149,11 +150,11 @@ export const AdminPage: React.FC = () => {
           {/* TAB 7: STAFF ACCOUNTS & ROLE MANAGEMENT */}
           {admin.activeTab === 'workflow' && (
             <div className="space-y-5">
-              <div className="flex flex-wrap gap-2" aria-label="Workflow reports">
-                <button type="button" className={stationButton} aria-pressed={workflow === 'makeup'} onClick={() => setWorkflow('makeup')}>Makeup / Grooming</button>
-                <button type="button" className={stationButton} aria-pressed={workflow === 'photos'} onClick={() => setWorkflow('photos')}>Photo Selection</button>
+              <div role="tablist" className="flex flex-wrap gap-2" aria-label="Workflow reports">
+                <button role="tab" type="button" className={`${stationButton} ${workflow === 'makeup' ? 'border-b-4 border-b-gold bg-obsidian !text-gold' : 'bg-panel !text-ink'}`} aria-selected={workflow === 'makeup'} onClick={() => setWorkflow('makeup')}>Makeup / Grooming</button>
+                <button role="tab" type="button" className={`${stationButton} ${workflow === 'photos' ? 'border-b-4 border-b-gold bg-obsidian !text-gold' : 'bg-panel !text-ink'}`} aria-selected={workflow === 'photos'} onClick={() => setWorkflow('photos')}>Photo Selection</button>
               </div>
-              {workflow === 'makeup' ? <MakeupPage embedded /> : <ChooserPage embedded />}
+              {workflow === 'makeup' ? <><MuaTeamSettings /><MakeupPage embedded /></> : <ChooserPage embedded />}
             </div>
           )}
 

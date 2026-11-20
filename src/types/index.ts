@@ -93,6 +93,7 @@ export interface MuaServiceType {
   id: string;
   name: string;
   is_active: boolean;
+  payout_rate?: number;
 }
 
 export type ClientKind = 'school' | 'walkin';
