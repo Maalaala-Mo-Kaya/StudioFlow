@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { GraduationCap, Camera, MapPin, Pencil, Plus, Save, Trash2, ScrollText } from 'lucide-react';
+import { GraduationCap, Camera, MapPin, Pencil, Plus, Save, Trash2, ScrollText, Sparkles } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
 import { useToast } from '../../../context/ToastContext';
 import { useStudioSettings } from '../../../hooks/useStudioSettings';
@@ -13,7 +13,7 @@ const errorText = (err: unknown) =>
 
 const blankSession = { name: '', code: '', on_location: false, is_active: true };
 
-/** Admin: who the kiosk accepts (school / walk-in), walk-in session types and walk-in terms. */
+/** Admin: who the kiosk accepts (school / walk-in), the preferred makeup look question, walk-in session types and terms. */
 export const AdminClientTypesTab: React.FC = () => {
   const { toast } = useToast();
   const studio = useStudioSettings();
@@ -130,6 +130,37 @@ export const AdminClientTypesTab: React.FC = () => {
         </p>
       </div>
 
+      {/* Preferred makeup look */}
+      <div className="bg-panel border-2 border-line shadow-lux p-6">
+        <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink m-0 pb-3 border-b-2 border-line mb-4">
+          Preferred Makeup Look at the Kiosk
+        </h3>
+        {settings && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Switch
+              Icon={Sparkles}
+              title="Ask School Clients"
+              hint="Students choose Full makeup, Light / natural or Grooming only. To skip one school, edit it in Schools & Courses."
+              on={!!settings.makeup_look_school}
+              disabled={saving}
+              onChange={(value) => void saveSettings({ makeup_look_school: value }, `Preferred look for school clients ${value ? 'switched ON' : 'switched OFF'}.`)}
+            />
+            <Switch
+              Icon={Sparkles}
+              title="Ask Walk-in Clients"
+              hint="To skip one session type (e.g. ID / Passport Photo), use its Look button below."
+              on={!!settings.makeup_look_walkin}
+              disabled={saving}
+              onChange={(value) => void saveSettings({ makeup_look_walkin: value }, `Preferred look for walk-in clients ${value ? 'switched ON' : 'switched OFF'}.`)}
+            />
+          </div>
+        )}
+        <p className="mt-3 text-[11px] text-neutral-500">
+          Asked only when the package or an add-on includes makeup / grooming. The choice and the client&apos;s note show on the MUA station.
+          Admins can change them in Edit Client.
+        </p>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Session types */}
         <div className="bg-panel border-2 border-line shadow-lux p-6">
@@ -189,6 +220,20 @@ export const AdminClientTypesTab: React.FC = () => {
                       type.is_active ? 'border-emerald-400 text-emerald-700 bg-emerald-50' : 'border-neutral-300 text-neutral-500 bg-neutral-100'
                     }`}>
                     {type.is_active ? 'Offered' : 'Off'}
+                  </button>
+                  <button type="button" disabled={saving}
+                    title={type.makeup_look_off ? 'The kiosk does not ask these clients for a preferred look' : 'The kiosk asks these clients for a preferred look'}
+                    aria-pressed={!type.makeup_look_off}
+                    onClick={async () => {
+                      try {
+                        await pb.collection('session_types').update(type.id, { makeup_look_off: !type.makeup_look_off });
+                        await studio.refresh();
+                      } catch (err) { toast.error(errorText(err)); }
+                    }}
+                    className={`btn-tactile px-2 py-1 text-[10px] font-black uppercase border cursor-pointer ${
+                      type.makeup_look_off ? 'border-neutral-300 text-neutral-500 bg-neutral-100' : 'border-gold text-gold-soft bg-gold-wash'
+                    }`}>
+                    {type.makeup_look_off ? 'No look' : 'Look'}
                   </button>
                   <button type="button" aria-label={`Edit ${type.name}`}
                     onClick={() => { setEditingId(type.id); setForm({ name: type.name, code: type.code || '', on_location: !!type.on_location, is_active: !!type.is_active }); }}

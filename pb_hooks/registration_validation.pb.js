@@ -92,11 +92,36 @@ onRecordCreateRequest((e) => {
     invalid("package", "This package is not offered for this type of client. Choose another package.");
   }
 
+  // Preferred makeup look: only when the order includes makeup / grooming and the kiosk asks
+  // this client (Admin → Client Types, per school / session type). Otherwise it is cleared.
+  const lookRules = require(__hooks + "/studio_makeup_look.js");
+  const workflow = require(__hooks + "/studio_workflow.js");
+  if (pkg && workflow.purchasedServices(e.app, record).length && lookRules.asked(e.app, record)) {
+    const problem = lookRules.check(record, true);
+    if (problem) invalid(problem.field, problem.message);
+  } else {
+    lookRules.clear(record);
+  }
+
   if (!record.getBool("terms_accepted")) invalid("terms_accepted", "Agree to the Terms & Conditions to proceed.");
   if (!record.getUnsavedFiles("signature").length) {
     invalid("signature", "Provide your digital signature on the signature pad.");
   }
 
   if (Object.keys(errors).length) throw new BadRequestError("Check the registration fields and try again.", errors);
+  return e.next();
+}, "registrations");
+
+// Admin edits of the preferred makeup look (Edit Client): a known look or none, and a short note.
+onRecordUpdateRequest((e) => {
+  const before = e.record.original();
+  if (e.record.getString("makeup_look") === before.getString("makeup_look")
+    && e.record.getString("makeup_look_note") === before.getString("makeup_look_note")) return e.next();
+  const problem = require(__hooks + "/studio_makeup_look.js").check(e.record, false);
+  if (problem) {
+    throw new BadRequestError(problem.message, {
+      [problem.field]: new ValidationError("validation_registration_" + problem.field, problem.message),
+    });
+  }
   return e.next();
 }, "registrations");

@@ -53,6 +53,8 @@ export interface Organization {
   name: string;
   code?: string;
   is_active?: boolean;
+  /** Don't ask this school's students for a preferred makeup look. */
+  makeup_look_off?: boolean;
 }
 
 export interface Level {
@@ -103,6 +105,8 @@ export interface SessionType {
   on_location?: boolean;
   is_active?: boolean;
   order?: number;
+  /** Don't ask clients of this session type for a preferred makeup look. */
+  makeup_look_off?: boolean;
 }
 
 /** Studio-wide switches (one record, key = main). */
@@ -114,6 +118,9 @@ export interface StudioSettings {
   walkin_terms?: string[] | null;
   /** Text the cashier sends when an order is ready; see utils/pickupMessage.ts for placeholders. */
   pickup_message?: string;
+  /** Ask the preferred makeup look at the kiosk (school / walk-in clients). */
+  makeup_look_school?: boolean;
+  makeup_look_walkin?: boolean;
 }
 
 export interface Package {
@@ -204,6 +211,9 @@ export interface Registration {
   shoot_completed?: boolean;
   photo_status?: PhotoStatus;
   makeup_service?: string;
+  /** Preferred look from the kiosk: full | light | grooming (empty = not asked). */
+  makeup_look?: string;
+  makeup_look_note?: string;
   makeup_state?: '' | 'claimed' | 'in_progress' | 'completed';
   claimed_by?: string;
   released_at?: string;

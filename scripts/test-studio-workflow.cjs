@@ -130,7 +130,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       family_name: 'Dela Cruz', given_name: 'Juan Carlos', middle_name: 'D',
       organization: school.id, level: level.id, course: course.id, package: pkg.id, student_id: studentId,
       terms_accepted: 'true', email: 'person@example.test', add_ons: JSON.stringify(addOns),
-      status: 'shooting', paid_amount: '1000', ...fields,
+      status: 'shooting', paid_amount: '1000', makeup_look: 'full', ...fields,
     })) form.set(key, value);
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');
     const { payload } = await send(records('registrations'), { method: 'POST', body: form, status: expected });
@@ -337,7 +337,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   for (const key of ['Juan Carlos Dela Cruz', 'Workflow Academy', 'Media Arts', galleryStudent.student_id, galleryStudent.job_order_no]) {
     assert.ok((await list(key)).some((item) => item.id === galleryStudent.id && item.availability === 'available'));
   }
-  assert.equal((await list(unpaid.student_id))[0].availability, 'pending_shoot');
+  // Search lists only photographed clients: a client not photographed yet is not found.
+  assert.deepEqual(await list(unpaid.student_id), []);
+  assert.deepEqual(await list(unpaid.job_order_no), []);
   const route = `${api}/chooser/${galleryStudent.id}`;
   const open = (actor = chooser) => send(route + '/open', { token: actor.token, method: 'POST' }).then((r) => r.payload);
   const first = await open();
@@ -361,6 +363,41 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.equal((await choose(first, first.photos.slice(0, 2), chooser, 200, requestId)).version, confirmed.version);
   await choose(concurrent, concurrent.photos.slice(-1), otherChooser, 409);
   assert.equal((await list(galleryStudent.student_id))[0].selectionState, 'completed');
+  // Chooser filters: already selected / not yet, school or walk-ins, course, with counts.
+  const browse = (params) => send(api + '/chooser?' + new URLSearchParams(params), { token: chooser.token }).then((r) => r.payload);
+  const ids = (result) => result.items.map((item) => item.id);
+  const chosenView = await browse({ done: 'selected' });
+  assert.ok(ids(chosenView).includes(galleryStudent.id), 'Already selected lists the client who confirmed.');
+  assert.ok(!ids(chosenView).includes(plain.id));
+  const waitingView = await browse({ done: 'not_selected' });
+  assert.ok(ids(waitingView).includes(plain.id) && !ids(waitingView).includes(galleryStudent.id), 'Not yet selected leaves them out.');
+  assert.ok(!ids(waitingView).includes(unpaid.id), 'Clients not photographed yet are not listed without a search.');
+  assert.equal(waitingView.counts.all, waitingView.counts.selected + waitingView.counts.notSelected);
+  assert.equal(waitingView.counts.selected, chosenView.counts.selected);
+  assert.ok(waitingView.counts.selected >= 1 && waitingView.counts.notSelected >= 1);
+  assert.ok(ids(await browse({ done: 'selected', school: school.id, course: course.id })).includes(galleryStudent.id));
+  assert.equal((await browse({ school: 'walkin', done: 'selected' })).items.length, 0, 'No walk-in has chosen yet.');
+  assert.equal((await browse({ course: 'nosuchcourse' })).counts.all, 0);
+  assert.ok(ids(await browse({ q: galleryStudent.job_order_no, done: 'selected' })).includes(galleryStudent.id), 'Search combines with the filter.');
+  assert.equal((await browse({ q: galleryStudent.job_order_no, done: 'not_selected' })).items.length, 0);
+  const choices = (await send(api + '/chooser-filters', { token: chooser.token })).payload.schools;
+  const workflowSchool = choices.find((item) => item.id === school.id);
+  assert.equal(workflowSchool.name, 'WORKFLOW');
+  assert.ok(workflowSchool.courses.some((item) => item.id === course.id && item.name === 'MEDIA' && item.clients >= 2));
+  await send(api + '/chooser-filters', { token: photographer, status: 403 });
+  // Every active school is offered, with all its courses, even with no photographed clients yet.
+  const emptySchool = await create('organizations', { code: 'EMPTY', name: 'Empty Academy', is_active: true });
+  const emptyLevel = await create('levels', { organization: emptySchool.id, name: 'College' });
+  const emptyCourse = (await send(api + '/school-courses', {
+    method: 'POST', token: admin, status: 201, body: { schoolId: emptySchool.id, levelId: emptyLevel.id, name: 'Empty Course', code: 'EMPTYC' },
+  })).payload.course_id;
+  const offered = (await send(api + '/chooser-filters', { token: chooser.token })).payload.schools.find((item) => item.id === emptySchool.id);
+  assert.deepEqual([offered?.clients, offered?.courses.map((item) => [item.id, item.name, item.clients])], [0, [[emptyCourse, 'EMPTYC', 0]]]);
+  // Job orders created today (studio day, Manila) / on another day.
+  const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  assert.ok(ids(await browse({ done: 'selected', day: today })).includes(galleryStudent.id), "Today's job orders");
+  assert.equal((await browse({ day: '2020-01-01' })).counts.all, 0);
+  await send(api + '/chooser?day=2020-02-31', { token: chooser.token, status: 200 });
   const reopened = await open(otherChooser);
   assert.equal(reopened.photos.filter((photo) => photo.selected).length, 2);
   const revised = await choose(reopened, reopened.photos.filter((photo) => photo.name === 'third.png'), otherChooser);
@@ -891,6 +928,46 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.deepEqual((await send(api + '/camera/browse?path=' + encodeURIComponent(home), { token: photographer })).payload.folders
     .map((folder) => folder.name).includes('camera'), true);
   await send(records('camera_stations', camera.id), { token: photographer, method: 'DELETE', status: 404 });
+
+  // Preferred makeup look: required at the kiosk when the order brings makeup and the question is on.
+  const lookPackage = await create('packages', {
+    code: 'LOOK', name: 'Look Portrait', amount: 1000, is_active: true, requires_mua: true, mua_service_types: [groomingType.id],
+  });
+  const lookAddOn = await create('add_ons', {
+    code: 'LOOK-ADD', name: 'Look grooming', amount: 100, is_active: true, requires_mua: true, mua_service_types: [groomingType.id],
+  });
+  const missingLook =await register(lookPackage, [], 400, { makeup_look: '' });
+  assert.equal(missingLook.data.makeup_look.message, 'Choose your preferred look.');
+  assert.ok((await register(lookPackage, [], 400, { makeup_look: 'glam' })).data.makeup_look);
+  assert.ok((await register(lookPackage, [], 400, { makeup_look_note: 'x'.repeat(201) })).data.makeup_look_note);
+  const lookClient = await register(lookPackage, [], 200, { makeup_look: 'grooming', makeup_look_note: '  no lipstick  ' });
+  assert.deepEqual([lookClient.makeup_look, lookClient.makeup_look_note], ['grooming', 'no lipstick']);
+  // No makeup in the order: the look is not kept.
+  const noMakeup = await register(standard, [], 200, { makeup_look: 'full', makeup_look_note: 'ignored' });
+  assert.deepEqual([noMakeup.makeup_look, noMakeup.makeup_look_note], ['', '']);
+  // An add-on that brings makeup asks it too.
+  assert.ok((await register(standard, [{ id: lookAddOn.id }], 400, { makeup_look: '' })).data.makeup_look);
+  // The MUA station shows the look and the note.
+  await pay(lookClient, 1000);
+  const lookRow = (await queue(artists[1])).find((row) => row.id === lookClient.id);
+  assert.deepEqual([lookRow.look, lookRow.lookNote], ['grooming', 'no lipstick']);
+  // Switched off for this school: not asked, and not kept if sent.
+  await patchCatalog('organizations', school, { makeup_look_off: true });
+  const skipped = await register(lookPackage, [], 200, { makeup_look: '' });
+  assert.equal((await register(lookPackage, [], 200, { makeup_look: 'full' })).makeup_look, '');
+  await patchCatalog('organizations', school, { makeup_look_off: false });
+  // Switched off for all school clients.
+  const studioSettings = (await send(records('studio_settings'))).payload.items[0];
+  assert.deepEqual([studioSettings.makeup_look_school, studioSettings.makeup_look_walkin], [true, true], 'On after the upgrade.');
+  await send(records('studio_settings', studioSettings.id), { token: cashier, method: 'PATCH', body: { makeup_look_school: false }, status: 404 });
+  await send(records('studio_settings', studioSettings.id), { token: admin, method: 'PATCH', body: { makeup_look_school: false } });
+  await register(lookPackage, [], 200, { makeup_look: '' });
+  await send(records('studio_settings', studioSettings.id), { token: admin, method: 'PATCH', body: { makeup_look_school: true } });
+  // Admin can set or clear it in Edit Client; only known looks; other stations can't change it.
+  assert.equal((await registrations(skipped, admin, { makeup_look: 'light', makeup_look_note: ' sensitive skin ' })).payload.makeup_look_note, 'sensitive skin');
+  await registrations(skipped, admin, { makeup_look: 'glam' }, 400);
+  assert.equal((await registrations(skipped, admin, { makeup_look: '' })).payload.makeup_look, '');
+  await registrations(skipped, cashier, { makeup_look: 'full' }, 403);
 
   // Job order numbers stay unique when several kiosks register at the same moment.
   const together = await Promise.all(Array.from({ length: 6 }, () => register(standard)));

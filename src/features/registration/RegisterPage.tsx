@@ -11,6 +11,7 @@ import { RegistrationSummarySidebar } from './components/RegistrationSummarySide
 import { RegistrationStepProgress } from './components/RegistrationStepProgress';
 import { ClientKindPicker } from './components/ClientKindPicker';
 import { WalkInDetailsSection } from './components/WalkInDetailsSection';
+import { MakeupLookSection } from './components/MakeupLookSection';
 
 export const RegisterPage: React.FC = () => {
   const form = useRegistrationForm();
@@ -145,6 +146,16 @@ export const RegisterPage: React.FC = () => {
               errors={form.errors}
               emptyMessage={form.clientKind ? undefined : 'Choose the type of client above to see the packages.'}
             />
+
+            {form.asksLook && (
+              <MakeupLookSection
+                value={form.makeupLook}
+                onChange={form.setMakeupLook}
+                note={form.makeupLookNote}
+                onNoteChange={form.setMakeupLookNote}
+                errors={form.errors}
+              />
+            )}
 
             <TermsAndSignatureSection
               termsAccepted={form.termsAccepted}

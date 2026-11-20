@@ -10,6 +10,11 @@ export function studioDayStartUtc(now = Date.now()): string {
   return new Date(Date.parse(`${manilaDay}T00:00:00Z`) - MANILA_OFFSET_MS).toISOString().replace('T', ' ');
 }
 
+/** A studio day (Manila) as YYYY-MM-DD; `daysAgo` 1 = yesterday. */
+export function studioDate(daysAgo = 0, now = Date.now()): string {
+  return new Date(now + MANILA_OFFSET_MS - daysAgo * 86_400_000).toISOString().slice(0, 10);
+}
+
 /** Start of the current month (the 1st, Manila midnight) as a PocketBase datetime string in UTC. */
 export function studioMonthStartUtc(now = Date.now()): string {
   const manilaMonth = new Date(now + MANILA_OFFSET_MS).toISOString().slice(0, 7);

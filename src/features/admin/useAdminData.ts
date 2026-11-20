@@ -361,11 +361,12 @@ export function useAdminData() {
   };
 
   // --- Organization & Course Mutations (T018, T019) ---
-  const handleUpdateOrg = async (id: string, name: string, code: string) => {
+  const handleUpdateOrg = async (id: string, name: string, code: string, askLook: boolean) => {
     try {
       await pb.collection('organizations').update(id, {
         name: name.trim(),
         code: code.trim().toUpperCase(),
+        makeup_look_off: !askLook,
       });
       toast.success('Organization updated.');
       loadAllData();

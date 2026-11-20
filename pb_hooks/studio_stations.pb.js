@@ -23,6 +23,9 @@ routerAdd("GET", "/api/studioflow/makeup", (e) => {
       ...workflow.summary(e.app, record),
       service: record.getString("makeup_service"),
       services: workflow.makeupServices(record),
+      // The client's preferred look and note from the kiosk (empty when not asked).
+      look: record.getString("makeup_look"),
+      lookNote: record.getString("makeup_look_note"),
       state: record.getString("makeup_state") || "waiting",
       version: record.getInt("makeup_version"),
       artistId,

@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { formatQueueNumber } from '../../utils/formatters';
+import { makeupLookLabel } from '../../constants/makeupLook';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
 import { stationButton, stationCard, stationGrid, StationLayout, StationStudentDetails, type StationStudent } from './StationLayout';
 
@@ -14,6 +15,9 @@ interface MakeupAssignment extends StationStudent {
   service: string;
   services?: { source: keyof typeof serviceSource; name: string; types?: { id: string; name: string }[] }[];
   state: MakeupState;
+  /** The client's preferred look from the kiosk (full | light | grooming) and note; empty when not asked. */
+  look?: string;
+  lookNote?: string;
   version: number;
   artistId: string;
   artistName: string;
@@ -85,6 +89,13 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
                 <span className="text-xs font-black uppercase">{stateLabel[row.state]}</span>
               </div>
               <StationStudentDetails student={row} />
+              {(row.look || row.lookNote) && (
+                <div className="border-2 border-gold bg-gold-wash px-3 py-2">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-gold-soft">Preferred look</p>
+                  {row.look && <p className="text-base font-black uppercase text-ink">{makeupLookLabel(row.look) || row.look}</p>}
+                  {row.lookNote && <p className="text-sm text-ink break-words">“{row.lookNote}”</p>}
+                </div>
+              )}
               <div className="border-t border-neutral-300 pt-2">
                 <p className="text-xs font-black uppercase">MUA Service</p>
                 {row.services?.length ? (

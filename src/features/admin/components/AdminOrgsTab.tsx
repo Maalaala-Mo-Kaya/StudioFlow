@@ -21,7 +21,7 @@ interface AdminOrgsTabProps {
   newOrgCode: string;
   onNewOrgCodeChange: (val: string) => void;
   onAddOrg: (e: React.FormEvent) => void;
-  onUpdateOrg: (id: string, name: string, code: string) => Promise<void>;
+  onUpdateOrg: (id: string, name: string, code: string, askLook: boolean) => Promise<void>;
   onToggleOrgActive: (id: string, current: boolean) => Promise<void>;
   onDeleteOrg: (id: string) => Promise<void>;
   onAddCourse: (assignment: AssignSchoolCourse) => Promise<void>;
@@ -68,6 +68,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
   const [editingOrgId, setEditingOrgId] = useState<string | null>(null);
   const [editOrgName, setEditOrgName] = useState('');
   const [editOrgCode, setEditOrgCode] = useState('');
+  const [editOrgAskLook, setEditOrgAskLook] = useState(true);
 
   // Course Form State
   const [newCourseName, setNewCourseName] = useState('');
@@ -126,12 +127,13 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
     setEditingOrgId(org.id);
     setEditOrgName(org.name);
     setEditOrgCode(org.code || '');
+    setEditOrgAskLook(!org.makeup_look_off);
   };
 
   const handleSaveOrgEdit = async () => {
     if (!editingOrgId) return;
     try {
-      await onUpdateOrg(editingOrgId, editOrgName, editOrgCode);
+      await onUpdateOrg(editingOrgId, editOrgName, editOrgCode, editOrgAskLook);
       toast.success(`School "${editOrgName}" updated`);
       setEditingOrgId(null);
     } catch (err: unknown) {
@@ -328,6 +330,20 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                           className="w-full p-1.5 border border-line bg-panel font-mono font-bold uppercase"
                         />
                       </div>
+                      <label className="flex items-start gap-2 text-[10px] font-bold text-ink cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editOrgAskLook}
+                          onChange={(e) => setEditOrgAskLook(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 accent-[var(--color-gold)]"
+                        />
+                        <span>
+                          Ask preferred makeup look at the kiosk
+                          <span className="block font-normal text-neutral-500">
+                            When the package includes makeup / grooming (and it is on in Client Types).
+                          </span>
+                        </span>
+                      </label>
                       <div className="flex gap-2 justify-end pt-1">
                         <button
                           type="button"
@@ -364,6 +380,12 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                         }`}>
                           {o.code || 'ORG'}
                         </span>
+                        {o.makeup_look_off && (
+                          <span className="ml-1.5 font-mono text-[9px] px-1.5 py-0.5 uppercase inline-block border border-neutral-400 text-neutral-500"
+                            title="The kiosk does not ask this school's students for a preferred makeup look">
+                            No look
+                          </span>
+                        )}
                       </button>
                       <div className="relative flex shrink-0 items-center gap-1.5">
                         <button

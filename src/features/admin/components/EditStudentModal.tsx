@@ -15,6 +15,7 @@ import { formatCurrency } from '../../../utils/formatters';
 import { getRegistrationAddOns, sumAddOnAmounts } from '../../../utils/registrationAddOns';
 import { isWalkIn } from '../../../utils/clientInfo';
 import { useStudioSettings } from '../../../hooks/useStudioSettings';
+import { MAKEUP_LOOKS, MAKEUP_LOOK_NOTE_MAX } from '../../../constants/makeupLook';
 
 export type RegistrationEdits = Omit<Partial<Registration>, 'add_ons'> & {
   mua_correction?: 'required' | 'waived';
@@ -69,6 +70,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [eventDate, setEventDate] = useState(reg.event_date?.slice(0, 10) ?? '');
   const [eventVenue, setEventVenue] = useState(reg.event_venue || '');
   const [muaCorrection, setMuaCorrection] = useState<NonNullable<RegistrationEdits['mua_correction']> | ''>('');
+  const [makeupLook, setMakeupLook] = useState(reg.makeup_look || '');
+  const [makeupLookNote, setMakeupLookNote] = useState(reg.makeup_look_note || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Add-ons: the ones on the order keep the price they were sold at; new ones show today's catalog price.
@@ -137,6 +140,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
         framing_status: framingStatus,
         photo_status: photoStatus,
         notes: notes.trim(),
+        makeup_look: makeupLook,
+        makeup_look_note: makeupLookNote.trim(),
         mua_correction: canCorrectMua && muaCorrection ? muaCorrection : undefined,
       });
     } finally {
@@ -454,6 +459,23 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 ) : reg.makeup_state !== 'completed' && (
                   <p className="text-neutral-600">Release the active MUA assignment to correct its requirement.</p>
                 )}
+              </div>
+            )}
+            {(reg.makeup_service || reg.makeup_look || muaCorrection === 'required') && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 border-t border-neutral-200 pt-2">
+                <label className="block">
+                  <span className="font-black uppercase">Preferred look</span>
+                  <select value={makeupLook} onChange={(e) => setMakeupLook(e.target.value)}
+                    className="mt-1 w-full p-2 bg-canvas border border-line">
+                    <option value="">Not chosen</option>
+                    {MAKEUP_LOOKS.map((look) => <option key={look.value} value={look.value}>{look.label}</option>)}
+                  </select>
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="font-black uppercase">Note for the makeup artist</span>
+                  <input value={makeupLookNote} maxLength={MAKEUP_LOOK_NOTE_MAX} onChange={(e) => setMakeupLookNote(e.target.value)}
+                    placeholder="e.g. no lipstick" className="mt-1 w-full p-2 bg-canvas border border-line" />
+                </label>
               </div>
             )}
           </div>
