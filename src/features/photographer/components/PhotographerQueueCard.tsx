@@ -5,7 +5,7 @@ import {
   formatClientName,
   formatJobOrderNo,
   formatQueueNumber,
-  parsePackageInclusions,
+  orderInclusions,
 } from '../../../utils/formatters';
 import { getPhotoFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
 import { useToast } from '../../../context/ToastContext';
@@ -37,7 +37,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
   const [copied, setCopied] = useState(false);
   const [folderPath, setFolderPath] = useState('');
   const { toast } = useToast();
-  const inclusionsArray = parsePackageInclusions(reg.expand?.package?.inclusions);
+  const inclusionsArray = orderInclusions(reg);
 
   const handleCopyFolder = async () => {
     try {

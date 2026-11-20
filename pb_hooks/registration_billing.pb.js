@@ -40,10 +40,7 @@ onRecordCreate((e) => {
   const packageId = e.record.getString("package");
   const pkg = packageId ? e.app.findRecordById("packages", packageId) : null;
   const base = pkg ? pkg.getFloat("amount") : 0;
-  e.record.set("package_snapshot", pkg ? {
-    id: pkg.id, code: pkg.getString("code"), name: pkg.getString("name"), amount: base,
-    revenue_category: pkg.getString("revenue_category"),
-  } : null);
+  e.record.set("package_snapshot", pkg ? pricing.snapshotPackage(pkg) : null);
   const total = pricing.cents(base) + pricing.addOnCents(pricing.savedAddOns(e.record)) + pricing.cents(e.record.getFloat("other_fees"));
   e.record.set("total_amount", total / 100);
   e.record.set("revenue_terms", require(__hooks + "/studio_revenue.js").terms(e.record, total));
@@ -92,10 +89,7 @@ onRecordUpdateRequest((e) => {
   if (packageChanged) {
     const pkg = e.app.findRecordById("packages", packageId);
     const base = pkg.getFloat("amount");
-    e.record.set("package_snapshot", {
-      id: pkg.id, code: pkg.getString("code"), name: pkg.getString("name"), amount: base,
-      revenue_category: pkg.getString("revenue_category"),
-    });
+    e.record.set("package_snapshot", pricing.snapshotPackage(pkg));
     total = cents(base) + pricing.addOnCents(addOns) + fees;
   } else {
     e.record.set("package_snapshot", original.get("package_snapshot"));
@@ -156,6 +150,28 @@ onRecordValidate((e) => {
         throw new BadRequestError(`Turn off the current default for ${kind === "school" ? "school" : "walk-in"} clients before setting another.`);
       }
     }
+  }
+  return e.next();
+}, "add_ons");
+
+// A package or add-on that job orders use stays on record: deactivate it to stop selling it.
+// (Handlers run in isolated scopes, so the check is written inside each one.)
+onRecordDeleteRequest((e) => {
+  const used = new DynamicModel({ n: 0 });
+  e.app.db().newQuery("SELECT COUNT(*) AS n FROM registrations WHERE package = {:id}").bind({ id: e.record.id }).one(used);
+  if (used.n) {
+    throw new ApiError(409, `${used.n} job order${used.n === 1 ? " uses" : "s use"} this package. Deactivate it instead of deleting it.`);
+  }
+  return e.next();
+}, "packages");
+onRecordDeleteRequest((e) => {
+  const used = new DynamicModel({ n: 0 });
+  e.app.db().newQuery(`SELECT COUNT(*) AS n FROM registrations
+    WHERE json_valid(add_ons) AND json_type(add_ons) = 'array'
+      AND EXISTS (SELECT 1 FROM json_each(registrations.add_ons) WHERE json_extract(value, '$.id') = {:id})`)
+    .bind({ id: e.record.id }).one(used);
+  if (used.n) {
+    throw new ApiError(409, `${used.n} job order${used.n === 1 ? " uses" : "s use"} this add-on. Deactivate it instead of deleting it.`);
   }
   return e.next();
 }, "add_ons");

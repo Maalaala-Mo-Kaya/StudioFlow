@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Frame, Copy, Check, Layers, MessageSquare, Save } from 'lucide-react';
 import type { Registration, ProductionStatus } from '../../../types';
-import { formatClientName, formatCurrency } from '../../../utils/formatters';
+import { formatClientName, formatCurrency, orderInclusions } from '../../../utils/formatters';
 import { getPhotoFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
 import { useToast } from '../../../context/ToastContext';
 import { workflowError } from '../../../hooks/useWorkflowData';
@@ -121,9 +121,9 @@ function stageOf(reg: Registration): Stage {
 
 /** Frame items in the package or add-ons. */
 function frameItems(reg: Registration): string[] {
-  const inclusions = Array.isArray(reg.expand?.package?.inclusions) ? reg.expand.package.inclusions : [];
-  const items = inclusions.filter((item) => /frame/i.test(item));
-  if (/frame/i.test(reg.expand?.package?.name || '') && !items.length) items.push(reg.expand?.package?.name || 'Frame');
+  const items = orderInclusions(reg).filter((item) => /frame/i.test(item));
+  const packageName = reg.package_snapshot?.name || reg.expand?.package?.name || '';
+  if (/frame/i.test(packageName) && !items.length) items.push(packageName);
   for (const addOn of reg.add_ons || []) {
     if (/frame/i.test(addOn.name) || /frame/i.test(addOn.code || '')) items.push(addOn.name);
   }

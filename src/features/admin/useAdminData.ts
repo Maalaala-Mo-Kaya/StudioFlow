@@ -460,7 +460,7 @@ export function useAdminData() {
       loadAllData();
     } catch (err) {
       console.error('Failed to delete package:', err);
-      toast.error('Failed to delete package.');
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to delete package.');
     }
   };
 
@@ -532,7 +532,7 @@ export function useAdminData() {
       loadAllData();
     } catch (err) {
       console.error('Failed to delete add-on:', err);
-      toast.error('Failed to delete add-on.');
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to delete add-on.');
     }
   };
 

@@ -31,7 +31,10 @@ function version(record, photos) {
   ]));
 }
 
+// The limit the client bought (saved on the job order); older orders fall back to the package.
 function selectionLimit(app, record) {
+  const sold = workflow.json(record, "package_snapshot")?.photo_selection_limit;
+  if (Number.isInteger(sold) && sold >= 0) return sold;
   return workflow.catalogItem(app, "packages", record.getString("package"))?.getInt("photo_selection_limit") || 0;
 }
 

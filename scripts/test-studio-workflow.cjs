@@ -59,9 +59,15 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const legacyDb = new DatabaseSync(join(data, 'data.db'));
   try {
     const legacyAddon = legacyDb.prepare("SELECT id, name, code, amount FROM add_ons WHERE code = 'ADD-HAIRMAKEUP'").get();
+    // Inclusions saved the way the admin screen sends them (a JSON-encoded string).
+    legacyDb.prepare(`INSERT INTO packages (id, code, name, amount, inclusions, is_active, created, updated)
+      VALUES ('legacypkg00001', 'LEG', 'Legacy Package', 500, ?, 1, '2026-01-01 00:00:00.000Z', '2026-01-01 00:00:00.000Z')`)
+      .run(JSON.stringify(JSON.stringify(['8x10 frame', 'Soft copies'])));
     legacyDb.prepare(`INSERT INTO registrations
-      (id, job_order_no, family_name, given_name, status, add_ons, paid_amount, total_amount, balance, payment_status)
-      VALUES (?, '00050', 'Dela Cruz', 'Juan Carlos', 'done_shooting', ?, 1000, 1500, 500, 'downpayment')`)
+      (id, job_order_no, family_name, given_name, status, add_ons, paid_amount, total_amount, balance, payment_status,
+        package, package_snapshot)
+      VALUES (?, '00050', 'Dela Cruz', 'Juan Carlos', 'done_shooting', ?, 1000, 1500, 500, 'downpayment', 'legacypkg00001',
+        json_object('id', 'legacypkg00001', 'code', 'LEG', 'name', 'Legacy Package', 'configuredAmount', 500))`)
       .run(legacyId, JSON.stringify([legacyAddon]));
     legacyDb.prepare(`INSERT INTO payments
       (id, registration, amount, payment_type, payment_method, cash_tendered, receipt_no, status, created, updated)
@@ -195,6 +201,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.deepEqual([legacyPayment.receipt_no, legacyPayment.balance_before, legacyPayment.balance_after], ['REC-legacy-receipt', 1500, 500]);
   assert.equal(legacy.status, 'done_shooting');
   assert.equal(legacy.job_order_no, '00050');
+  // The upgrade adds the package contents to the saved snapshot and keeps the sold-price fields as saved.
+  assert.deepEqual(legacy.package_snapshot, {
+    id: 'legacypkg00001', code: 'LEG', name: 'Legacy Package', configuredAmount: 500,
+    inclusions: ['8x10 frame', 'Soft copies'], photo_selection_limit: 0,
+  });
   const builtInAddOn = (await send(records('add_ons'))).payload.items.find((item) => item.code === 'ADD-HAIRMAKEUP');
   assert.equal(builtInAddOn.requires_mua, true);
   await registrations(legacy, admin, { family_name: 'Corrected Name' });
@@ -231,6 +242,20 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const liveUpdate = await Promise.race([readEvent('studioflow-workflow'), delay(4000, 'timeout', { ref: false })]);
   assert.deepEqual(liveUpdate, {}, 'The server must notify connected realtime clients.');
   const unpaid = await register(prepared);
+  // Each job order keeps the package contents it was sold with.
+  assert.deepEqual([plain.package_snapshot.inclusions, plain.package_snapshot.photo_selection_limit, plain.package_snapshot.amount],
+    [['Makeup and grooming'], 0, 1000]);
+  assert.deepEqual([unpaid.package_snapshot.inclusions, unpaid.package_snapshot.photo_selection_limit], [[], 2]);
+  await patchCatalog('packages', prepared, { inclusions: JSON.stringify(['Changed later']), photo_selection_limit: 9 });
+  assert.deepEqual((await registrations(unpaid)).payload.package_snapshot, unpaid.package_snapshot,
+    'Editing a package does not change orders already placed.');
+  await patchCatalog('packages', prepared, { inclusions: JSON.stringify([]), photo_selection_limit: 2 });
+  // A package or add-on that orders use can't be deleted (deactivate it instead); unused ones can.
+  await send(records('packages', prepared.id), { token: admin, method: 'DELETE', status: 409 });
+  const unusedPackage = await create('packages', { code: 'TMP', name: 'Unused', amount: 0, is_active: true });
+  await send(records('packages', unusedPackage.id), { token: admin, method: 'DELETE', status: 204 });
+  const unusedAddOn = await create('add_ons', { code: 'TMP-ADD', name: 'Unused add-on', amount: 0, is_active: true });
+  await send(records('add_ons', unusedAddOn.id), { token: admin, method: 'DELETE', status: 204 });
   assert.deepEqual([plain.job_order_no, plain.queue_number, unpaid.job_order_no, unpaid.queue_number], [null, null, null, null]);
   assert.deepEqual([(await registrations(plain, cashier)).payload.job_order_no, (await registrations(plain, cashier)).payload.queue_number], [null, null]);
   await pay(plain, 1, 'full', 400);
@@ -1282,7 +1307,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await register(studio, [{ id: groomingAddOn.id }], 400);
     assert.deepEqual((await auditFor(mixed)).totals.revenue, settled.totals.revenue);
     await patchCatalog('packages', studio, { amount: 1500, revenue_category: 'studio' });
-    await send(records('add_ons', groomingAddOn.id), { token: admin, method: 'DELETE', status: 204 });
+    await send(records('add_ons', groomingAddOn.id), { token: admin, method: 'DELETE', status: 409 }); // sold on `mixed`
     assert.deepEqual((await auditFor(mixed)).totals.revenue, settled.totals.revenue);
     await registrations(mixed, cashier, { order_discount: { studio: 0, mua: 50, reason: 'staff discount' } }, 403);
     await registrations(mixed, admin, { order_discount: { studio: 0, mua: 50, reason: '' } }, 400);
@@ -1383,7 +1408,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal((await getTeam(replacement)).manage, true);
     assert.ok((await report()).rows.some((row) => row.id === parent.id && row.details.some((detail) => detail.jobId === muaOnly.id)));
     await shoot(mixed, 'shooting');
-    await send(records('packages', studio.id), { token: admin, method: 'DELETE', status: 204 });
+    await send(records('packages', studio.id), { token: admin, method: 'DELETE', status: 409 }); // sold on `mixed`
+    await patchCatalog('packages', studio, { name: 'Renamed later', is_active: false });
     const retained = await auditFor(mixed);
     assert.equal(retained.orders[0].registration.package_snapshot.name, 'Portrait');
     assert.equal(retained.byPackage[0].key, studio.id);
