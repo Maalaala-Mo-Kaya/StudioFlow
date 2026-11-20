@@ -29,6 +29,10 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const home = await mkdtemp(join(tmpdir(), 'studioflow-workflow-'));
   const data = join(home, 'db');
   const photos = join(home, 'photos');
+  // An empty public folder: otherwise PocketBase serves the repo's deployed pb_public, whose
+  // index fallback answers unknown routes with 200 and hides missing-route (404) checks.
+  const publicDir = join(home, 'public');
+  await mkdir(publicDir);
   const host = 'http://127.0.0.1:' + await port();
   const flags = ['--dir', data, '--hooksDir', join(repo, 'pb_hooks'), '--migrationsDir', join(repo, 'pb_migrations')];
   const options = { env: { ...process.env, STUDIOFLOW_PHOTOS_ROOT: photos }, windowsHide: true };
@@ -100,7 +104,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     ]), 80);
   } finally { oldMuaDb.close(); }
   async function startServer() {
-    server = spawn(executable, ['serve', '--http', host.slice(7), ...flags], options);
+    server = spawn(executable, ['serve', '--http', host.slice(7), '--publicDir', publicDir, ...flags], options);
     for (const stream of [server.stdout, server.stderr]) stream.on('data', (chunk) => { logs += chunk; });
     for (let attempt = 0; attempt < 60; attempt++) {
       if (await fetch(host + '/api/health').then((res) => res.ok).catch(() => false)) return;
