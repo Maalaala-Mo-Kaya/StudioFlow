@@ -262,13 +262,15 @@ export function useCashierState() {
     const amount = Number(amountPaid);
     const amountCentavos = toCentavos(amount);
     const balanceCentavos = toCentavos(selectedReg.balance);
-    const validMoney = /^\d+$/.test(amountPaid) && Number.isFinite(amount) && Number.isInteger(amount);
-    if (!validMoney || amountCentavos < 100 || amountCentavos > balanceCentavos) {
+    const discountSettlement = paymentType !== 'initial' && !!selectedReg.revenue_discount && amountCentavos === balanceCentavos && balanceCentavos % 100 !== 0;
+    const moneyPattern = discountSettlement ? /^\d+(\.\d{1,2})?$/ : /^\d+$/;
+    if (!moneyPattern.test(amountPaid) || !Number.isFinite(amount)
+      || amountCentavos < (discountSettlement ? 1 : 100) || amountCentavos > balanceCentavos) {
       toast.error('Please enter a valid payment amount.');
       return;
     }
     const cash = Number(cashReceived);
-    if (paymentMethod === 'cash' && (!/^\d+$/.test(cashReceived) || toCentavos(cash) < amountCentavos)) {
+    if (paymentMethod === 'cash' && (!moneyPattern.test(cashReceived) || toCentavos(cash) < amountCentavos)) {
       toast.error('Enter the cash received. It must cover the payment amount.');
       return;
     }

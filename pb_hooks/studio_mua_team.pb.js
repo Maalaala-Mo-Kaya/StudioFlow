@@ -19,7 +19,7 @@ routerAdd("GET", "/api/studioflow/makeup-team", (e) => {
       return;
     }
     const active = tx.findRecordsByFilter("registrations",
-      "status = 'paid' && paid_amount > 0 && (makeup_state = 'claimed' || makeup_state = 'in_progress')", "", 0, 0);
+      "status = 'paid' && " + workflow.paymentFilter + " && (makeup_state = 'claimed' || makeup_state = 'in_progress')", "", 0, 0);
     const loads = new Map();
     for (const job of active) {
       const id = job.getString("makeup_artist");

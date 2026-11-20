@@ -81,6 +81,8 @@ const financialColumns = [
   { key: 'studio', header: 'STUDIO REVENUE' },
   { key: 'mua', header: 'OTHER PAYMENT - MUA' },
   { key: 'unallocated', header: 'UNALLOCATED CASH' },
+  { key: 'credit', header: 'DISCOUNT CREDIT' },
+  { key: 'operational', header: 'OPERATIONAL COLLECTED' },
 ];
 const PESO = '"₱"#,##0.00;-"₱"#,##0.00';
 /** Column key for other fees (shown only when an order in the export has some). */
@@ -346,7 +348,10 @@ export function buildStudentWorkbook(
         if ((student.otherFees ?? 0) > 0) charges[OTHER_FEES] = student.otherFees ?? 0;
         if (student.discount) charges[DISCOUNT] = -student.discount;
         const revenue = allocateRevenue(total, student.revenueTerms ?? { studio: 0, mua: 0, unallocated: student.due });
-        const amountsInRow = { ...charges, ...revenue, due: student.due, full, additional, down, refunded, total, balance };
+        const granted = student.discount ?? 0;
+        const credit = Math.min(granted, Math.max(0, student.due + granted - total));
+        const amountsInRow = { ...charges, ...revenue, due: student.due, full, additional, down, refunded, total, balance,
+          credit, operational: total + credit };
         for (const [column, amount] of Object.entries(amountsInRow)) {
           amounts.set(column, (amounts.get(column) ?? 0) + amount);
           grand.set(column, (grand.get(column) ?? 0) + amount);
@@ -495,6 +500,7 @@ export function buildStudentWorkbook(
       line.getCell('due').value = linked('kept', kept);
       line.getCell('refunded').value = linked('refunded', keptPart('refunded'));
       line.getCell('total').value = linked('kept', kept);
+      line.getCell('operational').value = linked('kept', kept);
       for (const key of revenueKeys) {
         const result = cancelled.reduce((sum, order) => {
           const net = order.payments.full + order.payments.additional + order.payments.down - (order.payments.refunded ?? 0);

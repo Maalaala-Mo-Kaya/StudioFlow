@@ -19,15 +19,24 @@ function terms(record, subtotal) {
     : result;
 }
 
-function changes(e, original, subtotal, itemsChanged) {
-  const body = e.requestInfo().body || {};
+function changes(e, original, subtotal, itemsChanged, record = e.record, body = e.requestInfo().body || {}) {
   const hasReview = Object.hasOwn(body, "review_mua_amount");
   const hasDiscount = Object.hasOwn(body, "order_discount");
   const admin = e.hasSuperuserAuth() || e.auth?.getString("role") === "admin";
-  if ((hasReview || hasDiscount) && !admin) throw new ForbiddenError("Only administrators can adjust revenue or discounts.");
-  const record = e.record;
+  if (hasReview && !admin) throw new ForbiddenError("Only administrators can review revenue.");
+  if (hasDiscount && !admin && e.auth?.getString("role") !== "cashier") throw new ForbiddenError("Only cashiers and administrators can grant discounts.");
   let review = itemsChanged ? null : json(original, "revenue_review");
   let charges = terms(record, subtotal);
+  const savedTerms = json(original, "revenue_terms");
+  const previousDiscount = json(original, "revenue_discount");
+  if (charges.unallocated > 0 && savedTerms && savedTerms.unallocated === 0
+    && savedTerms.studio + savedTerms.mua + (previousDiscount?.studio || 0) + (previousDiscount?.mua || 0) === subtotal) {
+    charges = {
+      studio: savedTerms.studio + (previousDiscount?.studio || 0),
+      mua: savedTerms.mua + (previousDiscount?.mua || 0),
+      unallocated: 0,
+    };
+  }
   const actor = () => e.auth ? actorName(e.auth) : "Superuser";
   if (hasReview) {
     if (charges.unallocated <= 0) throw new BadRequestError("This order has no charges that need review.");
@@ -42,16 +51,28 @@ function changes(e, original, subtotal, itemsChanged) {
 
   let discount = json(original, "revenue_discount");
   if (hasDiscount) {
-    const values = body.order_discount;
-    if (!values || !Number.isSafeInteger(values.studio) || !Number.isSafeInteger(values.mua)
+    let values = body.order_discount;
+    const percentage = values?.percentage;
+    if (percentage !== undefined) {
+      if (!Number.isInteger(percentage) || percentage < 0 || percentage > 100 || (percentage > 0 && charges.unallocated)) {
+        throw new BadRequestError("Enter a whole percentage from 0 to 100 on an order with classified charges.");
+      }
+      const credit = (charge) => Math.round(charge * percentage / 100) / 100;
+      values = { ...values, studio: credit(charges.studio), mua: percentage === 0 ? 0 : (previousDiscount?.mua || 0) };
+    }
+    if (!values || !Number.isFinite(values.studio) || !Number.isFinite(values.mua)
       || values.studio < 0 || values.mua < 0) {
       throw new BadRequestError("Enter nonnegative whole-peso discounts for Studio and MUA.");
     }
     const { studio, mua } = values;
     discount = studio || mua ? {
-      studio: studio * 100, mua: mua * 100,
-      reason: readReason(values.reason), by: actor(), at: new Date().toISOString(),
+      studio: cents(studio), mua: cents(mua), percentage: percentage ?? (subtotal ? (cents(studio) + cents(mua)) * 100 / subtotal : 0),
+      reason: readReason(values.reason), by: actor(), byId: e.auth?.id || "", at: new Date().toISOString(),
     } : null;
+  }
+  if (hasDiscount && body.order_discount?.percentage !== undefined && (discount?.studio || 0) + (discount?.mua || 0) >
+    Math.max(0, subtotal - cents(original.getFloat("paid_amount")))) {
+    throw new BadRequestError("Discount credit cannot exceed the original charges still unpaid.");
   }
   if ((discount?.studio || 0) > charges.studio || (discount?.mua || 0) > charges.mua) {
     throw new BadRequestError("Each discount must fit the verified charges in its category. Review or adjust the discount first.");

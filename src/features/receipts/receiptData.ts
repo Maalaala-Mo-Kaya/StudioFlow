@@ -104,10 +104,12 @@ export function soldPackagePrice(reg: Registration): number {
 
 export function orderExtras(reg: Registration): [string, number][] {
   const addOns = getRegistrationAddOns(reg.add_ons);
+  const credit = discountCents(reg) / 100;
+  const percentage = reg.revenue_discount?.percentage ?? (credit ? credit * 100 / (reg.total_amount + credit) : 0);
   return [
     ...addOns.map((item): [string, number] => [item.name + (item.revenue_category === 'mua' ? ' (MUA)' : ''), item.amount]),
     ...(reg.other_fees ? [['Other fees', reg.other_fees] as [string, number]] : []),
-    ...(discountCents(reg) ? [[`Discount (${reg.revenue_discount?.reason})`, -discountCents(reg) / 100] as [string, number]] : []),
+    ...(credit && reg.status !== 'cancelled' ? [[`Discount credit (${Number(percentage.toFixed(2))}%) · ${reg.revenue_discount?.reason}`, -credit] as [string, number]] : []),
   ];
 }
 

@@ -107,6 +107,7 @@ onRecordUpdateRequest((e) => {
   }
   const itemsChanged = packageChanged || addOnsChanged || feesChanged;
   const body = e.requestInfo().body || {};
+  if ("order_discount" in body && !isAdmin) throw new ForbiddenError("Use the cashier discount action.");
   if (itemsChanged || "review_mua_amount" in body || "order_discount" in body) {
     if (("order_discount" in body) && ["cancelled", "released"].includes(original.getString("status"))) {
       throw new BadRequestError("Discounts can only be changed on active, unreleased orders.");

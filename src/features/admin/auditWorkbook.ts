@@ -233,6 +233,8 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
       'Counted total on the Payments sheet (voided excluded)'],
     ['refunds', 'Refunds given', { formula: `Refunds!G${refundsTotalRow}`, result: audit.totals.refunds },
       'Total on the Refunds sheet (money given back in this period)'],
+    ['discountCredits', 'DISCOUNT CREDITS', { formula: '', result: audit.totals.discountCredits }, 'Active settlement credits granted in this period'],
+    ['analyticsCollected', 'OPERATIONAL COLLECTED', { formula: '', result: audit.totals.analyticsCollected }, 'Net payments plus discount credits'],
     ['net', 'NET COLLECTIONS (cash to account for)', { formula: '', result: audit.totals.netCollections },
       'Payments received − Refunds given', true],
     ...([
@@ -275,7 +277,8 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
     cellOf[key] = `B${rowNumber}`;
     if (key === 'net') value.formula = `${cellOf.received}-${cellOf.refunds}`;
     const row = summary.getRow(rowNumber);
-    row.values = [label, value, how];
+    if (key === 'analyticsCollected') value.formula = `${cellOf.received}-${cellOf.refunds}+${cellOf.discountCredits}`;
+    row.values = [label, value.formula ? value : value.result, how];
     row.getCell(2).numFmt = PESO;
     row.getCell(3).alignment = { wrapText: true, vertical: 'top' };
     if (bold) row.font = { bold: true };

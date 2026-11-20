@@ -24,7 +24,7 @@ import { MuaPerformancePanel } from './MuaPerformancePanel';
 import { clientGroup, clientSummary } from '../../../utils/clientInfo';
 import { overviewMetrics, type OverviewMetrics } from '../overviewMetrics';
 import { buildAudit, isCountedPayment, type AuditGroup } from '../auditData';
-import { allocateRevenue, revenuePesos, revenueTerms } from '../../../utils/revenue';
+import { allocateRevenue, discountCents, revenuePesos, revenueTerms } from '../../../utils/revenue';
 import { studioDayStartUtc, studioMonthStartUtc } from '../../../utils/studioDay';
 
 const transactionDate = new Intl.DateTimeFormat('en-PH', {
@@ -103,13 +103,17 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
     const net = paid - refunded;
     const total = cents(registration.total_amount || 0);
     const cancelled = registration.status === 'cancelled';
+    const granted = discountCents(registration);
+    const credit = cancelled ? 0 : Math.min(granted, Math.max(0, total + granted - net));
     const overpaid = cancelled ? 0 : Math.max(0, net - total);
     return {
       registration,
       transactions,
       orderRefunds,
       cancelled,
-      collected: net / 100,
+      collected: (net + credit) / 100,
+      credit: credit / 100,
+      netPayments: net / 100,
       revenue: revenuePesos(allocateRevenue(net, revenueTerms(registration))),
       refunded: refunded / 100,
       balance: cancelled ? 0 : Math.max(0, total - net) / 100,
@@ -184,12 +188,13 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       cell: ({ registration }) => clientGroup(registration) || 'ORG', cellClassName: 'text-neutral-600' },
     { id: 'package', header: 'Package', sortable: true, accessor: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code,
       cell: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code || 'PKG' },
-    { id: 'billed', header: 'Billed', sortable: true, accessor: ({ registration }) => registration.total_amount, align: 'right',
-      cell: ({ registration }) => formatCurrency(registration.total_amount), cellClassName: 'font-bold' },
-    { id: 'collected', header: 'Collected (net)', sortable: true, accessor: ({ collected }) => collected, align: 'right',
-      cell: ({ collected, refunded }) => (
+    { id: 'billed', header: 'Original billed', sortable: true, accessor: ({ registration }) => registration.total_amount + discountCents(registration) / 100, align: 'right',
+      cell: ({ registration }) => formatCurrency(registration.total_amount + discountCents(registration) / 100), cellClassName: 'font-bold' },
+    { id: 'collected', header: 'Collected (payments + credits)', sortable: true, accessor: ({ collected }) => collected, align: 'right',
+      cell: ({ collected, refunded, credit, netPayments }) => (
         <>
           <div>{formatCurrency(collected)}</div>
+          {credit > 0 && <div className="text-[9px] font-normal text-neutral-500">{formatCurrency(netPayments)} net payments + {formatCurrency(credit)} credit</div>}
           {refunded > 0 && <div className="text-[9px] font-normal text-neutral-500">after {formatCurrency(refunded, { exact: true })} refunded</div>}
         </>
       ), cellClassName: 'font-bold text-emerald-700' },
@@ -365,9 +370,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             {formatCurrency(shown.totalCollections)}
           </div>
           <p className="text-[11px] text-neutral-400 mt-1">
-            {shown.totalRefunds > 0
-              ? `${formatCurrency(shown.totalReceived, { exact: true })} received − ${formatCurrency(shown.totalRefunds, { exact: true })} refunded ${periodWords}`
-              : `Payments received ${periodWords} (voided excluded)`}
+            {formatCurrency(shown.totalReceived - shown.totalRefunds, { exact: true })} net payments + {formatCurrency(shown.totalDiscountCredits, { exact: true })} discount credits
           </p>
         </div>
 
@@ -424,6 +427,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       {/* Accounting Reconciliation Banner */}
       <div className="grid gap-3 sm:grid-cols-3">
         {([
+          ['Operational collected', audit.totals.analyticsCollected],
+          ['Discount credits', audit.totals.discountCredits],
           ['Studio revenue', audit.totals.revenue.studio],
           ['Other Payment — MUA', audit.totals.revenue.mua],
           ['Unallocated cash', audit.totals.revenue.unallocated],
@@ -497,7 +502,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
               <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
                 <span>TOTAL</span>
                 <div className="text-right">
-                  <div className="text-ink">{formatCurrency(audit.totals.revenue.studio, { exact: true })}</div>
+                  <div className="text-ink">{formatCurrency(activeSchools.reduce((total, school) => total + school.collected, 0), { exact: true })}</div>
                 </div>
               </div>
             )}
@@ -534,7 +539,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
               <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
                 <span>TOTAL</span>
                 <div className="text-right">
-                  <div className="text-ink">{formatCurrency(audit.totals.revenue.studio, { exact: true })}</div>
+                  <div className="text-ink">{formatCurrency(activePackages.reduce((total, pkg) => total + pkg.collected, 0), { exact: true })}</div>
                   <span className="text-[10px] text-neutral-500 block">{audit.totals.activeOrders} orders</span>
                 </div>
               </div>

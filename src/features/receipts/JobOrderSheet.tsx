@@ -1,4 +1,5 @@
 import React from 'react';
+import { discountCents } from '../../utils/revenue';
 import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
@@ -35,7 +36,8 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
   const extras = orderExtras(reg);
   const { rows, hidden } = visiblePayments(payments, MAX_ROWS);
   const latest = [...payments].reverse().find(isCounted);
-  const settled = reg.balance <= 0 && reg.paid_amount > 0;
+  const credit = reg.status === 'cancelled' ? 0 : discountCents(reg) / 100;
+  const settled = reg.balance <= 0 && reg.paid_amount + credit > 0;
   const marks = jobOrderMarks(reg);
   const cancelled = reg.status === 'cancelled';
   const refundNumbers = data.refunds.map((refund) => refund.refund_no).filter(Boolean);
@@ -131,21 +133,22 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
         </table>
 
         <div className="w-[2.2in] shrink-0 self-start border-2 border-[#0a0a0a] p-[6px] font-mono space-y-[2px]">
-          <Line label="Total Billed" value={peso(reg.total_amount)} />
+          <Line label="Original billed" value={peso(reg.total_amount + discountCents(reg) / 100)} />
           <p className="text-[7px] leading-tight">{receiptRevenueLine(data)}</p>
           {/* paid_amount is net of refunds; show the refund so the payment history still adds up. */}
           {(reg.refunded_amount ?? 0) > 0 && <Line label="Less refunds" value={`−${peso(reg.refunded_amount)}`} />}
           {refundNumbers.length > 0 && (
             <div className="text-right text-[7.5px] font-bold text-[#444]">{refundNumbers.join(', ')}</div>
           )}
-          <Line label={(reg.refunded_amount ?? 0) > 0 ? 'Net Paid' : 'Amount Paid'} value={peso(reg.paid_amount)} tone="#0f6b3a" />
+          <Line label={(reg.refunded_amount ?? 0) > 0 ? 'Net Paid' : 'Payments received'} value={peso(reg.paid_amount)} tone="#0f6b3a" />
+          {credit > 0 && <Line label="Total settled" value={peso(reg.paid_amount + credit)} />}
           <Line label={cancelled ? 'Balance (cancelled, not owed)' : 'Balance'} value={peso(reg.balance)} tone={reg.balance > 0 ? '#c8102e' : undefined} big />
           {/* A cancelled order owes nothing; show what the studio still holds (refundable up to this). */}
           {cancelled && <Line label="Held by studio" value={peso(Math.max(0, reg.paid_amount))} />}
           <div className={`mt-[4px] border text-center text-[10px] font-black uppercase tracking-[0.15em] py-[1px] ${
             settled || marks.settlement ? 'border-2 border-[#0a0a0a]' : 'border-[#0a0a0a]'
           }`}>
-            {marks.settlement ?? (settled ? '✓ Fully Paid' : reg.paid_amount > 0 ? 'With Balance' : 'Unpaid')}
+            {marks.settlement ?? (settled ? '✓ Fully Settled' : reg.paid_amount + credit > 0 ? 'Partial' : 'Unpaid')}
           </div>
           {latest?.payment_method === 'cash' && (latest.cash_tendered ?? 0) > 0 && (
             <div className="mt-[3px] text-[8px] text-[#444]">

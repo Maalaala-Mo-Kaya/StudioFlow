@@ -42,7 +42,11 @@ onRecordCreate((e) => {
       const remainingCentavos = current.balance;
       const amountCentavos = Math.round(amount * 100);
 
-      if (!Number.isFinite(amount) || !Number.isInteger(amount) || amountCentavos < 100) {
+      const discountSettlement = paymentType !== "initial" && amountCentavos === remainingCentavos && remainingCentavos % 100 !== 0
+        && !!require(__hooks + "/studio_workflow.js").json(reg, "revenue_discount");
+      if (!Number.isFinite(amount) || (discountSettlement
+        ? amountCentavos <= 0 || Math.abs(amount * 100 - amountCentavos) > 1e-6
+        : !Number.isInteger(amount) || amountCentavos < 100)) {
         throw new BadRequestError("Payment must be a positive whole-peso amount of at least ₱1.");
       }
       if (!["full", "initial", "additional"].includes(paymentType)) throw new BadRequestError("Invalid collection mode.");

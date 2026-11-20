@@ -149,6 +149,8 @@ export function CashierTable({
             </button>
           ) : null}
 
+          {reg.balance === 0 && reg.revenue_discount && !['cancelled', 'released'].includes(reg.status) &&
+            <button type="button" className="border border-line px-3 py-2 font-bold" onClick={() => onOpenPayment(reg)}>Edit discount</button>}
           {reg.job_order_no && <button
             type="button"
             onClick={() => onOpenPrint(reg)}

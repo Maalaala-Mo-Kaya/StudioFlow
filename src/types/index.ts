@@ -204,7 +204,7 @@ export interface Registration {
   other_fees?: number;
   revenue_terms?: RevenueSplit | null;
   revenue_review?: { mua: number; reason: string; by: string; at: string } | null;
-  revenue_discount?: { studio: number; mua: number; reason: string; by: string; at: string } | null;
+  revenue_discount?: { studio: number; mua: number; percentage?: number; reason: string; by: string; byId?: string; at: string } | null;
   total_amount: number;
   paid_amount: number;
   balance: number;

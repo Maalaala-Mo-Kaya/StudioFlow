@@ -1155,6 +1155,36 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await patchCatalog('add_ons', wardrobe, { is_active: false });
     assert.equal((await register(studio, [], 200, { no_mua_default_quote: 'none' })).total_amount, 1500);
     await patchCatalog('add_ons', walkinDefault, { is_active: false });
+    const discount = (job, percentage, status = 200) => send(api + '/registrations/' + job.id + '/discount', {
+      method: 'POST', token: cashier, status, body: { percentage, reason: 'Student Council Officer' },
+    }).then(({ payload }) => payload);
+    const complimentary = await register(studio);
+    const complimentarySettled = await discount(complimentary, 100);
+    assert.deepEqual([complimentarySettled.paid_amount, complimentarySettled.balance, complimentarySettled.payment_status], [0, 0, 'fully_paid']);
+    assert.ok(complimentarySettled.job_order_no && complimentarySettled.queue_number);
+    assert.equal((await discount(complimentary, 100)).revenue_discount.at, complimentarySettled.revenue_discount.at);
+    assert.equal((await recordsFor('payments', complimentary)).length, 0);
+    const complimentaryAudit = await auditFor(complimentary);
+    assert.equal(complimentaryAudit.totals.analyticsCollected, 1500);
+    assert.equal(complimentaryAudit.byPackage.find((group) => group.key === studio.id).collected, 1500);
+    await send(`${api}/registrations/${complimentary.id}/cancel`, {
+      method: 'POST', token: admin, body: { reason: 'Client postponed' },
+    });
+    assert.equal((await auditFor(complimentary)).totals.analyticsCollected, 0);
+    const restoredComplimentary = (await send(`${api}/registrations/${complimentary.id}/restore`, { method: 'POST', token: admin })).payload;
+    assert.equal(restoredComplimentary.queue_number, complimentarySettled.queue_number);
+    await shoot(complimentary, 'shooting');
+    await shoot(complimentary, 'done_shooting');
+    const half = await register(studio);
+    const partial = await discount(half, 50);
+    assert.deepEqual([partial.paid_amount, partial.balance, partial.payment_status], [0, 750, 'downpayment']);
+    assert.equal((await auditFor(half)).totals.analyticsCollected, 750);
+    await pay(half, 750);
+    const halfAudit = (await auditFor(half)).totals;
+    assert.deepEqual([halfAudit.analyticsCollected, halfAudit.netCollections, halfAudit.discountCredits], [1500, 750, 750]);
+    await discount(half, 100, 400);
+    await discount(half, 0);
+    assert.equal((await auditFor(half)).totals.analyticsCollected, 750);
     const defaultArtist = await createStaff('defaultartist', 'mua');
     const wardrobePayment = await pay(included, 1550);
     const includedPaid = (await registrations(included, cashier)).payload;
@@ -1274,7 +1304,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const receipt = { registration: settled.orders[0].registration, payments: [mixedFirst, mixedLast], refunds: [], terms: [] };
     assert.equal(receiptRevenueLine(receipt, mixedLast), 'Studio ₱1,500.00 / MUA ₱450.00 / Unallocated ₱-975.00');
     assert.deepEqual(buildRegistrationsCsv([receipt.registration], receipt.payments).split('\r\n')
-      .slice(1).map((line) => line.split(',').slice(-3)), [['1500.00', '450.00', '0.00'], ['1500.00', '450.00', '0.00']]);
+      .slice(1).map((line) => line.split(',').slice(-5)), [['1500.00', '450.00', '0.00', '0.00', '1950.00'], ['1500.00', '450.00', '0.00', '0.00', '1950.00']]);
 
     // Sold prices and ownership are independent from later catalog edits.
     await patchCatalog('packages', studio, { amount: 1800, revenue_category: 'mua' });
@@ -1291,7 +1321,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     })).payload;
     assert.deepEqual(discounted.revenue_terms, { studio: 150000, mua: 30000, unallocated: 0 });
     assert.deepEqual([discounted.total_amount, discounted.balance], [1800, 0]);
-    assert.deepEqual(orderExtras(discounted).at(-1), ['Discount (Complimentary grooming)', -150]);
+    assert.deepEqual(orderExtras(discounted).at(-1), ['Discount credit (7.69%) · Complimentary grooming', -150]);
     assert.equal((await auditFor(mixed)).orders[0].overpaid, 150);
     await refundRoute({ registrationId: mixed.id, amount: 150, method: 'cash', reason: 'Approved complimentary service' });
     assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });

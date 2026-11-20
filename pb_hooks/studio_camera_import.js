@@ -373,7 +373,7 @@ function startSession(app, id, registrationId) {
   try { registration = app.findRecordById("registrations", registrationId || ""); } catch (_) {
     throw new NotFoundError("Registration not found.");
   }
-  if (!["paid", "shooting", "done_shooting"].includes(registration.getString("status")) || registration.getFloat("paid_amount") <= 0) {
+  if (!["paid", "shooting", "done_shooting"].includes(registration.getString("status")) || !require(__hooks + "/studio_workflow.js").paymentEligible(registration)) {
     throw new BadRequestError("Only paid clients on the photo floor can receive camera photos.");
   }
   if (before.getString("active_registration") === registration.id) return;

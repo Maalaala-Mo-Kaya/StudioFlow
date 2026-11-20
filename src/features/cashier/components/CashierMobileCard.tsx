@@ -133,6 +133,8 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
           <Printer className="w-4 h-4" /> Stub
         </button>}
 
+        {reg.balance === 0 && reg.revenue_discount && !['cancelled', 'released'].includes(reg.status) &&
+          <button type="button" className="border border-line px-3 py-2 font-bold" onClick={() => onOpenPayment(reg)}>Edit discount</button>}
         {reg.status !== 'pending_payment' && reg.status !== 'released' && reg.status !== 'cancelled' && (
           <button
             type="button"
