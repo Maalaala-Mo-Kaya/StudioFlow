@@ -59,7 +59,6 @@ export function useAdminData() {
   const [newPkgRequiresMua, setNewPkgRequiresMua] = useState(false);
   const [newPkgKind, setNewPkgKind] = useState<PackageKind>('school');
   const [newPkgRevenue, setNewPkgRevenue] = useState<RevenueCategory>('studio');
-  const [newPkgMuaTypes, setNewPkgMuaTypes] = useState<string[]>([]);
   const [newPkgInclusions, setNewPkgInclusions] = useState('');
 
   // Roster CSV Upload State
@@ -174,7 +173,6 @@ export function useAdminData() {
         amount: Number(newPkgAmount),
         photo_selection_limit: newPkgPhotoLimit,
         requires_mua: newPkgRequiresMua,
-        mua_service_types: newPkgMuaTypes,
         client_kind: newPkgKind,
         revenue_category: newPkgRevenue,
         inclusions: JSON.stringify(inclusions),
@@ -186,7 +184,6 @@ export function useAdminData() {
       setNewPkgInclusions('');
       setNewPkgPhotoLimit(0);
       setNewPkgRequiresMua(false);
-      setNewPkgMuaTypes([]);
       setNewPkgRevenue('studio');
       toast.success('Package created.');
       loadAllData();
@@ -425,7 +422,7 @@ export function useAdminData() {
   // --- Package & Add-on Mutations (T020) ---
   const handleUpdatePackage = async (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; mua_service_types: string[]; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
+    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
   ) => {
     try {
       await pb.collection('packages').update(id, {
@@ -435,7 +432,6 @@ export function useAdminData() {
         inclusions: JSON.stringify(data.inclusions),
         photo_selection_limit: data.photo_selection_limit,
         requires_mua: data.requires_mua,
-        mua_service_types: data.mua_service_types,
         client_kind: data.client_kind,
         revenue_category: data.revenue_category,
       });
@@ -469,7 +465,7 @@ export function useAdminData() {
   };
 
   const handleAddAddOn = async (
-    name: string, code: string, amount: number, requiresMua: boolean, serviceTypes: string[],
+    name: string, code: string, amount: number, requiresMua: boolean,
     clientKind: PackageKind, revenueCategory: RevenueCategory | '', defaultWhenNoMua: boolean,
   ) => {
     if (!name.trim()) return;
@@ -479,7 +475,6 @@ export function useAdminData() {
         code: code.trim().toUpperCase(),
         amount: Number(amount),
         requires_mua: requiresMua,
-        mua_service_types: serviceTypes,
         client_kind: clientKind,
         revenue_category: revenueCategory,
         default_when_no_mua: defaultWhenNoMua,
@@ -498,7 +493,6 @@ export function useAdminData() {
     code: string,
     amount: number,
     requiresMua: boolean,
-    serviceTypes: string[],
     clientKind: PackageKind,
     revenueCategory: RevenueCategory | '',
     defaultWhenNoMua: boolean,
@@ -509,7 +503,6 @@ export function useAdminData() {
         code: code.trim().toUpperCase(),
         amount: Number(amount),
         requires_mua: requiresMua,
-        mua_service_types: serviceTypes,
         client_kind: clientKind,
         revenue_category: revenueCategory,
         default_when_no_mua: defaultWhenNoMua,
@@ -673,8 +666,6 @@ export function useAdminData() {
     setNewPkgRevenue,
     setNewPkgKind,
     setNewPkgRequiresMua,
-    newPkgMuaTypes,
-    setNewPkgMuaTypes,
     setNewPkgAmount,
     newPkgInclusions,
     setNewPkgInclusions,

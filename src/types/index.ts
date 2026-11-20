@@ -89,13 +89,6 @@ export interface SchoolCourse {
   expand?: { course_id?: Course };
 }
 
-export interface MuaServiceType {
-  id: string;
-  name: string;
-  is_active: boolean;
-  payout_rate?: number;
-}
-
 export type ClientKind = 'school' | 'walkin';
 
 /** What a walk-in client books. on_location sessions ask for the event date and venue. */
@@ -143,7 +136,6 @@ export interface Package {
   inclusions?: string[] | string;
   photo_selection_limit?: number;
   requires_mua?: boolean;
-  mua_service_types?: string[];
   is_active?: boolean;
   /** Which kiosk form offers it: school, walk-in, or both. Empty = school. */
   client_kind?: ClientKind | 'both' | '';
@@ -157,7 +149,6 @@ export interface AddOn {
   name: string;
   amount: number;
   requires_mua?: boolean;
-  mua_service_types?: string[];
   is_active?: boolean;
   /** Which kiosk form offers it; empty means both (unlike packages, where empty means school). */
   client_kind?: ClientKind | 'both' | '';

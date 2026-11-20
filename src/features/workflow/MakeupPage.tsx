@@ -15,7 +15,7 @@ type MakeupState = 'waiting' | 'claimed' | 'in_progress' | 'completed';
 type Action = 'assign' | 'claim' | 'start' | 'complete' | 'release';
 interface MakeupAssignment extends StationStudent {
   service: string;
-  services?: { source: keyof typeof serviceSource; name: string; types?: { id: string; name: string }[] }[];
+  services?: { source: keyof typeof serviceSource; name: string; defaultService?: boolean; types?: { id: string; name: string }[] }[];
   state: MakeupState;
   /** The client's preferred look from the kiosk (full | light | grooming) and note; empty when not asked. */
   look?: string;
@@ -111,7 +111,7 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
               )}
               <div className="border-t border-neutral-300 pt-2">
                 <p className="text-xs font-black uppercase">MUA Service</p>
-                {row.services?.length ? (
+              {row.services?.length ? (
                   <ul className="space-y-1">
                     {row.services.map(({ name, source, types }, index) => (
                       <li key={index} className="text-sm break-words">
@@ -125,6 +125,8 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
               {row.artistId && manage && <p className="text-xs font-bold">MUA {row.artistName}</p>}
               {row.state === 'waiting' && <p className="text-xs">Payment confirmed · eligible for MUA</p>}
               {row.completedAt && <p className="text-xs">{new Date(row.completedAt.replace(' ', 'T')).toLocaleString()}</p>}
+              {row.services?.some((service) => service.defaultService) && row.state !== 'completed' &&
+                <p className="text-xs font-black uppercase text-gold-soft">Default service — confirmation required</p>}
               {row.state !== 'waiting' && row.state !== 'completed' && !row.eligible &&
                 <p className="text-xs font-bold text-red-700">Registration or payment is no longer eligible.</p>}
               {team?.canClaim && row.state === 'waiting' && (
@@ -143,15 +145,15 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
                 </div>
               )}
               {!admin && row.artistId === user?.id && (row.state === 'claimed' || row.state === 'in_progress') && (
-                <button type="button" className={stationButton} disabled={!!working || !row.eligible} onClick={() => void update(row, row.state === 'claimed' ? 'start' : 'complete')}>
-                  {row.state === 'claimed' ? 'Mark in progress' : 'Complete makeup / grooming'}
+                <button type="button" className={stationButton} disabled={!!working || !row.eligible} onClick={() => void update(row, row.state === 'claimed' && !row.services?.some((service) => service.defaultService) ? 'start' : 'complete')}>
+                  {row.state === 'claimed' && row.services?.some((service) => service.defaultService) ? 'Confirm service' : row.state === 'claimed' ? 'Mark in progress' : 'Complete makeup / grooming'}
                 </button>
               )}
               {admin && (row.state === 'claimed' || row.state === 'in_progress') && (
                 <div className="flex flex-wrap gap-2">
                   <button type="button" className={stationButton} disabled={!!working || !row.eligible}
-                    onClick={() => row.state === 'claimed' ? void update(row, 'start') : setConfirmCompletion(row)}>
-                    {row.state === 'claimed' ? 'Start on behalf of MUA' : 'Record completion'}
+                    onClick={() => row.state === 'claimed' && !row.services?.some((service) => service.defaultService) ? void update(row, 'start') : setConfirmCompletion(row)}>
+                    {row.state === 'claimed' && row.services?.some((service) => service.defaultService) ? 'Confirm service' : row.state === 'claimed' ? 'Start on behalf of MUA' : 'Record completion'}
                   </button>
                 </div>
               )}

@@ -119,7 +119,11 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
       record.set("makeup_state", "in_progress");
       team.log(tx, record, artistId, account, "start");
     } else {
-      if (state !== "in_progress") throw new ApiError(409, "Start makeup or grooming before marking it complete.");
+      const defaultOnly = workflow.makeupServices(record).length > 0
+        && workflow.makeupServices(record).every((service) => service.defaultService);
+      if (state !== "in_progress" && !(defaultOnly && state === "claimed")) {
+        throw new ApiError(409, "Start makeup or grooming before marking it complete.");
+      }
       const artist = onBehalf ? workflow.catalogItem(tx, "users", artistId) : account;
       if (!artist || artist.getString("role") !== "mua") {
         throw new ApiError(409, "The performing MUA could not be verified.");
@@ -140,14 +144,14 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
 onRecordAfterCreateSuccess((e) => {
   e.next();
   require(__hooks + "/studio_station_events.js").notify(e.app);
-}, "registrations", "packages", "add_ons", "mua_service_types");
+}, "registrations", "packages", "add_ons");
 
 onRecordAfterUpdateSuccess((e) => {
   e.next();
   require(__hooks + "/studio_station_events.js").notify(e.app);
-}, "registrations", "packages", "add_ons", "users", "mua_service_types");
+}, "registrations", "packages", "add_ons", "users");
 
 onRecordAfterDeleteSuccess((e) => {
   e.next();
   require(__hooks + "/studio_station_events.js").notify(e.app);
-}, "registrations", "packages", "add_ons", "users", "mua_service_types");
+}, "registrations", "packages", "add_ons", "users");

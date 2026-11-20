@@ -70,7 +70,7 @@ function counts(dbFile) {
     const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
     const n = (t) => (tables.has(t) ? db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n : 0);
     return Object.fromEntries(['registrations', 'payments', 'refunds', 'mua_completions', 'mua_assignment_events', 'master_lists', 'organizations', 'courses',
-      'packages', 'add_ons', 'mua_service_types', 'users', 'camera_stations'].map((t) => [t, n(t)]));
+      'packages', 'add_ons', 'users', 'camera_stations'].map((t) => [t, n(t)]));
   } finally { db.close(); }
 }
 
@@ -137,7 +137,7 @@ async function main() {
     console.log('Photos:   ' + photoRoot + (fs.existsSync(photoRoot) ? '' : '  (not found)'));
     console.log('\nNow in the database:');
     console.log(`  Client records : ${before.registrations} job orders, ${before.payments} payments, ${before.refunds} refunds, ${before.mua_completions} makeup logs, ${before.mua_assignment_events} assignment events, ${before.master_lists} roster rows`);
-    console.log(`  Setup          : ${before.organizations} schools, ${before.courses} courses, ${before.packages} packages, ${before.add_ons} add-ons, ${before.mua_service_types} makeup services, ${before.users} staff accounts, ${before.camera_stations} cameras`);
+    console.log(`  Setup          : ${before.organizations} schools, ${before.courses} courses, ${before.packages} packages, ${before.add_ons} add-ons, ${before.users} staff accounts, ${before.camera_stations} cameras`);
 
     let mode = option('mode');
     if (!mode) {

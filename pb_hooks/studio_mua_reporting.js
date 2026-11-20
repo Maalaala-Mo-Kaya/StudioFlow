@@ -1,5 +1,5 @@
 const workflow = require(__hooks + "/studio_workflow.js");
-const uncategorized = { id: "uncategorized", name: "Uncategorized" };
+const earnings = require(__hooks + "/studio_mua_earnings.js");
 
 function studioDate(instant) {
   // Asia/Manila uses UTC+08:00 for all dates StudioFlow records.
@@ -11,21 +11,11 @@ function staffName(record) {
 }
 
 function logCompletion(app, job, artist, actor, completedAt) {
-  const categorySources = new Map();
-  for (const { types, ...source } of workflow.makeupServices(job)) {
-    for (const type of types?.length ? types : [uncategorized]) {
-      let entry = categorySources.get(type.id);
-      if (!entry) {
-        const category = type.id === uncategorized.id ? null : workflow.catalogItem(app, "mua_service_types", type.id);
-        entry = { name: category?.getString("name") || type.name, payoutRate: category?.getFloat("payout_rate") || 0, sources: [] };
-        categorySources.set(type.id, entry);
-      }
-      entry.sources.push(source);
-    }
-  }
+  const basisForService = earnings.purchasedEarnings(job);
+  const services = new Map(workflow.makeupServices(job).map((source) => [earnings.serviceKey(source), source]));
   const collection = app.findCollectionByNameOrId("mua_completions");
   const pkg = workflow.json(job, "package_snapshot");
-  for (const [serviceId, entry] of categorySources) {
+  for (const [serviceId, source] of services) {
     const record = new Record(collection);
     const values = {
       job_id: job.id, job_order: job.getString("job_order_no"),
@@ -33,8 +23,9 @@ function logCompletion(app, job, artist, actor, completedAt) {
       student_name: ["given_name", "middle_name", "family_name"].map((key) => job.getString(key)).filter(Boolean).join(" "),
       artist_id: artist.id, artist_name: staffName(artist),
       actor_id: actor.id, actor_name: staffName(actor), actor_role: actor.getString("role"),
-      service_id: serviceId, service_name: entry.name, sources: entry.sources,
-      package_id: pkg?.id || job.getString("package"), package_name: pkg?.name || "", payout_rate: entry.payoutRate,
+      service_id: serviceId, service_name: source.name, sources: [source],
+      package_id: pkg?.id || job.getString("package"), package_name: pkg?.name || "",
+      earnings_basis: basisForService(source),
       local_date: studioDate(completedAt), completed_at: completedAt,
     };
     for (const [field, value] of Object.entries(values)) record.set(field, value);
@@ -42,52 +33,71 @@ function logCompletion(app, job, artist, actor, completedAt) {
   }
 }
 
-function dailyReport(app, date, today) {
+function artistRow(id) {
+  return { id, jobs: new Set(), counts: {}, earnings: {}, totalEarnings: 0, totalServices: 0, details: [] };
+}
+
+function dailyReport(app, date, today, includeAudit = false) {
   const columns = new Map();
   const artists = new Map();
   const allJobs = new Set();
   const totals = {};
+  const eventCache = new Map();
   const logs = app.findRecordsByFilter("mua_completions", "local_date = {:date}", "completed_at,id", 0, 0, { date });
   for (const log of logs) {
     const id = log.getString("artist_id");
-    const serviceId = log.getString("service_id");
+    const basis = earnings.basisFor(log);
+    const adjustments = earnings.adjustmentsFor(log);
+    const unmatched = basis.kind === "historical" && !basis.groupKey;
+    const serviceId = basis.groupKey || (unmatched ? "historical:" : "") + log.getString("service_id");
     const serviceName = log.getString("service_name");
     const jobId = log.getString("job_id");
-    columns.set(serviceId, serviceName);
-    const row = artists.get(id) || { id, jobs: new Set(), counts: {}, earnings: {}, totalEarnings: 0, details: [] };
+    if (includeAudit && !eventCache.has(jobId)) eventCache.set(jobId, earnings.financialEvents(app, jobId));
+    const pendingReview = (eventCache.get(jobId) || []).filter((event) =>
+      !adjustments.some((entry) => entry.kind === event.kind && entry.reference === event.reference));
+    columns.set(serviceId, unmatched ? serviceName + " (historical)" : serviceName);
+    const row = artists.get(id) || artistRow(id);
     row.name = log.getString("artist_name");
     row.jobs.add(jobId);
-    row.counts[serviceId] = (row.counts[serviceId] || 0) + 1;
-    const payout = log.getFloat("payout_rate") || 0;
-    row.earnings[serviceId] = (row.earnings[serviceId] || 0) + payout;
-    row.totalEarnings += payout;
+    row.counts[serviceId] = (row.counts[serviceId] || 0) + basis.quantity;
+    row.totalServices += basis.quantity;
+    const earned = basis.earned + adjustments.reduce((sum, entry) => sum + entry.amount, 0);
+    row.earnings[serviceId] = (row.earnings[serviceId] || 0) + earned;
+    row.totalEarnings += earned;
     row.details.push({
       id: log.id, jobId, jobOrder: log.getString("job_order"), studentId: log.getString("student_id"),
       studentName: log.getString("student_name"), artistName: row.name,
       actorId: log.getString("actor_id"), actorName: log.getString("actor_name"), actorRole: log.getString("actor_role"),
       serviceId, serviceName, sources: workflow.json(log, "sources"),
       packageId: log.getString("package_id"), packageName: log.getString("package_name"),
-      completedAt: log.getString("completed_at"), payoutRate: payout,
+      completedAt: log.getString("completed_at"), basis, adjustments, earned, pendingReview,
+      reviewReason: unmatched ? "Historical service has no unambiguous catalog match." : basis.reviewReason,
     });
     artists.set(id, row);
     allJobs.add(jobId);
-    totals[serviceId] = (totals[serviceId] || 0) + 1;
+    totals[serviceId] = (totals[serviceId] || 0) + basis.quantity;
   }
   if (date === today) {
-    for (const type of app.findRecordsByFilter("mua_service_types", "is_active = true", "name", 0, 0)) {
-      columns.set(type.id, type.getString("name"));
+    for (const [collection, source] of [["packages", "package"], ["add_ons", "add_on"]]) {
+      for (const item of app.findRecordsByFilter(collection, "is_active = true && requires_mua = true", "name", 0, 0)) {
+        const service = workflow.serviceRequirement(item, source);
+        if (service) columns.set(earnings.serviceKey(service), service.name);
+      }
     }
     for (const artist of app.findRecordsByFilter("users", "role = 'mua'", "name,id", 0, 0)) {
-      const row = artists.get(artist.id) || { id: artist.id, jobs: new Set(), counts: {}, earnings: {}, totalEarnings: 0, details: [] };
+      const row = artists.get(artist.id) || artistRow(artist.id);
       row.name = staffName(artist);
       artists.set(artist.id, row);
     }
   }
   return {
-    date, today, columns: Array.from(columns, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
-    rows: Array.from(artists.values(), ({ jobs, ...row }) => ({ ...row, totalClients: jobs.size }))
+    date, today, columns: Array.from(columns, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
+    rows: Array.from(artists.values(), ({ jobs, ...row }) => ({
+      ...row, totalClients: jobs.size, totalEarnings: row.totalEarnings / 100,
+      earnings: Object.fromEntries(Object.entries(row.earnings).map(([key, amount]) => [key, amount / 100])),
+    }))
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
-    totals, totalClients: allJobs.size,
+    totals, totalClients: allJobs.size, totalServices: Object.values(totals).reduce((sum, count) => sum + count, 0),
   };
 }
 

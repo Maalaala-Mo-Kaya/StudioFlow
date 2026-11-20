@@ -68,6 +68,31 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       VALUES ('legacypay00001', ?, 1000, 'additional', 'cash', 1000, 'REC-legacy-receipt', 'completed',
         '2026-01-05 01:00:00.000Z', '2026-01-05 01:00:00.000Z')`).run(legacyId);
   } finally { legacyDb.close(); }
+
+  // Stage records from the old MUA catalog before applying consolidation.
+  const oldMuaMigrations = join(home, 'old-mua-migrations');
+  await mkdir(oldMuaMigrations);
+  for (const filename of await readdir(join(repo, 'pb_migrations'))) {
+    if (filename < '1793803400') await copyFile(join(repo, 'pb_migrations', filename), join(oldMuaMigrations, filename));
+  }
+  execFileSync(executable, ['migrate', 'up', ...flags.slice(0, -1), oldMuaMigrations], options);
+  const oldMuaDb = new DatabaseSync(join(data, 'data.db'));
+  const bundleId = 'legacybundle001';
+  let oldAddOnId;
+  try {
+    oldAddOnId = oldMuaDb.prepare("SELECT id FROM add_ons WHERE code = 'ADD-HAIRMAKEUP'").get().id;
+    const oldMakeupId = oldMuaDb.prepare("SELECT id FROM mua_service_types WHERE name = 'Makeup'").get().id;
+    oldMuaDb.prepare(`INSERT INTO packages (id, code, name, amount, is_active, requires_mua, revenue_category)
+      VALUES (?, 'LEGACY-BUNDLE', 'Premium Portrait', 1000, 1, 1, 'studio')`).run(bundleId);
+    const insertLog = oldMuaDb.prepare(`INSERT INTO mua_completions
+      (id, job_id, service_id, service_name, sources, artist_id, artist_name, local_date, completed_at, payout_rate)
+      VALUES (?, ?, ?, 'Makeup', ?, 'legacy-artist', 'Historical Artist', '2026-01-06', '2026-01-06 01:00:00.000Z', ?)`);
+    const addOnSource = { source: 'add_on', id: oldAddOnId, name: 'Professional Studio Hair & Makeup' };
+    insertLog.run('oldmualog000001', 'old-mua-mapped', oldMakeupId, JSON.stringify([addOnSource]), 120);
+    insertLog.run('oldmualog000002', 'old-mua-overlap', oldMakeupId, JSON.stringify([
+      addOnSource, { source: 'package', id: bundleId, name: 'Premium Portrait' },
+    ]), 80);
+  } finally { oldMuaDb.close(); }
   async function startServer() {
     server = spawn(executable, ['serve', '--http', host.slice(7), ...flags], options);
     for (const stream of [server.stdout, server.stderr]) stream.on('data', (chunk) => { logs += chunk; });
@@ -112,7 +137,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     amount: 1000, is_active: true, requires_mua: false,
   });
   const prepared = await create('packages', {
-    code: 'PKG-D', name: 'Package D', amount: 1000, is_active: true, photo_selection_limit: 2, requires_mua: true,
+    code: 'PKG-D', name: 'Package D', amount: 1000, is_active: true, photo_selection_limit: 2, requires_mua: true, revenue_category: 'mua',
   });
   const makeup = await create('add_ons', { code: 'EXTRA', name: 'Touch up', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true });
   const patchCatalog = (collection, item, body) => send(records(collection, item.id), { token: admin, method: 'PATCH', body })
@@ -551,33 +576,38 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await registrations(updated, admin, { mua_correction: 'required' }, 409);
   assert.equal((await registrations(updated)).payload.paid_amount, 1000);
 
-  const { payload: types } = await send(api + '/mua-service-types', { token: admin });
-  const makeupType = types.find((type) => type.name === 'Makeup');
-  const groomingType = types.find((type) => type.name === 'Grooming');
-  const hairType = await create('mua_service_types', { name: 'Hair Styling', is_active: true });
+  await send(api + '/mua-service-types', { token: admin, status: 404 });
+  await send(records('mua_service_types'), { token: admin, status: 403 });
+  const hair = await create('add_ons', {
+    code: 'HAIR', name: 'Hair Styling', amount: 150, is_active: true, revenue_category: 'mua', requires_mua: true,
+  });
   const report = (date = '') => send(api + '/mua-performance?date=' + date, { token: admin }).then(({ payload }) => payload);
   await send(api + '/mua-performance', { token: artists[2].token, status: 403 });
   await send(api + '/mua-performance?date=2026-02-30', { token: admin, status: 400 });
   const performer = await createStaff('reportartist', 'mua');
   const originalReport = await report();
   assert.equal(originalReport.rows.find((row) => row.id === performer.id).totalClients, 0);
-  assert.ok(originalReport.columns.some((column) => column.id === hairType.id));
+  assert.ok(originalReport.columns.some((column) => column.id === 'add_on:' + hair.id));
   assert.ok(originalReport.rows.every((row) => !row.details.some((detail) => detail.jobId === legacyId)));
+  const migrated = (await report('2026-01-06')).rows[0];
+  assert.deepEqual([migrated.totalServices, migrated.totalEarnings], [2, 200]);
+  const mapped = migrated.details.find((detail) => detail.jobId === 'old-mua-mapped');
+  const unmatched = migrated.details.find((detail) => detail.jobId === 'old-mua-overlap');
+  assert.equal(mapped.serviceId, 'add_on:' + oldAddOnId);
+  assert.equal(mapped.earned, 12000);
+  assert.match(unmatched.reviewReason, /no unambiguous catalog match/);
+  assert.equal(unmatched.earned, 8000);
 
-  const multiPackage = await create('packages', {
-    code: 'MULTI', name: 'Premium Portrait', amount: 1000, is_active: true, requires_mua: true,
-    mua_service_types: [makeupType.id, groomingType.id, hairType.id],
-  });
+  const multiPackage = (await send(records('packages', bundleId))).payload;
   const makeupPackage = await create('packages', {
-    code: 'SECOND', name: 'Standard Portrait', amount: 1000, is_active: true, requires_mua: true,
-    mua_service_types: [makeupType.id],
+    code: 'SECOND', name: 'Makeup package', amount: 1000, is_active: true, revenue_category: 'mua',
   });
+  await patchCatalog('packages', makeupPackage, { requires_mua: true });
   const duplicateMakeup = await create('add_ons', {
     code: 'TOUCH', name: 'Touch up', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true,
-    mua_service_types: [makeupType.id],
   });
-  const multi = await register(multiPackage, [{ id: duplicateMakeup.id }]);
-  await pay(multi, 1100);
+  const multi = await register(multiPackage, [{ id: duplicateMakeup.id }, { id: hair.id }]);
+  await pay(multi, 1250);
   await contest(multi, performer, 'claim');
   await contest(multi, performer, 'start');
   assert.equal((await report()).rows.find((row) => row.id === performer.id).totalClients, 0);
@@ -604,10 +634,17 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const performance = daily.rows.find((row) => row.id === performer.id);
   assert.equal(performance.totalClients, 2);
   assert.equal(daily.totalClients, originalReport.totalClients + 2);
-  assert.deepEqual(performance.counts, { [makeupType.id]: 2, [groomingType.id]: 1, [hairType.id]: 1 });
-  const makeupDetail = performance.details.find((detail) => detail.jobId === multi.id && detail.serviceId === makeupType.id);
+  const bundleKey = 'package:' + multiPackage.id;
+  assert.deepEqual(performance.counts, {
+    [bundleKey]: 1, ['package:' + makeupPackage.id]: 1, ['add_on:' + duplicateMakeup.id]: 1, ['add_on:' + hair.id]: 1,
+  });
+  assert.equal(performance.totalServices, 4);
+  assert.equal(performance.totalEarnings, 1250);
+  const makeupDetail = performance.details.find((detail) => detail.jobId === multi.id && detail.serviceId === bundleKey);
   assert.equal(makeupDetail.actorId, performer.id);
-  assert.deepEqual(makeupDetail.sources.map(({ name }) => name), ['Premium Portrait', 'Touch up']);
+  assert.deepEqual(makeupDetail.sources.map(({ name }) => name), ['Premium Portrait']);
+  assert.equal(makeupDetail.earned, 0, 'A portrait bundle requires a verified allocation.');
+  assert.match(makeupDetail.reviewReason, /no separately priced MUA charge/);
   const adminDetail = performance.details.find((detail) => detail.jobId === second.id);
   assert.equal(adminDetail.actorRole, 'admin');
   assert.notEqual(adminDetail.actorId, performer.id);
@@ -627,14 +664,14 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       .run('2026-10-02', '2026-10-01 16:00:00.000Z', multi.id);
   } finally { historyDb.close(); }
   const booked = await register(makeupPackage);
-  await patchCatalog('mua_service_types', makeupType, { name: 'Premium Makeup', is_active: false });
+  await patchCatalog('packages', makeupPackage, { name: 'Premium Makeup', amount: 1200, requires_mua: false });
   await patchCatalog('packages', multiPackage, { name: 'Renamed Portrait', is_active: false });
   await patchCatalog('users', performer, { name: 'Renamed Artist', disabled: true });
   const historical = await report('2026-10-02');
   assert.equal(historical.totalClients, 1);
   assert.equal(historical.rows[0].name, performer.username);
-  assert.deepEqual(historical.columns.find((column) => column.id === makeupType.id), { id: makeupType.id, name: 'Makeup' });
-  assert.equal(historical.rows[0].details.find((detail) => detail.serviceId === makeupType.id).sources[0].name, 'Premium Portrait');
+  assert.deepEqual(historical.columns.find((column) => column.id === bundleKey), { id: bundleKey, name: 'Premium Portrait' });
+  assert.equal(historical.rows[0].details.find((detail) => detail.serviceId === bundleKey).sources[0].name, 'Premium Portrait');
   assert.equal((await report()).rows.find((row) => row.id === performer.id).totalClients, 1);
   const afterDeactivation = await register(makeupPackage);
   assert.equal(afterDeactivation.makeup_service, '');
@@ -643,8 +680,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await contest(booked, artists[3], 'start');
   await contest(booked, artists[3], 'complete');
   const bookedDetail = (await report()).rows.find((row) => row.id === artists[3].id).details.find((detail) => detail.jobId === booked.id);
-  assert.equal(bookedDetail.serviceId, makeupType.id);
-  assert.equal(bookedDetail.serviceName, 'Premium Makeup');
+  assert.equal(bookedDetail.serviceId, 'package:' + makeupPackage.id);
+  assert.equal(bookedDetail.serviceName, 'Makeup package');
+  assert.equal(bookedDetail.earned, 100000, 'Already booked services use the original sold price and name.');
 
   const pickup = await register(standard);
   const dropped = await register(standard);
@@ -954,10 +992,10 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
 
   // MUA note: the preferred-look choices are retired, but the optional note remains.
   const lookPackage = await create('packages', {
-    code: 'LOOK', name: 'Look Portrait', amount: 1000, is_active: true, requires_mua: true, mua_service_types: [groomingType.id],
+    code: 'LOOK', name: 'Look Portrait', amount: 1000, is_active: true, requires_mua: true, revenue_category: 'mua',
   });
   const lookAddOn = await create('add_ons', {
-    code: 'LOOK-ADD', name: 'Look grooming', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true, mua_service_types: [groomingType.id],
+    code: 'LOOK-ADD', name: 'Look grooming', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true,
   });
   assert.ok((await register(lookPackage, [], 400, { makeup_look_note: 'x'.repeat(201) })).data.makeup_look_note);
   const lookClient = await register(lookPackage, [], 200, { makeup_look: 'grooming', makeup_look_note: '  no lipstick  ' });
@@ -1055,11 +1093,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     });
     const muaAddOn = await create('add_ons', {
       code: 'MUA-300', name: 'Makeup session', amount: 300, is_active: true, requires_mua: true,
-      mua_service_types: [makeupType.id], revenue_category: 'mua',
+      revenue_category: 'mua',
     });
     const groomingAddOn = await create('add_ons', {
       code: 'MUA-150', name: 'Grooming session', amount: 150, is_active: true, requires_mua: true,
-      mua_service_types: [groomingType.id], revenue_category: 'mua',
+      revenue_category: 'mua',
     });
     const recordsFor = async (collection, job) => (await send(
       records(collection) + '?filter=' + encodeURIComponent(`registration = "${job.id}"`), { token: admin },
@@ -1071,7 +1109,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
 
     const wardrobeFields = {
       name: 'Wardrobe', amount: 50, is_active: true, client_kind: 'school',
-      revenue_category: 'studio', default_when_no_mua: true,
+      revenue_category: 'mua', default_when_no_mua: true,
     };
     const wardrobe = await create('add_ons', { ...wardrobeFields, code: 'WARDROBE' });
     await send(records('add_ons'), {
@@ -1102,9 +1140,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const included = await register(studio, [{ id: wardrobe.id, amount: 0 }], 200, {
       no_mua_default_quote: wardrobe.id + ':5000',
     });
-    assert.deepEqual([included.total_amount, included.balance, included.makeup_service], [1550, 1550, '']);
+    assert.deepEqual([included.total_amount, included.balance, included.makeup_service], [1550, 1550, 'Wardrobe']);
     assert.deepEqual(included.add_ons, [{
-      id: wardrobe.id, code: 'WARDROBE', name: 'Wardrobe', amount: 50, revenue_category: 'studio', auto_applied: true,
+      id: wardrobe.id, code: 'WARDROBE', name: 'Wardrobe', amount: 50, revenue_category: 'mua', auto_applied: true,
     }]);
     assert.deepEqual((await register(pureMua, [], 200, { no_mua_default_quote: 'none' })).add_ons, []);
     const withGrooming = await register(studio, [{ id: groomingAddOn.id }, { id: wardrobe.id }], 200, {
@@ -1117,17 +1155,91 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await patchCatalog('add_ons', wardrobe, { is_active: false });
     assert.equal((await register(studio, [], 200, { no_mua_default_quote: 'none' })).total_amount, 1500);
     await patchCatalog('add_ons', walkinDefault, { is_active: false });
+    const defaultArtist = await createStaff('defaultartist', 'mua');
     const wardrobePayment = await pay(included, 1550);
     const includedPaid = (await registrations(included, cashier)).payload;
     assert.equal(includedPaid.total_amount, 1550);
     assert.equal(includedPaid.balance, 0);
-    assert.ok(includedPaid.queue_number > 0);
-    assert.deepEqual(orderExtras(includedPaid), [['Wardrobe', 50]]);
+    assert.equal(includedPaid.queue_number, null, 'Default MUA services wait for confirmation before photography.');
+    assert.ok((await queue(defaultArtist)).some((row) => row.id === included.id));
+    await contest(included, defaultArtist, 'claim');
+    await contest(included, defaultArtist, 'complete');
+    const includedCompleted = (await registrations(included, cashier)).payload;
+    assert.ok(includedCompleted.queue_number > 0, 'Default MUA confirmation hands off to photography.');
+    assert.deepEqual(orderExtras(includedPaid), [['Wardrobe (MUA)', 50]]);
     assert.equal(wardrobePayment.balance_before, 1550);
-    assert.deepEqual((await auditFor(included)).totals.revenue, { studio: 1550, mua: 0, unallocated: 0 });
+    assert.deepEqual((await auditFor(included)).totals.revenue, { studio: 1500, mua: 50, unallocated: 0 });
     const includedReport = (await send(api + '/student-excel', { token: admin })).payload;
     assert.equal(includedReport.rows.find((row) => row.jobOrder === includedPaid.job_order_no).addOns[wardrobe.id], 5000);
-    assert.ok(!(await report()).rows.flatMap((row) => row.details).some((detail) => detail.jobId === included.id));
+    assert.equal((await report()).rows.flatMap((row) => row.details).filter((detail) => detail.jobId === included.id).length, 1,
+      'A confirmed default service is recorded once in MUA performance analytics.');
+
+    // Catalog price determines new earnings, including three separately completed purchases.
+    const rateArtist = await createStaff('earningsartist', 'mua');
+    const rateAddOn = await create('add_ons', {
+      code: 'IND-MAKEUP', name: 'Catalog Makeup', amount: 200, revenue_category: 'mua', is_active: true,
+    });
+    assert.equal((await register(studio, [{ id: rateAddOn.id }])).makeup_service, '',
+      'MUA revenue classification alone does not activate the queue.');
+    await send(records('add_ons', rateAddOn.id), { token: admin, method: 'PATCH', status: 400,
+      body: { requires_mua: true, revenue_category: 'studio' } });
+    await patchCatalog('add_ons', rateAddOn, { requires_mua: true });
+    const serviceCatalog = (await send(api + '/registration-catalog')).payload;
+    assert.equal(serviceCatalog.addOns.find((item) => item.id === rateAddOn.id).requires_mua, true);
+    const serviceId = 'add_on:' + rateAddOn.id;
+    const artistReport = async () => (await report()).rows.find((row) => row.id === rateArtist.id);
+    const jobs = [];
+    for (let count = 1; count <= 3; count++) {
+      const job = await register(studio, [{ id: rateAddOn.id }]);
+      const payment = await pay(job, 1700);
+      await contest(job, rateArtist, 'claim');
+      await contest(job, rateArtist, 'start');
+      assert.equal((await artistReport()).totalEarnings, (count - 1) * 200);
+      await contest(job, rateArtist, 'complete');
+      await contest(job, rateArtist, 'complete');
+      const row = await artistReport();
+      assert.equal(row.counts[serviceId], count);
+      assert.equal(row.earnings[serviceId], count * 200);
+      jobs.push({ job, payment, detail: row.details.find((item) => item.jobId === job.id) });
+    }
+    await patchCatalog('add_ons', rateAddOn, { amount: 275, is_active: false });
+    assert.equal((await artistReport()).earnings[serviceId], 600);
+    await register(studio, [{ id: rateAddOn.id }], 400);
+
+    const first = jobs[0];
+    await send(`${api}/registrations/${first.job.id}/cancel`, { method: 'POST', token: admin, body: { reason: 'Refund approved after service' } });
+    const refund = await refundRoute({ registrationId: first.job.id, amount: 75, method: 'cash', reason: 'Refund part of makeup charge' });
+    const secondJob = jobs[1];
+    await send(`${api}/payments/${secondJob.payment.id}/void`, { method: 'POST', token: admin, body: { reason: 'Incorrect collection recorded' } });
+    assert.equal((await artistReport()).earnings[serviceId], 600, 'Ledger activity awaits an explicit service allocation.');
+    const apiAdjust = (completion, body, token = admin, status = 200) =>
+      send(`${api}/mua-completions/${completion.id}/adjustments`, { method: 'POST', token, body, status }).then((r) => r.payload);
+    const refundAdjustment = { kind: 'refund', reference: refund.refund_no, amount: -7500,
+      reason: 'Entire refund attributable to makeup', clientKey: randomUUID() };
+    await apiAdjust(first.detail, refundAdjustment, rateArtist.token, 403);
+    await apiAdjust(secondJob.detail, refundAdjustment, admin, 400);
+    assert.equal((await apiAdjust(first.detail, refundAdjustment)).reference, refund.refund_no);
+    await apiAdjust(first.detail, refundAdjustment);
+    await apiAdjust(first.detail, { ...refundAdjustment, clientKey: randomUUID() }, admin, 409);
+    await apiAdjust(secondJob.detail, { kind: 'void', reference: secondJob.payment.receipt_no, amount: -20000,
+      reason: 'Reverse verified makeup share of void', clientKey: randomUUID() });
+    await apiAdjust(jobs[2].detail, { kind: 'correction', amount: -2500,
+      reason: 'Verified service price correction', clientKey: randomUUID() });
+    const reviewedEarnings = await artistReport();
+    assert.deepEqual([reviewedEarnings.counts[serviceId], reviewedEarnings.earnings[serviceId]], [3, 300]);
+    assert.ok(reviewedEarnings.details.every((item) => item.basis.earned === 20000 && !item.pendingReview.length));
+    const priceReport = await report();
+    const { muaReportCsv, buildMuaWorkbook } = await import('../src/features/admin/muaPerformanceExport.ts');
+    const { muaEarningsTable } = await import('../src/features/admin/muaPerformance.ts');
+    const earningsMatrix = muaEarningsTable(priceReport);
+    const earningsBook = await buildMuaWorkbook(priceReport, 'earnings');
+    const artistIndex = priceReport.rows.findIndex((row) => row.id === rateArtist.id);
+    const columnIndex = priceReport.columns.findIndex((col) => col.id === serviceId);
+    assert.equal(earningsBook.getWorksheet('MUA Earnings').getCell(artistIndex + 2, columnIndex + 3).value, 300);
+    assert.equal(earningsBook.getWorksheet('Earnings Audit').getSheetValues().filter(Boolean)
+      .filter((row) => row.includes(refund.refund_no) && row.includes(-75)).length, 1);
+    assert.match(muaReportCsv(priceReport, 'earnings').split('\r\n')[artistIndex + 1], /,300$/);
+    assert.equal(earningsMatrix.rows[artistIndex][columnIndex + 2], 300);
 
     const studioOnly = await register(studio);
     await pay(studioOnly, 1500);
@@ -1166,7 +1278,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
 
     // Sold prices and ownership are independent from later catalog edits.
     await patchCatalog('packages', studio, { amount: 1800, revenue_category: 'mua' });
-    await patchCatalog('add_ons', groomingAddOn, { amount: 180, revenue_category: 'studio', is_active: false });
+    await patchCatalog('add_ons', groomingAddOn, { amount: 180, revenue_category: 'studio', requires_mua: false, is_active: false });
     await register(studio, [{ id: groomingAddOn.id }], 400);
     assert.deepEqual((await auditFor(mixed)).totals.revenue, settled.totals.revenue);
     await patchCatalog('packages', studio, { amount: 1500, revenue_category: 'studio' });
@@ -1252,7 +1364,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await contest(mixed, nextArtist, 'complete', 200, { version: '2' });
     await contest(mixed, parent, 'assign', 409, { artistId: firstArtist.id, version: '2' });
     const performed = (await report()).rows.find((row) => row.id === nextArtist.id).details.filter((row) => row.jobId === mixed.id);
-    assert.deepEqual(performed.map((row) => row.serviceName), ['Grooming']); // Makeup category was deactivated earlier in this test.
+    assert.deepEqual(performed.map((row) => row.serviceName).sort(), ['Grooming session', 'Makeup session']);
+    assert.deepEqual(performed.map((row) => row.earned).sort((a, b) => a - b), [10000, 20000]);
     assert.ok((await getTeam(parent)).artists.find((artist) => artist.id === nextArtist.id).completed > 0);
     const history = (await send(records('mua_assignment_events') + '?sort=created&filter='
       + encodeURIComponent(`job_id = "${mixed.id}"`), { token: admin })).payload.items;

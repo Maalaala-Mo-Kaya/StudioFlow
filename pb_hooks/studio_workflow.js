@@ -22,18 +22,12 @@ function makeupServices(registration) {
   return service ? [{ source: "legacy", name: service }] : [];
 }
 
-function serviceTypes(app, item) {
-  return item.getStringSlice("mua_service_types")
-    .map((id) => catalogItem(app, "mua_service_types", id))
-    .filter((category) => category?.getBool("is_active"))
-    .map((category) => ({ id: category.id, name: category.getString("name") }));
-}
-
-function serviceRequirement(app, item, source) {
-  if (!item?.getBool("requires_mua") || (source === "add_on" && item.getString("revenue_category") === "studio")) return null;
-  const types = serviceTypes(app, item);
-  if (item.getStringSlice("mua_service_types").length && !types.length) return null;
-  return { source, id: item.id, name: item.getString("name"), ...(types.length ? { types } : {}) };
+function serviceRequirement(item, source) {
+  const defaultMua = source === "add_on" && item?.getBool("default_when_no_mua")
+    && item.getString("revenue_category") === "mua";
+  if ((!item?.getBool("requires_mua") && !defaultMua)
+    || (source === "add_on" && item.getString("revenue_category") === "studio")) return null;
+  return { source, id: item.id, name: item.getString("name"), defaultService: defaultMua };
 }
 
 function purchasedServices(app, registration, before) {
@@ -50,7 +44,7 @@ function purchasedServices(app, registration, before) {
     (service.source !== "package" || !changedPackage)
     && (service.source !== "add_on" || selected.has(service.id)));
   const addService = (collection, source, id) => {
-    const service = serviceRequirement(app, catalogItem(app, collection, id), source);
+    const service = serviceRequirement(catalogItem(app, collection, id), source);
     if (service) saved.push(service);
   };
   if (changedPackage) addService("packages", "package", packageId);

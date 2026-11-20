@@ -160,11 +160,15 @@ To apply a discount, enter the whole-peso reduction against the Studio or MUA po
 
 ### Parent and Child MUAs
 
-In **Admin → Staff Accounts → Makeup Artist Team**, choose one enabled MUA as **Parent MUA**, set **Allow Parent MUA to Accept Clients**, and save. The other MUA accounts are Children while a Parent is configured. With no Parent, the station uses the shared self-claim queue.
+In **Admin → Makeup & Photo Selection → Makeup / Grooming → Makeup Artist Team**, choose one enabled MUA as **Parent MUA**, set **Allow Parent MUA to Accept Clients**, and save. The other MUA accounts are Children while a Parent is configured. With no Parent, the station uses the shared self-claim queue.
 
 Paid orders that require MUA work appear under **Unassigned Clients**. The Parent assigns them to an enabled Child, or to the Parent account when the toggle is on. Admin can also manage assignments under **Makeup & Photo Selection**. A Child can start and complete their own work. Reassigning active work returns it to pending for the new artist and logs the handoff. Changing the Parent or turning self-assignment off preserves existing work.
 
-The current queue assigns the purchased MUA services on a Job Order together. Completion records each distinct service category for the performing artist and counts the client once in the artist's daily total. The report uses Asia/Manila dates. Financial allocation follows the sale and ledger. The Job Order links to assignment history and completion records for attribution, even if payment arrived first.
+The queue assigns the purchased MUA services on a Job Order together. Completing the assignment credits each purchased service to the performing artist. In **Analytics & Overview → MUA Performance Analytics**, **Performance** counts completed services and **Earnings** shows their saved charges after discounts for the selected Asia/Manila date.
+
+In **Packages & Add-ons**, enable **This is an MUA Service** on a standalone **Other Payment — MUA** item. Once completed, each service earns its saved sale price, less its proportional share of any MUA category discount. Orders with an unverified MUA price need manual review. A legacy portrait bundle can keep its queue requirement while the earnings audit awaits a verified allocation.
+
+In **Earnings**, select the artist and use **Record earnings adjustment** on the relevant completion. Choose the refund or void from that order and enter the verified reduction, or enter zero to record that the event was unrelated to the service. Use **Verified service correction** for other documented corrections, including discounts entered after completion. The audit retains the original earnings, each change, its reason, the recorded date, and the administrator.
 
 
 * **How the figures are counted** (cards, school / package lists and the Audit Export all use the same rules):

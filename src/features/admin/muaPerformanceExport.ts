@@ -16,13 +16,14 @@ export async function buildMuaWorkbook(report: MuaPerformanceReport, tab: 'perfo
   const { default: { Workbook } } = await import('exceljs');
   const { headers, rows, total } = tab === 'earnings' ? muaEarningsTable(report) : muaReportTable(report);
   const workbook = new Workbook();
-  const sheet = workbook.addWorksheet('MUA Performance', {
+  const sheet = workbook.addWorksheet(tab === 'earnings' ? 'MUA Earnings' : 'MUA Performance', {
     views: [{ state: 'frozen', xSplit: 2, ySplit: 1 }],
     properties: { tabColor: { argb: 'FFC9A227' } },
   });
   sheet.columns = headers.map((name, index) => ({
     header: name,
     width: index === 0 ? 14 : index === 1 ? 28 : Math.min(34, Math.max(16, name.length + 2)),
+    style: tab === 'earnings' && index > 1 ? { numFmt: '"₱"#,##0.00' } : {},
   }));
   for (const row of rows) sheet.addRow(row);
   const footer = sheet.addRow(total);
@@ -37,6 +38,28 @@ export async function buildMuaWorkbook(report: MuaPerformanceReport, tab: 'perfo
     cell.font = { bold: true };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4E7B7' } };
   });
+  if (tab === 'earnings') {
+    const audit = workbook.addWorksheet('Earnings Audit', { views: [{ state: 'frozen', ySplit: 1 }] });
+    const labels = ['Job Order', 'MUA Name', 'Service', 'Quantity', 'Unit Price', 'Original Earnings', 'Net Earnings',
+      'Entry', 'Amount', 'Reference', 'Reason', 'Recorded By', 'Recorded At'];
+    audit.columns = labels.map((name, index) => ({
+      header: name,
+      width: index === 10 ? 54 : Math.max(18, name.length + 2),
+      style: [4, 5, 6, 8].includes(index) ? { numFmt: '"₱"#,##0.00' } : {},
+    }));
+    audit.getRow(1).font = { bold: true };
+    for (const artist of report.rows) for (const item of artist.details) {
+      const { basis, adjustments } = item;
+      const summary = [item.jobOrder, item.artistName, item.serviceName, basis.quantity,
+        basis.unit === undefined ? null : basis.unit / 100, basis.earned / 100, item.earned / 100];
+      audit.addRow([...summary, 'Completion', null, '', item.reviewReason ?? '', item.actorName, item.completedAt]);
+      if (basis.discount) audit.addRow([...summary, 'Discount at completion', -basis.discount.amount / 100,
+        '', basis.discount.reason, basis.discount.by, basis.discount.at]);
+      for (const adjustment of adjustments) audit.addRow([...summary, adjustment.kind,
+        adjustment.amount / 100, adjustment.reference, adjustment.reason, adjustment.by, adjustment.at]);
+      for (const event of item.pendingReview) audit.addRow([...summary, `${event.kind} to review`, event.amount / 100, event.reference]);
+    }
+  }
   return workbook;
 }
 

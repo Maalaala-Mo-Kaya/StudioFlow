@@ -146,8 +146,8 @@ onRecordUpdateRequest(checkCatalogPrice, "packages", "add_ons");
 onRecordValidate((e) => {
   const item = e.record;
   if (item.getBool("default_when_no_mua")) {
-    if (item.getBool("requires_mua")) {
-      throw new BadRequestError("A default for clients without makeup or grooming cannot require MUA service.");
+    if (item.getString("revenue_category") !== "mua") {
+      throw new BadRequestError("The Default Addon Rule is available only for Other Payment — MUA add-ons.");
     }
     for (const kind of ["school", "walkin"]) {
       const pricing = require(__hooks + "/studio_pricing.js");
@@ -165,7 +165,7 @@ routerAdd("GET", "/api/studioflow/registration-catalog", (e) => {
   let catalog;
   e.app.runInTransaction((tx) => {
     const list = (collection, source) => tx.findRecordsByFilter(collection, "is_active = true", "created,id", 0, 0)
-      .map((item) => ({ ...item.publicExport(), requires_mua: !!workflow.serviceRequirement(tx, item, source) }));
+      .map((item) => ({ ...item.publicExport(), requires_mua: !!workflow.serviceRequirement(item, source) }));
     catalog = { packages: list("packages", "package"), addOns: list("add_ons", "add_on") };
   });
   e.response.header().set("Cache-Control", "no-store");
