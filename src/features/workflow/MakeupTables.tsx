@@ -1,13 +1,12 @@
 import { useId, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { DataTable, type DataTableColumn } from '../../components/common/DataTable';
+import { DataTable, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
 import { defaultTableExpansion, type TableExpansion, type TablePage, type TableSort } from '../../components/common/dataTableModel';
 import { makeupLookLabel } from '../../constants/makeupLook';
 import { useWorkflowData } from '../../hooks/useWorkflowData';
 import { formatQueueNumber } from '../../utils/formatters';
 import { makeupStateLabels, requiresConfirmation, type MakeupAssignment } from './makeupAssignment';
 import type { MuaTeam } from './muaTeam';
-import { stationInput, stationToolbar } from './StationLayout';
 
 const serviceSources = {
   package: 'Selected package', add_on: 'Selected add-on', admin: 'Admin correction', legacy: 'Existing job order',
@@ -145,11 +144,11 @@ export function MakeupClientTable({
         expansion={{ value: view.expansion ?? defaultTableExpansion, onChange: (next) => onViewChange({ expansion: next }) }}
         loading={loading} emptyMessage={empty} filtered={filtersActive}
         detailsColumnId={kind === 'assigned' ? 'actions' : undefined}
-        headerClassName="uppercase tracking-wide" tableClassName="min-w-[650px] [&_tr:has(button[aria-expanded=true])]:bg-gold-wash"
+        headerClassName="uppercase tracking-wide" tableClassName="min-w-[650px]"
         toolbar={
-          <div className={stationToolbar}>
+          <div className="flex flex-wrap items-center gap-2 p-2">
             <input type="search" aria-label={`Search ${title.toLowerCase()}`} placeholder="Search job, client, service…" value={query}
-              onChange={(event) => changeFilter({ query: event.target.value })} className={`${stationInput} w-full sm:w-56`} />
+              onChange={(event) => changeFilter({ query: event.target.value })} className={`${tableFilterControl} w-full sm:w-56`} />
             <TableFilter name="Service" value={service} onChange={(next) => changeFilter({ service: next })}
               options={serviceOptions.map((name) => [name, name])} />
             {kind !== 'waiting' && <>
@@ -174,7 +173,7 @@ function TableFilter({ name, value, onChange, options }: {
 }) {
   return (
     <select aria-label={`Filter by ${name.toLowerCase()}`} value={value} onChange={(event) => onChange(event.target.value)}
-      className={`${stationInput} ${value ? 'border-gold bg-gold-wash' : ''}`}>
+      className={`${tableFilterControl} ${value ? 'border-gold bg-gold-wash' : ''}`}>
       <option value="">All {name === 'Status' ? 'statuses' : name.toLowerCase() + 's'}</option>
       {value && !options.some(([id]) => value === id) && <option value={value}>{value}</option>}
       {options.map(([id, label]) => <option value={id} key={id}>{label}</option>)}

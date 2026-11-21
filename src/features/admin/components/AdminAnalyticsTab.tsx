@@ -18,7 +18,7 @@ import { RefundModal, VoidPaymentModal } from './LedgerActionModals';
 import { PrintRefundSlipModal } from './PrintRefundSlipModal';
 import { formatCurrency, formatClientName } from '../../../utils/formatters';
 import { PrintReceiptModal } from '../../cashier/components/PrintReceiptModal';
-import { DataTable } from '../../../components/common/DataTable';
+import { DataTable, tableFilterControl } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { MuaPerformancePanel } from './MuaPerformancePanel';
 import { clientGroup, clientSummary } from '../../../utils/clientInfo';
@@ -271,6 +271,23 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         </div>
       ) },
     ];
+    const refundColumns: DataTableColumn<RefundRecord>[] = [
+      { id: 'date', header: 'Date & Time', cell: (refund) => transactionDate.format(new Date(refund.created.replace(' ', 'T'))) },
+      { id: 'number', header: 'Refund №', accessor: (refund) => refund.refund_no, cellClassName: 'font-bold' },
+      { id: 'method', header: 'Method', accessor: (refund) => refund.method, cellClassName: 'uppercase' },
+      { id: 'amount', header: 'Amount', align: 'right', cellClassName: 'font-bold text-red-700',
+        cell: (refund) => '−' + formatCurrency(refund.amount, { exact: true }) },
+      { id: 'staff', header: 'Given by', accessor: (refund) => refund.refunded_by },
+      { id: 'reason', header: 'Reason', accessor: (refund) => refund.reason, cellClassName: 'max-w-52 whitespace-normal' },
+      { id: 'slip', header: 'Slip', cell: (refund) => <>
+        <button type="button" onClick={() => setSlipTarget({ registration, refund })}
+          title={refund.signature ? 'Reprint the signed refund slip' : 'Have the client sign on screen, then print the refund slip'}
+          className="inline-flex items-center gap-1 border border-line bg-gold px-2 py-1 font-black uppercase cursor-pointer">
+          <Printer className="size-3" /> {refund.signature ? 'Print Slip' : 'Sign / Print'}
+        </button>
+        {refund.signature && <span className="ml-1 text-[9px] font-bold uppercase text-emerald-700">✓ Signed</span>}
+      </> },
+    ];
     return (
       <>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -303,35 +320,9 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         {orderRefunds.length > 0 && (
           <div className="mt-3">
             <div className="mb-1 text-[10px] font-black uppercase tracking-wider">Refunds</div>
-            <table className="w-full text-[10px] border border-line">
-              <thead>
-                <tr className="text-left uppercase">
-                  {['Date & Time', 'Refund №', 'Method', 'Amount', 'Given by', 'Reason', 'Slip'].map((head) => (
-                    <th key={head} className="px-2 py-1 border-b border-line">{head}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {orderRefunds.map((refund) => (
-                  <tr key={refund.id}>
-                    <td className="px-2 py-1">{transactionDate.format(new Date(refund.created.replace(' ', 'T')))}</td>
-                    <td className="px-2 py-1 font-bold">{refund.refund_no}</td>
-                    <td className="px-2 py-1 uppercase">{refund.method}</td>
-                    <td className="px-2 py-1 font-bold text-red-700">−{formatCurrency(refund.amount, { exact: true })}</td>
-                    <td className="px-2 py-1">{refund.refunded_by}</td>
-                    <td className="px-2 py-1 whitespace-normal">{refund.reason}</td>
-                    <td className="px-2 py-1">
-                      <button type="button" onClick={() => setSlipTarget({ registration, refund })}
-                        title={refund.signature ? 'Reprint the signed refund slip' : 'Have the client sign on screen, then print the refund slip'}
-                        className="inline-flex items-center gap-1 border border-line bg-gold px-2 py-1 font-black uppercase cursor-pointer">
-                        <Printer className="size-3" /> {refund.signature ? 'Print Slip' : 'Sign / Print'}
-                      </button>
-                      {refund.signature && <span className="ml-1 text-[9px] font-bold uppercase text-emerald-700">✓ Signed</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable label={`Refunds for JO № ${registration.job_order_no}`} rows={orderRefunds} columns={refundColumns}
+              getRowId={(refund) => refund.id} pagination={false} className="border! shadow-none!"
+              tableClassName="whitespace-nowrap text-[10px]!" headerClassName="uppercase" />
           </div>
         )}
       </>
@@ -580,16 +571,17 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
 
             <div className="flex flex-wrap gap-2 items-center text-xs font-mono">
               <input
-                type="text"
+                type="search"
+                aria-label="Search financial ledger"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search student or JO №..."
-                className="p-1.5 bg-canvas border border-line font-mono text-xs"
+                className={tableFilterControl}
               />
               <select
-                value={filterSchool}
+                aria-label="Filter ledger by school" value={filterSchool}
                 onChange={(e) => setFilterSchool(e.target.value)}
-                className="p-1.5 bg-canvas border border-line font-mono text-xs uppercase"
+                className={tableFilterControl}
               >
                 <option value="all">All Schools</option>
                 {organizations.map((org) => (
@@ -597,9 +589,9 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                 ))}
               </select>
               <select
-                value={filterPaymentStatus}
+                aria-label="Filter ledger by balance" value={filterPaymentStatus}
                 onChange={(e) => setFilterPaymentStatus(e.target.value)}
-                className="p-1.5 bg-canvas border border-line font-mono text-xs uppercase"
+                className={tableFilterControl}
               >
                 <option value="all">All Balances</option>
                 <option value="has_balance">With Outstanding Balance</option>

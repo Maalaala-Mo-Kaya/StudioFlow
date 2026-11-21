@@ -5,10 +5,11 @@ import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
 import { studioDate } from '../../utils/studioDay';
-import { DataTable, type DataTableColumn } from '../../components/common/DataTable';
+import { DataTable, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
+import { TablePagination } from '../../components/common/TablePagination';
 import { defaultTableExpansion, type TableExpansion } from '../../components/common/dataTableModel';
 import { StationTabs } from './StationTabs';
-import { stationButton, stationCard, stationInput, StationLayout, StationStudentDetails, type StationStudent } from './StationLayout';
+import { stationButton, stationCard, StationLayout, StationStudentDetails, type StationStudent } from './StationLayout';
 
 const availability = {
   available: 'Photos available',
@@ -138,7 +139,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
             filteredEmptyMessage="No photographed clients match the current filters."
             emptyMessage={done === 'not_selected' ? 'No photographed clients are waiting for photo selection.'
               : done === 'selected' ? 'No completed photo selections.' : 'No photographed clients found.'}
-            headerClassName="uppercase tracking-wide" tableClassName="min-w-[720px] [&_tr:has(button[aria-expanded=true])]:bg-gold-wash"
+            headerClassName="uppercase tracking-wide" tableClassName="min-w-[720px]"
             expansion={{ value: expansions[done] ?? defaultTableExpansion,
               onChange: (next) => setExpansions((current) => ({ ...current, [done]: next })) }}
             renderExpanded={(student) => (
@@ -156,18 +157,18 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             )}
             toolbar={
-              <div className="space-y-2 border-b border-line p-2">
+              <div className="space-y-2 p-2">
                 {/* Search + school / course (advanced filter) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 items-end">
                   <label className="block sm:col-span-2 lg:col-span-4">
                     <span className="mb-1 block text-[11px] font-bold uppercase">Search all clients</span>
                     <input type="search" value={search} onChange={(event) => change(setSearch)(event.target.value)}
                       placeholder="Name, student ID, job order, school, course, company or session"
-                      className={`${stationInput} w-full`} />
+                      className={`${tableFilterControl} w-full`} />
                   </label>
                   <label className="block lg:col-span-3">
                     <span className="mb-1 block text-[11px] font-bold uppercase">School / client type</span>
-                    <select className={`${stationInput} w-full`} value={school}
+                    <select className={`${tableFilterControl} w-full`} value={school}
                       onChange={(event) => { setSchool(event.target.value); setCourse(''); setPages({}); }}>
                       <option value="">All schools &amp; clients</option>
                       {schools.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.clients})</option>)}
@@ -176,7 +177,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
                   <label className="block lg:col-span-2">
                     <span className="mb-1 block text-[11px] font-bold uppercase">{chosenSchool?.walkin ? 'Session' : 'Course'}</span>
                     <select aria-label={chosenSchool?.walkin ? 'Session' : 'Course'}
-                      className={`${stationInput} w-full disabled:opacity-50`} value={course}
+                      className={`${tableFilterControl} w-full disabled:opacity-50`} value={course}
                       disabled={!chosenSchool} onChange={(event) => change(setCourse)(event.target.value)}>
                       <option value="">{chosenSchool ? `All ${chosenSchool.walkin ? 'sessions' : 'courses'}` : 'Choose a school first'}</option>
                       {chosenSchool?.courses.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.clients})</option>)}
@@ -185,7 +186,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
                   <div className="block sm:col-span-2 lg:col-span-3">
                     <label htmlFor="chooser-day" className="mb-1 block text-[11px] font-bold uppercase">Job order created</label>
                     <div className="flex flex-wrap gap-2">
-                      <select id="chooser-day" className={`${stationInput} flex-1`} value={dayMode}
+                      <select id="chooser-day" className={`${tableFilterControl} flex-1`} value={dayMode}
                         onChange={(event) => change(setDayMode)(event.target.value as typeof dayMode)}>
                         <option value="">All dates</option>
                         <option value="today">Today</option>
@@ -195,7 +196,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
                       {dayMode === 'pick' && (
                         <input type="date" aria-label="Date created" value={pickedDay} max={studioDate()}
                           onChange={(event) => { if (event.target.value) change(setPickedDay)(event.target.value); }}
-                          className={stationInput} />
+                          className={tableFilterControl} />
                       )}
                     </div>
                   </div>
@@ -211,7 +212,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
                 {embedded && (
                   <label className="block max-w-xs">
                     <span className="mb-1 block text-[11px] font-bold uppercase">Exact selection status</span>
-                    <select className={`${stationInput} w-full`} value={filter}
+                    <select className={`${tableFilterControl} w-full`} value={filter}
                       onChange={(event) => change(setFilter)(event.target.value)}>
                       <option value="">Any status</option>
                       {Object.entries(selectionStates).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -222,11 +223,9 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
             }
           />
           {(page > 1 || data?.hasMore) && (
-            <nav aria-label="Photo Chooser pagination" className="flex flex-wrap items-center justify-end gap-2 border border-line bg-panel p-2 font-mono text-xs">
-              <button type="button" disabled={page <= 1} onClick={() => setPages({ ...pages, [done]: page - 1 })} className={stationButton}>Previous</button>
-              <span aria-live="polite">Page {page}</span>
-              <button type="button" disabled={!data?.hasMore} onClick={() => setPages({ ...pages, [done]: page + 1 })} className={stationButton}>Next</button>
-            </nav>
+            <TablePagination label="Photo Chooser pagination" pageLabel={`Page ${page}`}
+              previous={page > 1 ? () => setPages({ ...pages, [done]: page - 1 }) : undefined}
+              next={data?.hasMore ? () => setPages({ ...pages, [done]: page + 1 }) : undefined} />
           )}
         </StationTabs>
       )}

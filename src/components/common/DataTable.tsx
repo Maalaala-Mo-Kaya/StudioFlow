@@ -1,8 +1,11 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, Key, MouseEvent, ReactNode } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight } from 'lucide-react';
-import { nextTableSort, sortTableRows, tablePageRange, toggleTableRow } from './dataTableModel';
+import { defaultTableExpansion, keepVisibleTableRows, nextTableSort, sortTableRows, tablePageRange, toggleTableMultiExpand, toggleTableRow } from './dataTableModel';
 import type { SortValue, TableExpansion, TablePage, TableSort, TableSortColumn } from './dataTableModel';
+import { TablePagination } from './TablePagination';
+
+export const tableFilterControl = 'min-h-10 min-w-0 max-w-full border border-line bg-panel px-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-gold';
 
 export interface DataTableColumn<Row, Id extends string = string> extends TableSortColumn<Row> {
   id: Id;
@@ -45,7 +48,7 @@ type DataTableProps<Row, Id extends string> = {
   footer?: (visibleColumns: readonly DataTableColumn<Row, Id>[]) => ReactNode;
   onRowClick?: (row: Row) => void;
   renderExpanded?: (row: Row) => ReactNode;
-  /** Enables the Multi-Expand control and lets tabs retain their own expansion state. */
+  /** Optional controlled state for views that retain expansion across tab switches. */
   expansion?: { value: TableExpansion; onChange: (value: TableExpansion) => void };
   /** Place the detail toggle in a specific visible column and display a text label. */
   detailsColumnId?: Id;
@@ -87,8 +90,9 @@ export function DataTable<Row, Id extends string = string>({
   const [localPage, setLocalPage] = useState<TablePage>(() => ({
     page: 1, pageSize: options?.initialPageSize ?? pageSizes[0],
   }));
-  const [localExpansion, setLocalExpansion] = useState<TableExpansion>({ multiple: true, keys: [] });
-  const expandedKeys = expansion?.value.keys ?? localExpansion.keys;
+  const [localExpansion, setLocalExpansion] = useState(defaultTableExpansion);
+  const expansionState = expansion?.value ?? localExpansion;
+  const setExpansion = expansion?.onChange ?? setLocalExpansion;
   const sort = sorting ? sorting.value : localSort;
   const pageState = options?.value ?? localPage;
   const total = mode === 'server' ? (totalItems ?? 0) : rows.length;
@@ -104,11 +108,10 @@ export function DataTable<Row, Id extends string = string>({
   [ordered, mode, pagination, range.offset, pageState.pageSize]);
 
   useEffect(() => {
-    if (loading || !expansion?.value.keys.length) return;
-    const visibleKeys = new Set(paged.map(getRowId));
-    const keys = expansion.value.keys.filter((key) => visibleKeys.has(key));
-    if (keys.length !== expansion.value.keys.length) expansion.onChange({ ...expansion.value, keys });
-  }, [expansion, getRowId, loading, paged]);
+    if (loading || !expansionState.keys.length) return;
+    const next = keepVisibleTableRows(expansionState, new Set(paged.map(getRowId)));
+    if (next !== expansionState) setExpansion(next);
+  }, [expansionState, getRowId, loading, paged, setExpansion]);
 
   const onPageChange = options?.onChange;
   useEffect(() => {
@@ -135,10 +138,7 @@ export function DataTable<Row, Id extends string = string>({
   }
 
   function activateRow(row: Row, key: Key) {
-    if (renderExpanded) {
-      if (expansion) expansion.onChange(toggleTableRow(expansion.value, key));
-      else setLocalExpansion((current) => toggleTableRow(current, key));
-    }
+    if (renderExpanded) setExpansion(toggleTableRow(expansionState, key));
     onRowClick?.(row);
   }
 
@@ -146,22 +146,19 @@ export function DataTable<Row, Id extends string = string>({
   const message = loading ? loadingMessage : filtered ? filteredEmptyMessage : emptyMessage;
   return (
     <div aria-busy={loading || undefined} className={`flex min-w-0 flex-col overflow-hidden border-2 border-line bg-panel shadow-lux ${className}`}>
-      {toolbar}
-      {renderExpanded && expansion && (
-        <div className="flex justify-end border-b border-line px-2 py-1">
-          <button type="button" aria-pressed={expansion.value.multiple} aria-label="Multi-Expand"
-            onClick={() => expansion.onChange({
-              multiple: !expansion.value.multiple,
-              keys: expansion.value.multiple ? expansion.value.keys.slice(-1) : expansion.value.keys,
-            })}
-            className="inline-flex min-h-9 items-center gap-2 border border-line bg-canvas px-2 text-[11px] font-black uppercase text-ink focus-visible:outline-2 focus-visible:outline-gold">
+      {renderExpanded ? (
+        <div className="flex flex-wrap items-end justify-end border-b border-line">
+          {toolbar && <div className="min-w-0 grow basis-[min(100%,34rem)]">{toolbar}</div>}
+          <button type="button" aria-pressed={expansionState.multiple} aria-label="Multi-Expand"
+            onClick={() => setExpansion(toggleTableMultiExpand(expansionState))}
+            className="m-2 ml-auto inline-flex min-h-9 shrink-0 items-center gap-2 border border-line bg-canvas px-2 text-[11px] font-black uppercase text-ink focus-visible:outline-2 focus-visible:outline-gold">
             Multi-Expand
             <span aria-hidden="true" className={`px-1.5 py-0.5 font-mono ${
-              expansion.value.multiple ? 'bg-gold text-on-gold' : 'bg-obsidian text-gold'
-            }`}>{expansion.value.multiple ? 'On' : 'Off'}</span>
+              expansionState.multiple ? 'bg-gold text-on-gold' : 'bg-obsidian text-gold'
+            }`}>{expansionState.multiple ? 'On' : 'Off'}</span>
           </button>
         </div>
-      )}
+      ) : toolbar}
       <div ref={viewport} role="region" aria-label={label} tabIndex={0}
         className={`@container min-h-0 min-w-0 overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold ${renderCompactRow ? 'hidden md:block' : ''} ${viewportClassName}`}>
         <table aria-label={label} className={`w-full border-separate border-spacing-0 text-left text-xs ${tableClassName}`}>
@@ -193,12 +190,12 @@ export function DataTable<Row, Id extends string = string>({
               </td></tr>
             ) : paged.map((row) => {
               const key = getRowId(row);
-              const isOpen = expandedKeys.includes(key);
+              const isOpen = expansionState.keys.includes(key);
               const detailId = `${id}-${encodeURIComponent(String(key))}`;
               const Chevron = isOpen ? ChevronDown : ChevronRight;
               return (
                 <Fragment key={key}>
-                  <tr className={`${interactive ? 'cursor-pointer' : ''} ${rowClassName?.(row) ?? 'hover:bg-canvas'}`}
+                  <tr className={`${interactive ? 'cursor-pointer' : ''} ${isOpen ? 'bg-gold-wash' : ''} ${rowClassName?.(row) ?? 'hover:bg-canvas'}`}
                     onClick={interactive ? (event) => { if (!clickedControl(event)) activateRow(row, key); } : undefined}>
                     {visible.map((column) => (
                       <td key={column.id} className={`border-b border-neutral-200 px-3 py-2 ${alignment[column.align ?? 'left']} ${column.cellClassName ?? ''}`}>
@@ -223,7 +220,7 @@ export function DataTable<Row, Id extends string = string>({
                   </tr>
                   {isOpen && renderExpanded && (
                     <tr id={detailId}><td colSpan={visible.length} className="border-y-2 border-gold bg-canvas p-3">
-                      <div className={`max-w-[calc(100cqw-1.5rem)] ${detailsColumnId || expansion ? 'sticky left-3' : ''}`}>{renderExpanded(row)}</div>
+                      <div className="sticky left-3 max-w-[calc(100cqw-1.5rem)]">{renderExpanded(row)}</div>
                     </td></tr>
                   )}
                 </Fragment>
@@ -240,9 +237,11 @@ export function DataTable<Row, Id extends string = string>({
         </div>
       )}
       {pagination !== false && (
-        <nav aria-label={`${label} pagination`} className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-neutral-300 bg-panel px-3 py-2 font-mono text-[10px]">
-          <span aria-live="polite" className="font-bold text-neutral-600">Showing {range.start}–{range.end} of {total}</span>
-          <div className="flex flex-wrap items-center gap-2">
+        <TablePagination label={`${label} pagination`} pageLabel={`${range.page} / ${range.totalPages}`}
+          summary={`Showing ${range.start}–${range.end} of ${total}`}
+          previous={!loading && range.page > 1 ? () => changePage({ ...pageState, page: range.page - 1 }) : undefined}
+          next={!loading && range.page < range.totalPages ? () => changePage({ ...pageState, page: range.page + 1 }) : undefined}
+          controls={
             <label className="flex items-center gap-1 font-bold uppercase">
               Rows per page
               <select value={pageState.pageSize} disabled={loading}
@@ -251,15 +250,8 @@ export function DataTable<Row, Id extends string = string>({
                 {(pageSizes.includes(pageState.pageSize) ? pageSizes : [...pageSizes, pageState.pageSize]).map((size) => <option key={size} value={size}>{size}</option>)}
               </select>
             </label>
-            <button type="button" aria-label="Previous page" disabled={loading || range.page === 1}
-              onClick={() => changePage({ ...pageState, page: range.page - 1 })}
-              className="min-h-8 border border-line bg-panel px-2 py-1 font-black uppercase focus-visible:outline-2 disabled:opacity-40">Previous</button>
-            <span className="min-w-12 text-center font-black">{range.page} / {range.totalPages}</span>
-            <button type="button" aria-label="Next page" disabled={loading || range.page === range.totalPages}
-              onClick={() => changePage({ ...pageState, page: range.page + 1 })}
-              className="min-h-8 border border-line bg-panel px-2 py-1 font-black uppercase focus-visible:outline-2 disabled:opacity-40">Next</button>
-          </div>
-        </nav>
+          }
+        />
       )}
     </div>
   );

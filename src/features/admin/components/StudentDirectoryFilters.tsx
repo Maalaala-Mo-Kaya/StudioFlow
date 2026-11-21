@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, Filter, Search } from 'lucide-react';
+import { tableFilterControl } from '../../../components/common/DataTable';
 
 type FilterOption = { id: string; label: string };
 
@@ -139,7 +140,7 @@ export function StudentDirectoryFilters<Column extends string, Key extends strin
               placeholder={searchPlaceholder}
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
-              className="min-w-0 w-full pl-9 pr-3 py-2 bg-canvas border border-neutral-400 font-semibold text-xs focus:bg-panel"
+              className={`${tableFilterControl} w-full pl-9 pr-3 font-semibold`}
             />
           </div>
         </div>

@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { UploadCloud, CheckCircle2, AlertCircle, Trash2, Search } from 'lucide-react';
+import { UploadCloud, CheckCircle2, Trash2, Search } from 'lucide-react';
 import type { Organization, MasterListItem } from '../../../types';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
-import { DataTable } from '../../../components/common/DataTable';
+import { DataTable, tableFilterControl } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 
 interface AdminRosterTabProps {
@@ -131,11 +131,25 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
     });
   };
 
+  const rosterColumns: DataTableColumn<MasterListItem>[] = [
+    { id: 'name', header: 'Name', sortable: true, accessor: (item) => item.full_name, cellClassName: 'font-bold uppercase' },
+    { id: 'student', header: 'Student ID', sortable: true, accessor: (item) => item.student_id },
+    { id: 'section', header: 'Section', sortable: true, accessor: (item) => item.section },
+    { id: 'mobile', header: 'Mobile', accessor: (item) => item.mobile_number },
+    { id: 'actions', header: 'Actions', cell: (item) => (
+      <button type="button" onClick={() => promptDeleteItem(item)}
+        className="min-h-8 min-w-8 border border-line p-1 text-red-700 hover:bg-red-50"
+        aria-label={'Remove roster record for ' + item.full_name} title="Remove Record">
+        <Trash2 className="mx-auto size-3.5" aria-hidden="true" />
+      </button>
+    ) },
+  ];
+
   return (
     <div className="space-y-8 animate-enter font-mono text-xs">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
         {/* Ingestion & Parser */}
-        <div className="bg-panel border-2 border-line shadow-lux p-6 space-y-4">
+        <div className="min-w-0 bg-panel border-2 border-line shadow-lux p-6 space-y-4">
           <div className="pb-3 border-b-2 border-line flex items-center justify-between">
             <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink flex items-center gap-2">
               <UploadCloud className="w-4 h-4 text-gold" />
@@ -213,7 +227,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
         </div>
 
         {/* SECTION 2: ROSTER DIRECTORY & SEARCH */}
-        <div className="bg-panel border-2 border-line shadow-lux p-6 flex flex-col justify-between">
+        <div className="min-w-0 bg-panel border-2 border-line shadow-lux p-6 flex flex-col justify-between">
           <div className="space-y-4">
             <div className="pb-3 border-b-2 border-line flex items-center justify-between">
               <h3 className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-ink flex items-center gap-2">
@@ -236,50 +250,18 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
               </div>
             </div>
 
-            {/* Search Input */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-neutral-400" />
-              <input
-                type="text"
-                value={searchRoster}
-                onChange={(e) => setSearchRoster(e.target.value)}
-                placeholder="Search roster by student name, ID, or section..."
-                className="w-full pl-8 p-2 bg-canvas border border-line text-xs"
-              />
-            </div>
-
-            {/* Master List Records Table */}
-            <div className="max-h-[380px] overflow-y-auto border border-neutral-300 divide-y divide-neutral-200">
-              {orgMasterList.length === 0 ? (
-                <div className="p-8 text-center text-neutral-400">
-                  <AlertCircle className="w-6 h-6 mx-auto mb-2 text-neutral-300" />
-                  No roster entries found for {selectedOrg?.name || 'this school'}.
-                </div>
-              ) : (
-                orgMasterList.map((item) => (
-                  <div key={item.id} className="p-2.5 hover:bg-canvas flex justify-between items-center transition-colors">
-                    <div>
-                      <span className="font-bold text-ink uppercase block text-xs">
-                        {item.full_name}
-                      </span>
-                      <div className="text-[10px] text-neutral-500 mt-0.5 space-x-2">
-                        {item.student_id && <span>ID: {item.student_id}</span>}
-                        {item.section && <span>Sec: {item.section}</span>}
-                        {item.mobile_number && <span>Ph: {item.mobile_number}</span>}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => promptDeleteItem(item)}
-                      className="p-1 text-red-600 hover:bg-red-50 border border-neutral-200 hover:border-red-400 cursor-pointer"
-                      title="Remove Record"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
+            <DataTable label="Master roster records" rows={orgMasterList} columns={rosterColumns}
+              getRowId={(item) => item.id} pagination={false} viewportClassName="max-h-[380px]"
+              tableClassName="min-w-[410px]" headerClassName="uppercase" filtered={Boolean(searchRoster.trim())}
+              emptyMessage={'No roster entries found for ' + (selectedOrg?.name || 'this school') + '.'}
+              toolbar={<div className="relative p-2">
+                <Search aria-hidden="true" className="pointer-events-none absolute left-5 top-1/2 size-3.5 -translate-y-1/2 text-neutral-400" />
+                <input type="search" aria-label="Search roster" value={searchRoster}
+                  onChange={(event) => setSearchRoster(event.target.value)}
+                  placeholder="Search by student name, ID, or section"
+                  className={`${tableFilterControl} w-full pl-8`} />
+              </div>}
+            />
           </div>
 
           <div className="mt-4 pt-3 border-t border-neutral-200 flex justify-between items-center text-neutral-500 text-[10px]">

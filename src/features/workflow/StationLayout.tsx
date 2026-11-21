@@ -15,8 +15,6 @@ export interface StationStudent {
 
 export const stationCard = 'bg-panel border-2 border-line shadow-lux p-4 sm:p-5';
 export const stationButton = 'btn-tactile inline-flex items-center justify-center gap-2 min-h-10 px-3 py-2 border border-line bg-gold text-on-gold font-black text-xs uppercase tracking-wide cursor-pointer disabled:opacity-40 disabled:cursor-default';
-export const stationInput = 'min-h-10 min-w-0 max-w-full border border-line bg-panel px-2 text-sm text-ink';
-export const stationToolbar = 'flex flex-wrap items-center gap-2 border-b border-line p-2';
 
 export function StationLayout({ title, badge, liveLabel, description, refresh, actions, embedded, children }: {
   title: ReactNode;
