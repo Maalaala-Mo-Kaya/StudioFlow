@@ -1596,6 +1596,16 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.ok((await readdir(migratedPath)).includes('Unselected'));
   await assert.rejects(stat(legacyPath), { code: 'ENOENT' });
   assert.match(execFileSync(process.execPath, migrateArgs, { encoding: 'utf8' }), /0 repositories ready/);
+  const orphanLeaf = '999999_Empty_Client';
+  const orphan = join(photos, 'ORGANIZATION', 'COURSE', orphanLeaf);
+  await mkdir(join(orphan, orphanLeaf), { recursive: true });
+  await mkdir(join(orphan, 'Unselected'));
+  const scanner = join(repo, 'scripts', 'clean_orphan_folders.cjs');
+  assert.match(execFileSync(process.execPath, [scanner, '--scan', migrationDb, photos], { encoding: 'utf8' }), /1 empty orphan folders found/);
+  assert.ok((await stat(orphan)).isDirectory());
+  assert.match(execFileSync(process.execPath, [scanner, '--prune', migrationDb, photos], { encoding: 'utf8' }), /1 empty orphan folders removed/);
+  await assert.rejects(stat(orphan), { code: 'ENOENT' });
+  assert.deepEqual(await readFile(join(migratedPath, migratedLeaf, 'kept.png')), png);
   const verifiedDb = new DatabaseSync(migrationDb, { readOnly: true });
   try {
     const migrated = verifiedDb.prepare('SELECT photo_folder, photo_selection FROM registrations WHERE id = ?').get(legacyId);

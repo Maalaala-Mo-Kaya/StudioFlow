@@ -110,7 +110,8 @@ StudioFlow includes pre-built batch scripts to simplify studio operations:
 | **`run.bat --build`** | `.\run.bat --build` | Builds the frontend and deploys it to `pb_public` for single-port serving (`:8090`). |
 | **`scripts\backup.bat`** | Double-click | Creates a timestamped snapshot of the database (`pb_data\`) into `backups\`. |
 | **`scripts\restore.bat`** | Double-click | Restores the database from a previous backup snapshot. |
-| **`scripts\clean_orphans.bat`** | Double-click | Scans and safely prunes empty or cancelled student photo folders on disk. |
+| **`scripts\clean_orphans.bat`** | Double-click | Previews or removes empty client folders that have no matching Job Order or saved binding. |
+| **`scripts\migrate-photo-folders.bat`** | Command Prompt | Previews photo folder renames. Use `--apply` to migrate or `--resume` to continue an interrupted migration. |
 | **`scripts\reset-for-handover.bat`** | Double-click (server closed) | Removes all test data before handover so numbering starts at Job Order 00001 / OR-000001. Backs up first. It can keep the setup (schools, packages, staff) or create a factory-fresh database. |
 
 ---
