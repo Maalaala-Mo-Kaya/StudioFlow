@@ -1425,6 +1425,101 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.deepEqual(retained.totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
   });
 
+  // Admin edits of a job order's package and add-ons at each stage.
+  {
+    const plainPkg = await create('packages', { code: 'EDIT', name: 'Edit Portrait', amount: 1000, is_active: true, revenue_category: 'studio' });
+    const retiredPkg = await create('packages', { code: 'RETIRED', name: 'Retired Portrait', amount: 500, is_active: false, revenue_category: 'studio' });
+    const walkinPkg = await create('packages', { code: 'WALK-ONLY', name: 'Walk-in Portrait', amount: 700, is_active: true, client_kind: 'walkin', revenue_category: 'studio' });
+    const lateMakeup = await create('add_ons', { code: 'LATE-MU', name: 'Late makeup', amount: 200, is_active: true, revenue_category: 'mua', requires_mua: true });
+    const lateGrooming = await create('add_ons', { code: 'LATE-GR', name: 'Late grooming', amount: 150, is_active: true, revenue_category: 'mua', requires_mua: true });
+    const lateFrame = await create('add_ons', { code: 'LATE-FR', name: 'Late frame', amount: 300, is_active: true, revenue_category: 'studio' });
+    const editArtist = await createStaff('editartist', 'mua');
+    const edit = (job, body, status = 200) => registrations(job, admin, body, status).then((r) => r.payload);
+    const ids = (job) => job.add_ons.map((item) => item.id);
+    const doMakeup = async (job) => {
+      const version = String((await queue(admin)).find((row) => row.id === job.id).version);
+      await contest(job, admin, 'assign', 200, { artistId: editArtist.id, version });
+      const next = String(Number(version) + 1);
+      await contest(job, admin, 'start', 200, { onBehalf: true, artistId: editArtist.id, version: next });
+      await contest(job, admin, 'complete', 200, { onBehalf: true, artistId: editArtist.id, version: next });
+    };
+    // Completion logs are superuser-only through the API: read them from the database.
+    const credited = async (job) => {
+      const db = new DatabaseSync(join(data, 'data.db'), { readOnly: true });
+      try {
+        return db.prepare('SELECT service_name FROM mua_completions WHERE job_id = ? ORDER BY completed_at, rowid')
+          .all(job.id).map((row) => row.service_name);
+      } finally { db.close(); }
+    };
+
+    // A changed package must be on sale and offered to the client's type.
+    const basic = await register(plainPkg);
+    assert.match((await edit(basic, { package: retiredPkg.id }, 400)).message, /no longer offered/);
+    assert.match((await edit(basic, { package: walkinPkg.id }, 400)).message, /not offered to school clients/);
+
+    // The automatic add-on follows the order when makeup is added or removed.
+    const autoFee = await create('add_ons', {
+      code: 'AUTO-FEE', name: 'Styling fee', amount: 40, is_active: true, client_kind: 'school',
+      revenue_category: 'mua', default_when_no_mua: true,
+    });
+    const withFee = await register(plainPkg, [], 200, { no_mua_default_quote: autoFee.id + ':4000' });
+    assert.deepEqual([ids(withFee), withFee.total_amount], [[autoFee.id], 1040]);
+    await pay(withFee, 1040);
+    const addedMakeup = await edit(withFee, { add_ons: [{ id: autoFee.id }, { id: lateMakeup.id }] });
+    assert.deepEqual([ids(addedMakeup), addedMakeup.total_amount, addedMakeup.balance, addedMakeup.makeup_service],
+      [[lateMakeup.id], 1200, 160, 'Late makeup'], 'Makeup replaces the automatic add-on.');
+    const removedMakeup = await edit(withFee, { add_ons: [] });
+    assert.deepEqual([ids(removedMakeup), removedMakeup.total_amount, removedMakeup.balance, removedMakeup.makeup_service],
+      [[autoFee.id], 1040, 0, 'Styling fee'], 'Without makeup the automatic add-on (and its service) comes back.');
+    assert.equal(removedMakeup.add_ons[0].auto_applied, true);
+    await patchCatalog('add_ons', autoFee, { is_active: false });
+
+    // Fully paid, mid-shoot, the client asks for makeup: back to the MUA queue, then to the shoot.
+    const midShoot = await register(plainPkg);
+    await pay(midShoot, 1000);
+    await shoot(midShoot, 'shooting');
+    const queueNumber = (await registrations(midShoot)).payload.queue_number;
+    assert.equal((await cameraApi('start', { registration: midShoot.id })).client.id, midShoot.id);
+    await drop('before-makeup.jpg');
+    const sentBack = await edit(midShoot, { add_ons: [{ id: lateMakeup.id }] });
+    assert.deepEqual(
+      [sentBack.status, sentBack.makeup_service, sentBack.makeup_state, sentBack.payment_status, sentBack.balance, sentBack.queue_number],
+      ['paid', 'Late makeup', '', 'downpayment', 200, queueNumber]);
+    assert.equal((await cameraApi('scan')).client, null, 'The camera is unlinked when the client leaves for makeup.');
+    const midFolder = (await send(`${api}/photo-folder/${midShoot.id}`, { method: 'POST', token: photographer })).payload.path;
+    assert.ok((await readdir(midFolder)).includes('before-makeup.jpg'), 'Shots taken before the pause stay with the client.');
+    await shoot(midShoot, 'shooting', 400);
+    assert.ok((await queue(admin)).some((row) => row.id === midShoot.id));
+    await doMakeup(midShoot);
+    assert.deepEqual(await credited(midShoot), ['Late makeup']);
+    await shoot(midShoot, 'shooting');
+
+    // A second round mid-shoot credits only the new service.
+    const secondRound = await edit(midShoot, { add_ons: [{ id: lateMakeup.id }, { id: lateGrooming.id }] });
+    assert.deepEqual([secondRound.status, secondRound.makeup_state, secondRound.makeup_service],
+      ['paid', '', 'Late makeup + Late grooming']);
+    await doMakeup(midShoot);
+    assert.deepEqual(await credited(midShoot), ['Late makeup', 'Late grooming'], 'Earlier makeup is not credited twice.');
+    await shoot(midShoot, 'shooting');
+    await shoot(midShoot, 'done_shooting');
+
+    // After the shoot: no new makeup, but other add-ons still bill the client.
+    const lateTouch = await create('add_ons', { code: 'LATE-TU', name: 'Late touch up', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true });
+    assert.match((await edit(midShoot, { add_ons: [{ id: lateMakeup.id }, { id: lateGrooming.id }, { id: lateTouch.id }] }, 409)).message,
+      /Photos are already done/);
+    const framed = await edit(midShoot, { add_ons: [{ id: lateMakeup.id }, { id: lateGrooming.id }, { id: lateFrame.id }] });
+    assert.deepEqual([framed.status, framed.balance, framed.payment_status], ['done_shooting', 650, 'downpayment']);
+    await pay(midShoot, 650, 'additional');
+
+    // Released and cancelled orders keep their items.
+    await send(api + '/production-status', { method: 'POST', token: admin, body: { ids: [midShoot.id], status: 'ready_for_pickup' } });
+    await registrations(midShoot, cashier, { status: 'released', claimed_by: 'Client' });
+    assert.match((await edit(midShoot, { add_ons: [] }, 400)).message, /already released/);
+    await pay(basic, 1000);
+    await send(`${api}/registrations/${basic.id}/cancel`, { method: 'POST', token: admin, body: { reason: 'Client left' } });
+    assert.match((await edit(basic, { add_ons: [{ id: lateFrame.id }] }, 400)).message, /Restore it/);
+  }
+
   // Both export formats use the same row matrix as the dashboard.
   const { muaReportTable } = await import('../src/features/admin/muaPerformance.ts');
   const { buildMuaWorkbook, muaReportCsv } = await import('../src/features/admin/muaPerformanceExport.ts');

@@ -114,22 +114,55 @@ onRecordUpdateRequest((e) => {
     e.app = tx;
     try {
       const beforePhotography = ["pending_payment", "paid"];
-      const canCorrect = beforePhotography.includes(current.getString("status")) && !current.getBool("shoot_completed");
+      const status = current.getString("status");
+      const canCorrect = beforePhotography.includes(status) && !current.getBool("shoot_completed");
+      // A client in the middle of the shoot can still get makeup: they go back to the MUA queue.
+      const inShoot = status === "shooting" && !current.getBool("shoot_completed");
       if (correction && !canCorrect) throw new ApiError(409, "The MUA requirement can only be corrected before photography starts.");
-      if (canCorrect && (correction || changed("package") || changed("add_ons"))) {
+      if (correction || changed("package") || changed("add_ons")) {
+        // Route makeup from the add-ons as they will be saved (with the automatic add-on adjusted).
+        if (changed("package") || changed("add_ons")) {
+          require(__hooks + "/studio_pricing.js").applyAutoAddOn(tx, e.record,
+            e.record.getString("client_kind") === "walkin" ? "walkin" : "school");
+        }
         const saved = workflow.makeupServices(current);
         let services = workflow.purchasedServices(tx, e.record, current);
         if (correction === "waived") services = [];
         if (correction === "required" && !services.length) services = [{ source: "admin", name: "Makeup / grooming" }];
-        if (JSON.stringify(services) !== JSON.stringify(saved)) {
-          if (!beforePhotography.includes(e.record.getString("status"))) {
-            throw new ApiError(409, "Save the MUA correction before changing the queue status.");
+        const serviceKey = (service) => `${service.source}:${service.id || service.name}`;
+        const savedKeys = new Set(saved.map(serviceKey));
+        // Makeup the client asked for. The automatic add-on's service (re-added when makeup is
+        // removed) never pulls a client back to the MUA queue on its own.
+        const added = services.filter((service) => !savedKeys.has(serviceKey(service)) && !service.defaultService);
+        const state = current.getString("makeup_state");
+        if (JSON.stringify(services) === JSON.stringify(saved)) {
+          // No makeup change.
+        } else if (!canCorrect && !inShoot) {
+          // Photos are done (or the order is closed): nothing left to photograph with new makeup.
+          // Services removed after photography keep their record.
+          if (added.length) {
+            throw new ApiError(409, "Photos are already done for this order. Makeup or grooming can only be added before or during the shoot.");
           }
-          const state = current.getString("makeup_state");
+        } else if (inShoot && !added.length) {
+          // Removing makeup mid-shoot changes only the price; what was done stays on record.
+        } else if (state === "completed" && !added.length) {
+          throw new ApiError(409, "Makeup or grooming is already complete for this order.");
+        } else {
+          if (e.record.getString("status") !== status) {
+            throw new ApiError(409, "Save the makeup change before changing the queue status.");
+          }
           if (workflow.activeMakeup.includes(state)) throw new ApiError(409, "Release the active MUA assignment before changing its services.");
-          if (state === "completed") throw new ApiError(409, "Makeup or grooming is already complete for this order.");
           workflow.saveMakeupServices(e.record, services);
           e.record.set("makeup_version", current.getInt("makeup_version") + 1);
+          if (added.length && (state === "completed" || inShoot)) {
+            // New makeup after an earlier round (or during the shoot): back to the MUA queue.
+            // The artist is credited only for the new services (see studio_mua_reporting.logCompletion),
+            // and the client keeps their photo queue number for when they return.
+            e.record.set("makeup_state", "");
+            e.record.set("makeup_artist", "");
+            e.record.set("makeup_completed_at", "");
+            if (inShoot) e.record.set("status", "paid");
+          }
           require(__hooks + "/studio_numbering.js").handoffToPhotography(tx, e.record);
         }
       }

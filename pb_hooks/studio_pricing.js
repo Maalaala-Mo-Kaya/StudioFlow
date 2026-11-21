@@ -99,4 +99,26 @@ function priceAddOns(app, selections, previous = [], clientKind = "school") {
   });
 }
 
-module.exports = { addOnCents, cents, defaultAddOns, offeredTo, packageInclusions, priceAddOns, savedAddOns, snapshotAddOn, snapshotPackage };
+/**
+ * The automatic add-on (the default for clients without makeup or grooming) follows an edited order:
+ * it is kept or added when the order no longer brings makeup, and dropped when it does.
+ * Works on the order's add-ons as sent (ids) or priced; sets and returns the adjusted list.
+ * Both registration update hooks call it, so the result doesn't depend on which hook runs first.
+ */
+function applyAutoAddOn(app, record, clientKind) {
+  const items = savedAddOns(record);
+  const [defaultAddOn] = defaultAddOns(app, clientKind);
+  const isAuto = (item) => item?.auto_applied || (defaultAddOn && item?.id === defaultAddOn.id);
+  const kept = items.filter((item) => !isAuto(item));
+  record.set("add_ons", kept);
+  const bringsMakeup = require(__hooks + "/studio_workflow.js").purchasedServices(app, record).length > 0;
+  if (!bringsMakeup && defaultAddOn) {
+    // Already on the order: keep the price it was sold at.
+    const sold = items.find((item) => item?.id === defaultAddOn.id && Number.isFinite(item.amount));
+    kept.push(sold ? { ...sold, auto_applied: true } : { ...snapshotAddOn(defaultAddOn), auto_applied: true });
+    record.set("add_ons", kept);
+  }
+  return kept;
+}
+
+module.exports = { addOnCents, applyAutoAddOn, cents, defaultAddOns, offeredTo, packageInclusions, priceAddOns, savedAddOns, snapshotAddOn, snapshotPackage };

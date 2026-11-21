@@ -65,29 +65,52 @@ onRecordUpdateRequest((e) => {
   if (feesChanged && !isAdmin) throw new ForbiddenError("Only administrators can change other fees.");
   if (fees < 0) throw new BadRequestError("Other fees can't be negative.");
 
+  const clientKind = e.record.getString("client_kind") === "walkin" ? "walkin" : "school";
+  const packageId = e.record.getString("package");
+  const packageChanged = Boolean(packageId) && packageId !== original.getString("package");
   // Add-ons: admin only. Ones already on the order keep their price; new ones come from the catalog.
   const previousAddOns = pricing.savedAddOns(original);
   let addOns = previousAddOns;
-  let addOnsChanged = false;
-  if ("add_ons" in (e.requestInfo().body || {})) {
+  const addOnsSent = "add_ons" in (e.requestInfo().body || {});
+  if (addOnsSent) {
     let selections;
     try { selections = JSON.parse(e.record.getString("add_ons") || "null") ?? []; } catch (_) { throw new BadRequestError("Invalid add-on selection."); }
-    addOns = pricing.priceAddOns(e.app, selections, previousAddOns, e.record.getString("client_kind") === "walkin" ? "walkin" : "school");
-    // Changed = a different set of add-ons or prices (resending the same list is not a change).
-    const key = (items) => JSON.stringify(items.map((item) => [item.id ?? item.name, pricing.cents(item.amount)]));
+    addOns = pricing.priceAddOns(e.app, selections, previousAddOns, clientKind);
+  }
+  // Changed = a different set of add-ons or prices (resending the same list is not a change).
+  const key = (items) => JSON.stringify(items.map((item) => [item.id ?? item.name, pricing.cents(item.amount)]));
+  let addOnsChanged = key(addOns) !== key(previousAddOns);
+  if (addOnsChanged && !isAdmin) throw new ForbiddenError("Only administrators can change add-ons.");
+
+  // A released order is closed, and a cancelled one owes nothing until it is restored.
+  const status = original.getString("status");
+  if ((packageChanged || addOnsChanged || feesChanged) && ["released", "cancelled"].includes(status)) {
+    throw new BadRequestError(status === "released"
+      ? "This order was already released, so its package, add-ons and fees can't change."
+      : "This order is cancelled. Restore it before changing its package, add-ons or fees.");
+  }
+  // A new package must be on sale and offered to this type of client (the same rule as the kiosk).
+  const pkg = packageChanged ? e.app.findRecordById("packages", packageId) : null;
+  if (pkg && !pkg.getBool("is_active")) {
+    throw new BadRequestError(`"${pkg.getString("name")}" is no longer offered. Choose an active package.`);
+  }
+  if (pkg && ![clientKind, "both"].includes(pkg.getString("client_kind") || "school")) {
+    throw new BadRequestError(`"${pkg.getString("name")}" is not offered to ${clientKind === "walkin" ? "walk-in" : "school"} clients.`);
+  }
+
+  // The automatic add-on follows the edited order (see studio_pricing.applyAutoAddOn).
+  if (packageChanged || addOnsChanged) {
+    e.record.set("add_ons", addOns);
+    addOns = pricing.applyAutoAddOn(e.app, e.record, clientKind);
     addOnsChanged = key(addOns) !== key(previousAddOns);
   }
-  if (addOnsChanged && !isAdmin) throw new ForbiddenError("Only administrators can change add-ons.");
   // Unchanged: keep exactly what was saved (older records may carry extra fields such as quantity).
   e.record.set("add_ons", addOnsChanged ? addOns : original.get("add_ons"));
 
-  const packageId = e.record.getString("package");
-  const packageChanged = Boolean(packageId) && packageId !== original.getString("package");
   const originalDiscount = require(__hooks + "/studio_workflow.js").json(original, "revenue_discount");
   const subtotal = cents(original.getFloat("total_amount")) + (originalDiscount?.studio || 0) + (originalDiscount?.mua || 0);
   let total = subtotal;
-  if (packageChanged) {
-    const pkg = e.app.findRecordById("packages", packageId);
+  if (pkg) {
     const base = pkg.getFloat("amount");
     e.record.set("package_snapshot", pricing.snapshotPackage(pkg));
     total = cents(base) + pricing.addOnCents(addOns) + fees;
