@@ -89,6 +89,8 @@ export const RegisterPage: React.FC = () => {
               onGivenNameChange={form.setGivenName}
               middleName={form.middleName}
               onMiddleNameChange={form.setMiddleName}
+              gender={form.gender}
+              onGenderChange={form.setGender}
               studentId={form.studentId}
               onStudentIdChange={form.setStudentId}
               organizations={form.organizations}

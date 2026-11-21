@@ -10,6 +10,7 @@ import type {
   RegistrationStatus,
   FramingStatus,
   PhotoStatus,
+  Gender,
 } from '../../../types';
 import { formatCurrency } from '../../../utils/formatters';
 import { getRegistrationAddOns, sumAddOnAmounts } from '../../../utils/registrationAddOns';
@@ -50,6 +51,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [givenName, setGivenName] = useState(reg.given_name || '');
   const [familyName, setFamilyName] = useState(reg.family_name || '');
   const [middleName, setMiddleName] = useState(reg.middle_name || '');
+  const [gender, setGender] = useState<Gender | ''>(reg.gender || '');
   const [studentId, setStudentId] = useState(reg.student_id || '');
   const [section, setSection] = useState(reg.section || '');
   const [mobileNumber, setMobileNumber] = useState(reg.mobile_number || '');
@@ -157,6 +159,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
         given_name: givenName.trim(),
         family_name: familyName.trim(),
         middle_name: middleName.trim(),
+        gender: gender || undefined,
         mobile_number: mobileNumber.trim(),
         email: email.trim(),
         ...(walkIn ? {
@@ -273,6 +276,15 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 className="w-full p-2 bg-panel border border-line uppercase"
               />
             </div>
+            <div>
+              <label htmlFor="edit-student-gender" className="block font-black uppercase text-ink mb-1">Gender</label>
+              <select id="edit-student-gender" value={gender} onChange={(e) => setGender(e.target.value as Gender | '')}
+                className="w-full p-2 bg-panel border border-line">
+                <option value="">Unset (legacy record)</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
           </div>
 
           {/* Row 2: Identifiers & Contact */}
@@ -303,7 +315,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
             </>}
             <div>
               <label htmlFor="edit-student-mobile" className="block font-black uppercase text-ink mb-1">
-                Mobile Number <span className="font-normal text-neutral-500">(Optional)</span>
+                Mobile Number <span className="text-red-600">*</span>
               </label>
               <input
                 id="edit-student-mobile"
@@ -315,7 +327,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
             </div>
             <div>
               <label className="block font-black uppercase text-ink mb-1">
-                Email Address
+                Email Address <span className="font-normal text-neutral-500">(Optional)</span>
               </label>
               <input
                 type="email"

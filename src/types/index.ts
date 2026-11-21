@@ -118,6 +118,7 @@ export interface StudioSettings {
 }
 
 export type RevenueCategory = 'studio' | 'mua';
+export type Gender = 'male' | 'female';
 
 /** Centavos, as saved on a job order. */
 export interface RevenueSplit {
@@ -185,6 +186,7 @@ export interface Registration {
   queue_number: number | null;
   family_name: string;
   given_name: string;
+  gender?: Gender | '';
   middle_name?: string;
   student_id?: string;
   /** Empty on older records = school. */
@@ -210,7 +212,7 @@ export interface Registration {
   other_fees?: number;
   revenue_terms?: RevenueSplit | null;
   revenue_review?: { mua: number; reason: string; by: string; at: string } | null;
-  revenue_discount?: { studio: number; mua: number; reason: string; by: string; at: string } | null;
+  revenue_discount?: { studio: number; mua: number; percentage?: number; reason: string; by: string; byId?: string; at: string } | null;
   total_amount: number;
   paid_amount: number;
   balance: number;

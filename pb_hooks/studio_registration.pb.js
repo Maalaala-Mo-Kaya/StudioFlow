@@ -97,7 +97,7 @@ onRecordUpdateRequest((e) => {
       }
       if (role === "cashier" && next !== "released") throw new ForbiddenError("Only deliverable release is available at this station.");
       if (role === "photographer" && current === "paid"
-        && (!before.getInt("queue_number") || before.getFloat("paid_amount") <= 0 || (before.getString("makeup_service") && before.getString("makeup_state") !== "completed"))) {
+        && (!before.getInt("queue_number") || !require(__hooks + "/studio_workflow.js").paymentEligible(before) || (before.getString("makeup_service") && before.getString("makeup_state") !== "completed"))) {
         throw new BadRequestError("The student is still waiting for payment or makeup / grooming.");
       }
     }

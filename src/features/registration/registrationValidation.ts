@@ -1,11 +1,16 @@
 export const registrationFields = [
-  'client_kind', 'family_name', 'given_name', 'organization', 'level', 'course',
-  'session_type', 'event_date', 'event_venue', 'mobile_number',
-  'email', 'package', 'makeup_look', 'makeup_look_note', 'terms_accepted', 'signature',
+  'client_kind', 'family_name', 'given_name', 'gender', 'organization', 'level', 'course',
+  'session_type', 'event_date', 'event_venue', 'email',
+  'mobile_number', 'package', 'makeup_look', 'makeup_look_note', 'terms_accepted', 'signature',
 ] as const;
 
 type RegistrationField = typeof registrationFields[number];
 export type RegistrationErrors = Partial<Record<RegistrationField, string>>;
+
+export const genderOptions = [
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+] as const;
 
 export const packageRequiredMessage = 'Please select a Job Order Package to continue.';
 

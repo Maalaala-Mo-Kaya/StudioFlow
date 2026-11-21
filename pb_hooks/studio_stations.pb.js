@@ -10,7 +10,7 @@ routerAdd("GET", "/api/studioflow/makeup", (e) => {
   const team = require(__hooks + "/studio_mua_team.js");
   const account = workflow.staff(e.app, e.auth, ["admin", "mua"]);
   const perms = team.permissions(team.settings(e.app), account);
-  const waiting = "status = 'paid' && paid_amount > 0 && makeup_service != '' && makeup_state = ''";
+  const waiting = "status = 'paid' && " + workflow.paymentFilter + " && makeup_service != '' && makeup_state = ''";
   const assigned = "(makeup_state = 'claimed' || makeup_state = 'in_progress')";
   const showCompleted = !perms.canClaim || e.request.url.query().get("completed") === "1";
   const personal = `makeup_artist = {:artist} && ((${assigned} && status != 'cancelled')${showCompleted ? " || makeup_state = 'completed'" : ""})`;
@@ -33,7 +33,7 @@ routerAdd("GET", "/api/studioflow/makeup", (e) => {
       artistId,
       artistName: artist?.getString("name") || artist?.getString("username") || artistId,
       completedAt: record.getString("makeup_completed_at"),
-      eligible: record.getString("status") === "paid" && record.getFloat("paid_amount") > 0 && !!record.getString("makeup_service"),
+      eligible: record.getString("status") === "paid" && workflow.paymentEligible(record) && !!record.getString("makeup_service"),
     };
   }));
 }, $apis.requireAuth("users"));
@@ -61,7 +61,7 @@ routerAdd("POST", "/api/studioflow/makeup/{id}/{action}", (e) => {
     const state = record.getString("makeup_state");
     const artistId = record.getString("makeup_artist");
     const version = record.getInt("makeup_version");
-    const eligible = record.getString("status") === "paid" && record.getFloat("paid_amount") > 0 && !!record.getString("makeup_service");
+    const eligible = record.getString("status") === "paid" && workflow.paymentEligible(record) && !!record.getString("makeup_service");
     if (action === "assign") {
       const target = team.availableArtist(tx, input.artistId);
       if (!target) throw new BadRequestError("Select an enabled MUA account.");

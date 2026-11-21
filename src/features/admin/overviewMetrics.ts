@@ -9,8 +9,9 @@ export interface OverviewMetrics {
   totalPaidShooting: number;
   /** Photographed, whatever happened after (production, ready, released). */
   totalCompleted: number;
-  /** Net collections: payments received (voided excluded) minus refunds given. */
+  /** Operational settlement: net payments plus discount credits. */
   totalCollections: number;
+  totalDiscountCredits: number;
   /** Payments received, before refunds. */
   totalReceived: number;
   /** Refunds given. */
@@ -37,7 +38,8 @@ export function overviewMetrics(
     totalRegistrations: audit.totals.activeOrders,
     totalPaidShooting: active.filter((reg) => reg.status === 'paid' || reg.status === 'shooting').length,
     totalCompleted: active.filter(isPhotographed).length,
-    totalCollections: audit.totals.netCollections,
+    totalCollections: audit.totals.analyticsCollected,
+    totalDiscountCredits: audit.totals.discountCredits,
     totalReceived: audit.totals.collections,
     totalRefunds: audit.totals.refunds,
     totalRefundDue: audit.totals.overpaid,

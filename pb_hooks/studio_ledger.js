@@ -33,7 +33,9 @@ function applyTotals(registration, totals) {
   registration.set("refunded_amount", totals.refunded / 100);
   // A cancelled job order owes nothing; Restore recalculates the real balance.
   registration.set("balance", registration.getString("status") === "cancelled" ? 0 : totals.balance / 100);
-  registration.set("payment_status", totals.net <= 0 ? "unpaid" : totals.balance === 0 ? "fully_paid" : "downpayment");
+  const credit = require(__hooks + "/studio_workflow.js").json(registration, "revenue_discount");
+  const settled = totals.net + (credit?.studio || 0) + (credit?.mua || 0);
+  registration.set("payment_status", settled <= 0 ? "unpaid" : totals.balance === 0 ? "fully_paid" : "downpayment");
 }
 
 /** Next number in a sequence such as OR-000123 or RF-000004. */

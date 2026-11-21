@@ -1,4 +1,5 @@
 import type { jsPDF } from 'jspdf';
+import { discountCents } from '../../utils/revenue';
 import type { PaymentRecord, RefundRecord, Registration } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { pb } from '../../db/pocketbase';
@@ -219,12 +220,13 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   // A cancelled order has one more line (money held by the studio), so its box is taller.
   const extra = cancelled ? 0.2 : 0;
   box(doc, bx, y, totalsW, 0.92 + extra, 1.5);
-  const settled = reg.balance <= 0 && reg.paid_amount > 0;
+  const credit = cancelled ? 0 : discountCents(reg) / 100;
+  const settled = reg.balance <= 0 && reg.paid_amount + credit > 0;
   const line = (label: string, value: string, ly: number, size: number, color: RGB = INK) => {
     put(doc, label, bx + 0.07, ly, { size: 5.5, bold: true, color: [85, 85, 85] });
     put(doc, value, right - 0.07, ly, { size, bold: true, mono: true, color, align: 'right' });
   };
-  line('TOTAL BILLED', php(reg.total_amount), y + 0.15, 8);
+  line('ORIGINAL BILLED', php(reg.total_amount + discountCents(reg) / 100), y + 0.15, 8);
   put(doc, receiptRevenueLine(data, undefined, false), x, y - 0.035, { size: 5.5, color: GREY, width: tableW });
   // paid_amount is net of refunds; show the refund on its own line so the figures add up.
   // (Plain "-": the built-in PDF fonts have no minus sign.)
@@ -232,8 +234,9 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
     line('LESS REFUNDS', '-' + php(reg.refunded_amount), y + 0.25, 7);
     line('NET PAID', php(reg.paid_amount), y + 0.345, 7, GREEN);
   } else {
-    line('AMOUNT PAID', php(reg.paid_amount), y + 0.3, 8, GREEN);
+    line('PAYMENTS RECEIVED', php(reg.paid_amount), y + 0.3, 8, GREEN);
   }
+  if (credit > 0) line('TOTAL SETTLED', php(reg.paid_amount + credit), y + 0.40, 7);
   line('BALANCE', php(reg.balance), y + 0.48, 10, reg.balance > 0 ? RED : INK);
   // A cancelled order owes nothing; show what the studio still holds (refundable up to this).
   if (cancelled) {
@@ -242,7 +245,7 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   }
   const marks = jobOrderMarks(reg);
   box(doc, bx + 0.07, y + 0.54 + extra, totalsW - 0.14, 0.16, settled || marks.settlement ? 1.5 : 0.75);
-  put(doc, (marks.settlement ?? (settled ? 'FULLY PAID' : reg.paid_amount > 0 ? 'WITH BALANCE' : 'UNPAID')).toUpperCase(), bx + totalsW / 2, y + 0.655 + extra, {
+  put(doc, (marks.settlement ?? (settled ? 'FULLY SETTLED' : reg.paid_amount + credit > 0 ? 'PARTIAL' : 'UNPAID')).toUpperCase(), bx + totalsW / 2, y + 0.655 + extra, {
     size: 7.5, bold: true, align: 'center',
   });
   const latest = [...payments].reverse().find(isCounted);

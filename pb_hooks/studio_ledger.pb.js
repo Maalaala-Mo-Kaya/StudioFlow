@@ -6,6 +6,48 @@
 // - Cancel: the job order stops (no payments, no queue); money already received stays until refunded.
 // - Restore: returns a cancelled job order to the status it had before it was cancelled.
 
+routerAdd("POST", "/api/studioflow/registrations/{id}/discount", (e) => {
+  const workflow = require(__hooks + "/studio_workflow.js");
+  const ledger = require(__hooks + "/studio_ledger.js");
+  const numbering = require(__hooks + "/studio_numbering.js");
+  const storage = require(__hooks + "/studio_photo_storage.js");
+  const body = e.requestInfo().body || {};
+  if (!Number.isInteger(body.percentage)) throw new BadRequestError("Enter a whole discount percentage.");
+  const saved = workflow.withRegistration(e.app, e.request.pathValue("id"), (tx, reg) => {
+    const actor = workflow.staff(tx, e.auth, ["cashier", "admin"]);
+    const status = reg.getString("status");
+    if (["cancelled", "released"].includes(status)) throw new ApiError(409, "This order is closed.");
+    const previous = workflow.json(reg, "revenue_discount");
+    const reason = body.percentage === 0 ? "Discount removed" : ledger.readReason(body.reason);
+    if ((!previous && body.percentage === 0) ||
+      (previous?.percentage === body.percentage && previous.reason === reason)) return reg;
+    const subtotal = ledger.cents(reg.getFloat("total_amount")) + (previous?.studio || 0) + (previous?.mua || 0);
+    const total = require(__hooks + "/studio_revenue.js").changes(e, reg, subtotal, false, reg,
+      { order_discount: { percentage: body.percentage, reason } });
+    reg.set("total_amount", total / 100);
+    ledger.applyTotals(reg, ledger.ledger(tx, reg));
+    let numbered = false;
+    if (status === "pending_payment" && workflow.paymentEligible(reg)) {
+      reg.set("status", "paid");
+      numbered = numbering.issueJobOrder(tx, reg);
+      reg.set("prepared_by", ledger.actorName(actor));
+    } else if (status === "paid" && !workflow.paymentEligible(reg)) {
+      reg.set("status", "pending_payment");
+      reg.set("queue_number", 0);
+      reg.set("queue_issued_at", "");
+    }
+    numbering.handoffToPhotography(tx, reg);
+    if (numbered) storage.assignFolder(tx, reg, true);
+    tx.save(reg);
+    return reg;
+  });
+  try {
+    if (saved.getString("photo_folder")) storage.provision(saved.getString("photo_folder"));
+  } catch (error) { console.log("Pictorial directory creation notice:", error); }
+  numbering.exposeNumbers(saved);
+  return e.json(200, saved);
+}, $apis.requireAuth("users"));
+
 routerAdd("POST", "/api/studioflow/payments/{id}/void", (e) => {
   const workflow = require(__hooks + "/studio_workflow.js");
   const ledgerRules = require(__hooks + "/studio_ledger.js");
@@ -142,7 +184,8 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/restore", (e) => {
     let target = previous && previous !== "cancelled" && previous !== "released"
       ? previous : totals.net > 0 ? "paid" : "pending_payment";
     // Fully refunded before the shoot: nothing is held any more, so it is waiting for payment again, not Paid.
-    if (target === "paid" && totals.net <= 0) target = "pending_payment";
+    ledgerRules.applyTotals(reg, totals);
+    if (target === "paid" && !workflow.paymentEligible(reg)) target = "pending_payment";
     if (workflow.finishedShoot.includes(target)) reg.set("shoot_completed", true);
     reg.set("status", target);
     reg.set("restored_at", new DateTime());

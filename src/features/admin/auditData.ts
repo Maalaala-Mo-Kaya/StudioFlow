@@ -34,6 +34,8 @@ export interface AuditOrder {
   refunded: number;
   /** Paid − Refunded. */
   net: number;
+  discountCredit: number;
+  operationalCollected: number;
   /** Still unpaid (0 for cancelled orders). */
   balance: number;
   /** Net paid beyond the total: money owed back to the client (refund due). */
@@ -86,6 +88,8 @@ export interface AuditData {
     refunds: number;
     /** Collections − Refunds. */
     netCollections: number;
+    discountCredits: number;
+    analyticsCollected: number;
     revenue: RevenueSplit;
     collectionsOnEarlierOrders: number;
     refundsOnEarlierOrders: number;
@@ -229,11 +233,25 @@ export function buildAudit(
     for (const group of [schoolGroup(row.registration), packageGroup(row.registration)]) {
       if (!row.cancelled) group.count += 1;
       const studio = revenueTerms(row.registration).studio;
-      group.billed += row.cancelled ? row.revenue.studio : studio;
+      group.billed += row.cancelled ? row.revenue.studio : studio + (row.registration.revenue_discount?.studio ?? 0);
       group.balance += row.cancelled ? 0 : Math.max(0, studio - row.revenue.studio);
     }
   }
   const revenue = emptyRevenue();
+  let discountCredits = 0;
+  const orderCredits = new Map<string, number>();
+  for (const reg of registrations) {
+    const discount = reg.revenue_discount;
+    if (!discount || reg.status === 'cancelled' || !inPeriod(discount.at, since)) continue;
+    const unpaid = Math.max(0, cents(reg.total_amount) + discount.studio + discount.mua
+      - (paidById.get(reg.id) ?? 0) + (refundedById.get(reg.id) ?? 0));
+    const studioCredit = Math.min(discount.studio, unpaid);
+    const credit = studioCredit + Math.min(discount.mua, unpaid - studioCredit);
+    orderCredits.set(reg.id, credit);
+    discountCredits += credit;
+    schoolGroup(reg).collected += studioCredit;
+    packageGroup(reg).collected += studioCredit;
+  }
   for (const row of [...countedPayments, ...refundRows]) {
     schoolGroup(row.registration).collected += row.revenue.studio;
     packageGroup(row.registration).collected += row.revenue.studio;
@@ -254,6 +272,8 @@ export function buildAudit(
     orders: orderRows.map((row) => ({
       ...row, total: pesos(row.total), billed: pesos(row.billed), paid: pesos(row.paid), refunded: pesos(row.refunded),
       net: pesos(row.net), balance: pesos(row.balance), overpaid: pesos(row.overpaid),
+      discountCredit: pesos(orderCredits.get(row.registration.id) ?? 0),
+      operationalCollected: pesos(row.net + (orderCredits.get(row.registration.id) ?? 0)),
       revenue: revenuePesos(row.revenue),
     })),
     payments: paymentRows.map((row) => ({ ...row, revenue: revenuePesos(row.revenue) })),
@@ -267,6 +287,8 @@ export function buildAudit(
       collections: pesos(collections),
       refunds: pesos(refundTotal),
       netCollections: pesos(collections - refundTotal),
+      discountCredits: pesos(discountCredits),
+      analyticsCollected: pesos(collections - refundTotal + discountCredits),
       revenue: revenuePesos(revenue),
       collectionsOnEarlierOrders: pesos(collectionsOnEarlierOrders),
       refundsOnEarlierOrders: pesos(refundsOnEarlierOrders),

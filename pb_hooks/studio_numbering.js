@@ -15,7 +15,7 @@ function issueJobOrder(app, record) {
 
 function handoffToPhotography(app, record, timestamp = new Date().toISOString()) {
   if (record.getInt("queue_number") || !record.getString("job_order_no")
-    || record.getString("status") !== "paid" || record.getFloat("paid_amount") <= 0) return;
+    || record.getString("status") !== "paid" || !require(__hooks + "/studio_workflow.js").paymentEligible(record)) return;
   const state = record.getString("makeup_state");
   if (state !== "completed" && (state || record.getString("makeup_service"))) return;
 

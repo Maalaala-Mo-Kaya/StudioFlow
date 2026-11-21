@@ -7,25 +7,25 @@ onRecordCreateRequest((e) => {
     errors[field] = new ValidationError("validation_registration_" + field, message);
   };
 
-  for (const field of ["family_name", "given_name", "middle_name", "section", "department", "email", "mobile_number"]) {
+  for (const field of ["family_name", "given_name", "middle_name", "gender", "section", "department", "email", "mobile_number"]) {
     record.set(field, record.getString(field).trim());
   }
 
   if (!record.getString("family_name")) invalid("family_name", "Enter your family name.");
   if (!record.getString("given_name")) invalid("given_name", "Enter your given name.");
+  if (!["male", "female"].includes(record.getString("gender"))) invalid("gender", "Please select the client's gender.");
 
   // Keep the contact formats in sync with src/features/registration/registrationValidation.ts.
-  // The mobile number is required (the studio contacts clients by SMS); email is optional.
-  const mobile = record.getString("mobile_number");
-  const mobilePattern = /^(?:0|\+?63)9\d{9}$/;
-  if (!mobile) invalid("mobile_number", "Enter your mobile number.");
-  else if (!mobilePattern.test(mobile.replace(/[ -]/g, ""))) {
-    invalid("mobile_number", "Enter a valid Philippine mobile number, such as 0917-000-0000.");
-  }
-
   const email = record.getString("email");
   const emailPattern = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
   if (email && !emailPattern.test(email)) invalid("email", "Enter a valid email address.");
+
+  const mobile = record.getString("mobile_number");
+  const mobilePattern = /^(?:0|\+?63)9\d{9}$/;
+  if (!mobile) invalid("mobile_number", "Mobile number is required.");
+  else if (!mobilePattern.test(mobile.replace(/[ -]/g, ""))) {
+    invalid("mobile_number", "Enter a valid Philippine mobile number, such as 0917-000-0000.");
+  }
 
   // Client type: school/graduation (default) or walk-in. Each must be switched on in Admin.
   const kind = record.getString("client_kind") || "school";
@@ -111,6 +111,30 @@ onRecordCreateRequest((e) => {
   }
 
   if (Object.keys(errors).length) throw new BadRequestError("Check the registration fields and try again.", errors);
+  return e.next();
+}, "registrations");
+
+onRecordUpdateRequest((e) => {
+  const before = e.record.original();
+  const changed = (field) => e.record.getString(field) !== before.getString(field);
+  if (changed("gender") && e.record.getString("gender") && !["male", "female"].includes(e.record.getString("gender"))) {
+    throw new BadRequestError("Gender must be Male or Female.");
+  }
+  if (changed("mobile_number")) {
+    const mobile = e.record.getString("mobile_number").trim();
+    if (!mobile) throw new BadRequestError("Mobile number is required for updated client records.");
+    if (!/^(?:0|\+?63)9\d{9}$/.test(mobile.replace(/[ -]/g, ""))) {
+      throw new BadRequestError("Enter a valid Philippine mobile number, such as 0917-000-0000.");
+    }
+    e.record.set("mobile_number", mobile);
+  }
+  if (changed("email")) {
+    const email = e.record.getString("email").trim();
+    if (email && !/^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(email)) {
+      throw new BadRequestError("Enter a valid email address.");
+    }
+    e.record.set("email", email);
+  }
   return e.next();
 }, "registrations");
 

@@ -5,6 +5,10 @@ import type { Registration } from '../../../types';
 import { PAYMENT_METHOD_OPTIONS } from '../../../constants/studio';
 import { formatClientName, formatCurrency, formatJobOrderNo, formatQueueNumber } from '../../../utils/formatters';
 import { canUseCollectionMode, type CollectionMode } from '../useCashierState';
+import { pb } from '../../../db/pocketbase';
+import { useToast } from '../../../context/ToastContext';
+import { workflowApi, workflowError } from '../../../hooks/useWorkflowData';
+import { discountCents } from '../../../utils/revenue';
 
 interface PaymentModalProps {
   registration: Registration;
@@ -43,15 +47,49 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   cashReceived,
   onCashReceivedChange,
 }) => {
-  const moneyPattern = /^\d+$/;
+  const { toast } = useToast();
+  const [savingDiscount, setSavingDiscount] = React.useState(false);
+  const [percentage, setPercentage] = React.useState(String(Math.round(selectedReg.revenue_discount?.percentage ?? 0)));
+  const [reason, setReason] = React.useState(selectedReg.revenue_discount?.reason ?? '');
+  const currentCreditCents = discountCents(selectedReg);
+  const originalBilledCents = Math.round(selectedReg.total_amount * 100) + currentCreditCents;
+  const eligibleBaseCents = Math.max(0, (selectedReg.revenue_terms?.studio ?? Math.round(selectedReg.total_amount * 100))
+    + (selectedReg.revenue_discount?.studio ?? 0));
+  const percentageNumber = /^\d+$/.test(percentage) ? Number(percentage) : 0;
+  const previewCreditCents = Math.min(Math.round(eligibleBaseCents * percentageNumber / 100),
+    Math.max(0, originalBilledCents - Math.round(selectedReg.paid_amount * 100)));
+  const previewBalanceCents = Math.max(0, originalBilledCents - Math.round(selectedReg.paid_amount * 100) - previewCreditCents);
+  const formattedCredit = previewCreditCents > 0 ? `-${formatCurrency(previewCreditCents / 100)}` : formatCurrency(0);
+  const noEligibleCharges = eligibleBaseCents === 0;
+  React.useEffect(() => {
+    if (paymentType === 'full') onAmountPaidChange(String(previewBalanceCents / 100));
+    if (paymentType === 'initial') onAmountPaidChange(String(Math.min(previewBalanceCents, Math.round(originalBilledCents / 200) * 100) / 100));
+  }, [paymentType, previewBalanceCents, originalBilledCents, onAmountPaidChange]);
+  async function saveDiscount() {
+    setSavingDiscount(true);
+    try {
+      await pb.send(`${workflowApi}/registrations/${selectedReg.id}/discount`, {
+        method: 'POST', body: { percentage: Number(percentage), reason },
+      });
+      toast.success('Discount updated.');
+      onClose();
+    } catch (error) {
+      toast.error(workflowError(error));
+    } finally {
+      setSavingDiscount(false);
+    }
+  }
   const toCentavos = (amount: number) => Math.round(amount * 100);
   const totalCentavos = toCentavos(selectedReg.total_amount || 0);
   const balanceCentavos = toCentavos(selectedReg.balance || 0);
+  const allowDecimal = paymentType !== 'initial' && !!selectedReg.revenue_discount && balanceCentavos % 100 !== 0;
+  const discountSettlement = allowDecimal && toCentavos(Number(amountPaid)) === balanceCentavos;
+  const moneyPattern = discountSettlement ? /^\d+(\.\d{1,2})?$/ : /^\d+$/;
   const amount = Number(amountPaid);
   const amountCentavos = toCentavos(amount);
   const amountError = !amountPaid ? 'Payment amount is required.'
-    : !moneyPattern.test(amountPaid) || !Number.isFinite(amount) ? 'Enter a positive whole-peso amount using digits only.'
-    : amountCentavos < 100 ? 'Minimum payment is ₱1.'
+    : !moneyPattern.test(amountPaid) || !Number.isFinite(amount) ? 'Enter a valid payment amount.'
+    : amountCentavos < (discountSettlement ? 1 : 100) ? 'Enter a positive payment amount.'
     : amountCentavos > balanceCentavos ? 'Payment cannot exceed the remaining balance.'
     : '';
   const projectedBalance = Math.max(0, balanceCentavos - (amountError ? 0 : amountCentavos));
@@ -60,11 +98,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const cashCentavos = toCentavos(Number(cashReceived));
   const cashError = !isCash || amountError ? ''
     : !cashReceived ? 'Enter the cash handed over by the client.'
-    : !moneyPattern.test(cashReceived) ? 'Enter whole pesos using digits only.'
+    : !moneyPattern.test(cashReceived) ? 'Enter a valid cash amount.'
     : cashCentavos < amountCentavos ? 'Cash received is less than the payment amount.'
     : '';
   const changeCentavos = isCash && !amountError && !cashError ? cashCentavos - amountCentavos : 0;
-  const canSubmit = !modeDisabled(paymentType) && !amountError && !cashError && cashierName.trim().length > 0;
+  const canSubmit = !savingDiscount && !modeDisabled(paymentType) && !amountError && !cashError && cashierName.trim().length > 0;
 
   const selectMode = (mode: CollectionMode) => {
     if (modeDisabled(mode) || mode === paymentType) return;
@@ -104,7 +142,33 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-4">
+        {!['cancelled', 'released'].includes(selectedReg.status) && (
+          <fieldset disabled={savingDiscount || isProcessing} className="mb-4 space-y-2 border border-line p-3">
+            <legend className="px-1 font-bold">Discount credit</legend>
+            <div className="space-y-1 text-sm">
+              <p>Eligible charges {formatCurrency(eligibleBaseCents / 100)}</p>
+              <p>Discount amount <strong>{formattedCredit}</strong></p>
+              <p>Amount due after discount <strong>{formatCurrency(previewBalanceCents / 100)}</strong></p>
+            </div>
+            {noEligibleCharges && percentageNumber > 0 &&
+              <p className="text-xs font-bold text-amber-300">No classified Studio charges are available for this order. Reconcile its revenue classification before applying a percentage discount.</p>}
+            <label className="block text-sm">Discount percentage (0 removes the credit)
+              <span className="mt-1 flex w-full items-center border border-line bg-panel">
+                <input type="number" min="0" max="100" step="1" inputMode="numeric" className="min-w-0 flex-1 bg-transparent p-2 outline-none"
+                  value={percentage} onChange={(event) => setPercentage(event.target.value)} />
+                <span className="px-3 font-black text-gold-soft">%</span>
+              </span>
+            </label>
+            <label className="block text-sm">Reason
+              <input className="block w-full border border-line bg-panel p-2" maxLength={500}
+                value={reason} onChange={(event) => setReason(event.target.value)} />
+            </label>
+            <button type="button" className="bg-obsidian px-3 py-2 font-bold text-gold"
+              disabled={!/^\d+$/.test(percentage) || Number(percentage) > 100 || (Number(percentage) > 0 && (reason.trim().length < 3 || noEligibleCharges))}
+              onClick={() => void saveDiscount()}>Save discount</button>
+          </fieldset>
+        )}
+        {selectedReg.balance > 0 && <form onSubmit={onSubmit} className="space-y-4">
           {/* Breakdown Box */}
           <div className="bg-obsidian text-white p-4 border border-line text-xs space-y-2 font-mono">
             <div className="flex justify-between">
@@ -114,11 +178,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-neutral-400 uppercase">Total Job Amount:</span>
+              <span className="text-neutral-400 uppercase">Original Job Amount:</span>
               <span className="font-black text-white">
-                {formatCurrency(selectedReg.total_amount)}
+                {formatCurrency(originalBilledCents / 100)}
               </span>
             </div>
+            {percentageNumber > 0 && <div className="flex justify-between">
+              <span className="text-neutral-400 uppercase">Discount ({percentageNumber}%):</span>
+              <span className="font-black text-amber-300">{formattedCredit}</span>
+            </div>}
             <div className="flex justify-between">
               <span className="text-neutral-400 uppercase">Previously Paid:</span>
               <span className="font-bold text-emerald-400">
@@ -128,7 +196,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             <div className="flex justify-between border-t border-neutral-800 pt-2">
               <span className="text-gold uppercase font-black">Amount Due:</span>
               <span className="font-black text-gold text-base">
-                {formatCurrency(selectedReg.balance)}
+                {formatCurrency(previewBalanceCents / 100)}
               </span>
             </div>
           </div>
@@ -170,17 +238,18 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             <input
               id="pos-payment-amount"
               type="number"
-              min="1"
+              inputMode={allowDecimal ? 'decimal' : 'numeric'}
+              min={allowDecimal ? '0.01' : '1'}
               max={(balanceCentavos / 100).toFixed(2)}
-              step="1"
+              step={allowDecimal ? '0.01' : '1'}
               value={amountPaid}
               placeholder={paymentType === 'additional' ? 'Payment amount is required.' : undefined}
               readOnly={paymentType !== 'additional' || modeDisabled('additional')}
               onKeyDown={(e) => {
-                if (['-', '+', '.', ',', 'e', 'E'].includes(e.key)) e.preventDefault();
+                if (['-', '+', ',', 'e', 'E'].includes(e.key) || (!allowDecimal && e.key === '.')) e.preventDefault();
               }}
               onChange={(e) => {
-                if (/^\d*$/.test(e.target.value)) onAmountPaidChange(e.target.value);
+                if ((allowDecimal ? /^\d*(\.\d{0,2})?$/ : /^\d*$/).test(e.target.value)) onAmountPaidChange(e.target.value);
               }}
               className="w-full min-h-[48px] font-mono text-xl font-black px-4 py-2 border-2 border-line bg-gold-wash text-ink read-only:cursor-not-allowed read-only:opacity-80"
             />
@@ -235,16 +304,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   <input
                     id="pos-cash-received"
                     type="number"
-                    inputMode="numeric"
+                    inputMode={allowDecimal ? 'decimal' : 'numeric'}
                     min="0"
-                    step="1"
+                    step={allowDecimal ? '0.01' : '1'}
                     value={cashReceived}
                     placeholder="e.g. 2000"
                     onKeyDown={(e) => {
-                      if (['-', '+', '.', ',', 'e', 'E'].includes(e.key)) e.preventDefault();
+                      if (['-', '+', ',', 'e', 'E'].includes(e.key) || (!allowDecimal && e.key === '.')) e.preventDefault();
                     }}
                     onChange={(e) => {
-                      if (/^\d*$/.test(e.target.value)) onCashReceivedChange(e.target.value);
+                      if ((allowDecimal ? /^\d*(\.\d{0,2})?$/ : /^\d*$/).test(e.target.value)) onCashReceivedChange(e.target.value);
                     }}
                     className="min-w-0 flex-1 min-h-[44px] font-mono text-lg font-black px-3 py-1.5 border-2 border-line bg-panel text-ink"
                   />
@@ -299,7 +368,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               {isProcessing ? 'Processing...' : 'Confirm & Print Receipt'}
             </button>
           </div>
-        </form>
+        </form>}
       </div>
     </div>,
     document.body

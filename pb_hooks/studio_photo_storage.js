@@ -1,4 +1,5 @@
 const { catalogItem } = require(__hooks + "/studio_workflow.js");
+const { clientFolderName } = require(__hooks + "/studio_photo_names.cjs");
 const defaultRoot = "C:\\StudioFlow_Photos";
 const formats = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif" };
 
@@ -16,16 +17,18 @@ function usableName(name) {
     && !/^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(name);
 }
 
-function pathFor(app, registration, legacyBrowser = false) {
+function pathFor(app, registration, layout = "current") {
   const label = (collection, field, fallback) => {
     const item = catalogItem(app, collection, registration.getString(field));
     return item?.getString("code") || item?.getString("name") || fallback;
   };
-  const clean = (value) => segment(legacyBrowser ? value.replace(/\s+/g, "_").replace(/^_+|_+$/g, "") : value);
-  const job = clean(registration.getString("job_order_no") || "JO-" + registration.id);
+  const clean = (value) => segment(layout === "browser" ? value.replace(/\s+/g, "_").replace(/^_+|_+$/g, "") : value);
+  const job = registration.getString("job_order_no");
   const family = clean(registration.getString("family_name") || "STUDENT");
   const given = registration.getString("given_name");
-  const leaf = `${job}_${family}${given ? "_" + clean(given) : ""}`.replace(/_+$/, "");
+  const leaf = layout === "current"
+    ? clientFolderName(job, registration.getString("family_name"), given, registration.getString("middle_name"))
+    : `${clean(job)}_${family}${given ? "_" + clean(given) : ""}`.replace(/_+$/, "");
   if (registration.getString("client_kind") === "walkin") {
     // Walk-ins have no school or course: file them by the month they registered (studio time, UTC+8).
     const created = registration.getString("created");
@@ -45,16 +48,11 @@ function setFolder(record, path) {
   record.set("photo_folder_key", path.toLowerCase());
 }
 
-// Names the client's folder at the first payment: <school>/<course>/<job no>_<Last>_<First>.
-// Job order numbers are unique, so the name is too. photoFolder() also finds the folder of a
-// job order from before folder names were saved (either legacy spelling, if it holds photos).
-// The record ID is added only as a last resort: a duplicate job order number from the old
-// numbering, or a path another job order already owns. A payment is never refused over this.
+// A storage conflict must not stop payment or bind a made-up repository path.
 function assignFolder(app, registration, newlyNumbered) {
   if (registration.getString("photo_folder")) return;
-  let path;
-  try { path = photoFolder(app, registration, newlyNumbered); } catch (_) { path = pathFor(app, registration) + "_" + registration.id; }
-  setFolder(registration, path);
+  try { setFolder(registration, photoFolder(app, registration, newlyNumbered)); }
+  catch (error) { app.logger().warn("Client photo folder could not be assigned", "registration", registration.id, "error", String(error)); }
 }
 
 const documentsDir = "RECEIPTS";
@@ -93,14 +91,16 @@ function photoFolder(app, registration, newlyNumbered = false) {
   if (!jobOrder || (newlyNumbered ? matches.length !== 0 : matches.length !== 1 || matches[0].id !== registration.id)) {
     throw new ApiError(409, "This legacy job order cannot be matched to a unique photo folder.");
   }
-  const paths = [...new Set([pathFor(app, registration), pathFor(app, registration, true)])];
+  const canonical = pathFor(app, registration);
+  const paths = [...new Set([canonical, pathFor(app, registration, "legacy"), pathFor(app, registration, "browser")])];
   const existing = paths.filter((path) => {
     const root = openStudent(path);
     if (!root) return false;
-    try { return inventory(root).length > 0; } finally { root.close(); }
+    root.close();
+    return true;
   });
   if (existing.length > 1) throw new ApiError(409, "Photos exist in two legacy folders for this job order.");
-  const path = existing[0] || paths[0];
+  const path = existing[0] || canonical;
   if (app.findRecordsByFilter("registrations", "photo_folder_key = {:path} && id != {:id}", "", 1, 0, {
     path: path.toLowerCase(), id: registration.id,
   }).length) throw new ApiError(409, "This photo folder belongs to another registration.");
@@ -156,11 +156,27 @@ function provision(relative) {
   const root = openStudent(relative, true);
   if (!root) throw new Error("The student folder could not be created.");
   try {
-    root.mkdirAll("selected", 0o750);
-    root.mkdirAll("unselected", 0o750);
+    for (const directory of Object.values(photoDirectories(root, relative))) root.mkdirAll(directory, 0o750);
   } finally {
     root.close();
   }
+}
+
+function photoDirectories(root, folder) {
+  const expected = folder.split("/").pop();
+  const dir = root.open(".");
+  let names;
+  try { names = dir.readDir(-1).map((entry) => entry.name()); } finally { dir.close(); }
+  const match = (candidates, fallback) => {
+    const found = names.filter((name) => candidates.includes(name.toLowerCase()));
+    if (found.length > 1) throw new Error("Multiple photo folders have the same role.");
+    if (found.length && !statEntry(root, found[0])?.isDir()) throw new Error("A photo selection folder is not a directory.");
+    return found[0] || fallback;
+  };
+  return {
+    selected: match([expected.toLowerCase(), "selected"], expected),
+    unselected: match(["unselected"], "Unselected"),
+  };
 }
 
 function photoMime(root, path, info) {
@@ -180,21 +196,22 @@ function photoMime(root, path, info) {
   }
 }
 
-function inventory(root) {
+function inventory(root, folder) {
   const entries = [];
-  for (const group of ["", "selected", "unselected"]) {
+  const directories = photoDirectories(root, folder);
+  for (const [group, directoryName] of [["", ""], ...Object.entries(directories)]) {
     if (group) {
-      const directory = statEntry(root, group);
+      const directory = statEntry(root, directoryName);
       if (!directory) continue;
       if (!directory.isDir()) throw new Error("A photo selection folder is not a directory.");
     }
-    const dir = root.open(group || ".");
+    const dir = root.open(directoryName || ".");
     try {
       for (const entry of dir.readDir(-1)) {
         const name = entry.name();
         if (!usableName(name) || !entry.type().isRegular() || !formats[$filepath.ext(name).toLowerCase()]) continue;
         const info = entry.info();
-        const path = group ? group + "/" + name : name;
+        const path = directoryName ? directoryName + "/" + name : name;
         let mime;
         try { mime = photoMime(root, path, info); } catch (error) {
           if (!isMissing(error)) throw error;
@@ -212,10 +229,11 @@ function inventory(root) {
   return entries.sort((a, b) => a.path < b.path ? -1 : Number(a.path > b.path));
 }
 
-function image(root, group, name, id) {
+function image(root, folder, group, name, id) {
   if (!["", "selected", "unselected"].includes(group) || !usableName(name)) throw new NotFoundError("Photo not found.");
-  if (group && !statEntry(root, group)?.isDir()) throw new NotFoundError("Photo not found.");
-  const path = group ? group + "/" + name : name;
+  const directory = group ? photoDirectories(root, folder)[group] : "";
+  if (directory && !statEntry(root, directory)?.isDir()) throw new NotFoundError("Photo not found.");
+  const path = directory ? directory + "/" + name : name;
   if ($security.sha256(path) !== id) throw new NotFoundError("Photo not found.");
   const mime = photoMime(root, path, statEntry(root, path));
   if (!mime) throw new NotFoundError("Photo not found.");
@@ -228,5 +246,5 @@ function displayPath(relative) {
 
 module.exports = {
   assignFolder, basePath, displayPath, documentsDir, formats, image, inventory, openStudent, pathFor, photoFolder,
-  photoMime, provision, saveDocument, setFolder, statEntry, usableName,
+  photoDirectories, photoMime, provision, saveDocument, setFolder, statEntry, usableName,
 };

@@ -278,7 +278,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
     </>,
     contact: (reg: Registration) => <>
       <div className="font-bold">{reg.section || '—'}</div>
-      <div className="text-[10px] text-neutral-500 font-mono">{reg.mobile_number}</div>
+      <div className="text-[10px] text-neutral-500 font-mono">{reg.mobile_number || '—'}{reg.gender ? ` · ${reg.gender === 'male' ? 'Male' : 'Female'}` : ''}</div>
     </>,
     package: (reg: Registration) => {
       const addOns = getRegistrationAddOns(reg.add_ons);

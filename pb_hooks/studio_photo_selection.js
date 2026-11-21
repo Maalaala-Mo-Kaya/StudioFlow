@@ -18,8 +18,8 @@ function gallery(app, record, callback) {
   try { return callback(root, folder); } finally { root.close(); }
 }
 
-function readInventory(root) {
-  try { return storage.inventory(root); } catch (_) {
+function readInventory(root, folder) {
+  try { return storage.inventory(root, folder); } catch (_) {
     throw new ApiError(503, "The photo folder could not be read. Try again after storage is available.");
   }
 }
@@ -50,9 +50,9 @@ function describe(record, photos) {
   return { selectionState, selectedCount: selected?.length ?? saved?.length ?? 0, unselectedCount: selected ? photos.length - selected.length : 0 };
 }
 
-function planMoves(root, photos, chosen) {
-  root.mkdirAll("selected", 0o750);
-  root.mkdirAll("unselected", 0o750);
+function planMoves(root, folder, photos, chosen) {
+  const directories = storage.photoDirectories(root, folder);
+  for (const directory of Object.values(directories)) root.mkdirAll(directory, 0o750);
   const destinations = new Set();
   const moves = [];
   for (const photo of photos) {
@@ -60,9 +60,9 @@ function planMoves(root, photos, chosen) {
     if (photo.group === group) continue;
     const extension = $filepath.ext(photo.name);
     const stem = photo.name.slice(0, -extension.length);
-    let path = group + "/" + photo.name;
+    let path = directories[group] + "/" + photo.name;
     for (let suffix = 2; destinations.has(path.toLowerCase()) || storage.statEntry(root, path); suffix++) {
-      path = group + "/" + stem + "_" + suffix + extension;
+      path = directories[group] + "/" + stem + "_" + suffix + extension;
     }
     destinations.add(path.toLowerCase());
     moves.push({ from: photo.path, to: path, fingerprint: photo.fingerprint });
@@ -123,14 +123,15 @@ function recover(app, id) {
     // Use the already-bound directory so an administrative status change cannot strand the journal.
     let root;
     try {
-      root = storage.openStudent(current.getString("photo_folder"));
+      const folder = current.getString("photo_folder");
+      root = storage.openStudent(folder);
       if (!root) throw new Error("The student folder is unavailable.");
-      for (const group of ["selected", "unselected"]) {
+      for (const group of Object.values(storage.photoDirectories(root, folder))) {
         if (!storage.statEntry(root, group)?.isDir()) throw new Error("A photo selection folder is missing or invalid.");
       }
       for (const move of pending.moves) applyMove(root, move);
       if (pending.request) {
-        const selected = storage.inventory(root).filter((item) => item.group === "selected")
+        const selected = storage.inventory(root, folder).filter((item) => item.group === "selected")
           .map(({ path, fingerprint }) => [path, fingerprint]);
         if (JSON.stringify(selected) !== JSON.stringify(pending.selected)) {
           throw new Error("The selected folder changed during the transfer.");
@@ -166,7 +167,7 @@ function queueMoves(app, id, auth, input) {
       }
     }
     gallery(tx, record, (root, folder) => {
-      const photos = readInventory(root);
+      const photos = readInventory(root, folder);
       if (!photos.length) throw new NotFoundError("No supported photographs are available yet.");
       const chosen = input ? new Set(input.selected) : new Set(photos.filter((photo) => photo.group === "selected").map((photo) => photo.id));
       if (input) {
@@ -180,7 +181,7 @@ function queueMoves(app, id, auth, input) {
         if (limit && chosen.size > limit) throw new BadRequestError("This package allows up to " + limit + " selected photographs.");
       }
       let moves;
-      try { moves = planMoves(root, photos, chosen); } catch (_) {
+      try { moves = planMoves(root, folder, photos, chosen); } catch (_) {
         throw new ApiError(503, "The photo folders are not writable. Check storage access and retry.");
       }
       storage.setFolder(record, folder);
@@ -205,8 +206,8 @@ function listItem(app, record) {
   if (workflow.json(record, "photo_pending")) return { ...info, availability: "recovering", ...describe(record) };
   if (!info.photographyComplete) return { ...info, availability: "pending_shoot", ...describe(record) };
   try {
-    return gallery(app, record, (root) => {
-      const photos = readInventory(root);
+    return gallery(app, record, (root, folder) => {
+      const photos = readInventory(root, folder);
       return { ...info, availability: photos.length ? "available" : "empty", ...describe(record, photos) };
     });
   } catch (error) {
@@ -215,9 +216,9 @@ function listItem(app, record) {
 }
 
 function details(app, id) {
-  return workflow.withRegistration(app, id, (tx, record) => gallery(tx, record, (root) => {
+  return workflow.withRegistration(app, id, (tx, record) => gallery(tx, record, (root, folder) => {
     if (workflow.json(record, "photo_pending")) throw new ApiError(409, "The gallery is being updated.");
-    const inventory = readInventory(root);
+    const inventory = readInventory(root, folder);
     return {
       student: workflow.summary(tx, record),
       version: version(record, inventory),

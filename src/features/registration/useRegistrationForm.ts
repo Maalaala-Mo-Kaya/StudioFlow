@@ -60,6 +60,7 @@ export function useRegistrationForm() {
   const [familyName, setFamilyName] = useState('');
   const [givenName, setGivenName] = useState('');
   const [middleName, setMiddleName] = useState('');
+  const [gender, setGender] = useState('');
   const [studentId, setStudentId] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
   const [preferredLevelId, setPreferredLevelId] = useState('');
@@ -200,7 +201,7 @@ export function useRegistrationForm() {
     }
     setSearchName('');
     setIsSearching(false);
-    clearErrors('family_name', 'given_name', 'email', 'mobile_number', 'organization', 'level', 'course');
+    clearErrors('family_name', 'given_name', 'gender', 'email', 'mobile_number', 'organization', 'level', 'course');
   };
 
   const toggleAddOn = useCallback((id: string) => {
@@ -250,6 +251,7 @@ export function useRegistrationForm() {
     const fieldErrors: RegistrationErrors = {};
     if (!familyName.trim()) fieldErrors.family_name = 'Enter your family name.';
     if (!givenName.trim()) fieldErrors.given_name = 'Enter your given name.';
+    if (!['male', 'female'].includes(gender)) fieldErrors.gender = "Please select the client's gender.";
     if (!clientKind) {
       fieldErrors.client_kind = availableKinds.length ? 'Choose the type of client.' : 'Registration is closed right now. Please ask the staff.';
     } else if (isWalkIn) {
@@ -264,7 +266,7 @@ export function useRegistrationForm() {
       if (!selectedCourseId) fieldErrors.course = 'Select a course or strand for this school and academic level.';
     }
     if (cleanEmail && !emailPattern.test(cleanEmail)) fieldErrors.email = 'Enter a valid email address.';
-    if (!cleanMobile) fieldErrors.mobile_number = 'Enter your mobile number.';
+    if (!cleanMobile) fieldErrors.mobile_number = 'Mobile number is required.';
     else if (!mobilePattern.test(cleanMobile.replace(/[ -]/g, ''))) {
       fieldErrors.mobile_number = 'Enter a valid Philippine mobile number, such as 0917-000-0000.';
     }
@@ -284,6 +286,7 @@ export function useRegistrationForm() {
       formData.append('family_name', familyName.trim());
       formData.append('given_name', givenName.trim());
       formData.append('middle_name', middleName.trim());
+      formData.append('gender', gender);
       formData.append('client_kind', clientKind);
       if (isWalkIn) {
         formData.append('session_type', selectedSession?.id ?? '');
@@ -358,6 +361,7 @@ export function useRegistrationForm() {
     setFamilyName('');
     setGivenName('');
     setMiddleName('');
+    setGender('');
     setStudentId('');
     setSelectedOrgId('');
     setPreferredLevelId('');
@@ -429,6 +433,8 @@ export function useRegistrationForm() {
     setGivenName: changeField('given_name', setGivenName),
     middleName,
     setMiddleName,
+    gender,
+    setGender: changeField('gender', setGender),
     studentId,
     setStudentId,
     selectedOrgId,

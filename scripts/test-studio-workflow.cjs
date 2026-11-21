@@ -5,7 +5,7 @@ const { mkdtemp, mkdir, writeFile, readdir, readFile, copyFile, link, stat, rm, 
 const { createHash, randomBytes, randomUUID } = require('node:crypto');
 const { createServer } = require('node:net');
 const { tmpdir } = require('node:os');
-const { join, resolve } = require('node:path');
+const { basename, join, resolve } = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { runInNewContext } = require('node:vm');
 const { test } = require('node:test');
@@ -16,6 +16,13 @@ const executable = process.env.POCKETBASE_TEST_BINARY || join(repo, 'pocketbase.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aUoUAAAAASUVORK5CYII=', 'base64');
 const password = 'Isolated-Test-Password!';
 const api = '/api/studioflow';
+const { clientFolderName } = require('../pb_hooks/studio_photo_names.cjs');
+
+test('photo repository names retain the official number and normalize client names', () => {
+  assert.equal(clientFolderName('0018', 'Dela Cruz', 'Juan', ''), '0018_Dela_Cruz_Juan');
+  assert.equal(clientFolderName('0018', '  Dela / Cruz ', 'Juan', 'Santos*'), '0018_Dela_Cruz_Juan_Santos');
+  assert.throws(() => clientFolderName('', 'Dela Cruz', 'Juan', ''), /official job order/);
+});
 
 async function port() {
   const socket = createServer();
@@ -59,6 +66,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const legacyId = 'legacyreg000001';
   const legacyPath = join(photos, 'ORGANIZATION', 'COURSE', '00050_Dela_Cruz_Juan_Carlos');
   await mkdir(legacyPath, { recursive: true });
+  await mkdir(join(legacyPath, 'selected'));
+  await mkdir(join(legacyPath, 'unselected'));
   await writeFile(join(legacyPath, 'legacy.png'), png);
   const legacyDb = new DatabaseSync(join(data, 'data.db'));
   try {
@@ -177,7 +186,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const studentId = 'WF-' + ++sequence;
     const form = new FormData();
     for (const [key, value] of Object.entries({
-      family_name: 'Dela Cruz', given_name: 'Juan Carlos', middle_name: 'D',
+      family_name: 'Dela Cruz', given_name: 'Juan Carlos', middle_name: 'D', gender: 'male', mobile_number: '09170000000',
       organization: school.id, level: level.id, course: course.id, package: pkg.id, student_id: studentId,
       terms_accepted: 'true', email: 'person@example.test', mobile_number: '0917-000-0000', add_ons: JSON.stringify(addOns),
       status: 'shooting', paid_amount: '1000', makeup_look: 'full', ...fields,
@@ -314,14 +323,14 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await registrations(plain, admin, { job_order_no: '12345' }, 403);
   await registrations(plain, admin, { queue_number: 123 }, 403);
   // The client folder is made at the first payment, named <job no>_<Last>_<First> (no record ID).
-  const clientFolder = (student) => join(photos, 'WORKFLOW', 'MEDIA', `${student.job_order_no}_Dela Cruz_Juan Carlos`);
+  const clientFolder = (student) => join(photos, 'WORKFLOW', 'MEDIA', `${student.job_order_no}_Dela_Cruz_Juan_Carlos_D`);
   await assert.rejects(stat(join(photos, 'WORKFLOW', 'MEDIA')), { code: 'ENOENT' }, 'An unpaid registration has no folder yet.');
   await pay(plain, 1000);
   const paidPlain = (await registrations(plain)).payload;
   assert.equal(paidPlain.job_order_no, '00051', 'Failed payments consume no number and the legacy sequence carries forward.');
   assert.ok(paidPlain.queue_number > 0, 'No-MUA jobs are ready for photography at payment.');
   assert.ok((await stat(clientFolder(paidPlain))).isDirectory(), 'The first payment creates the client folder.');
-  assert.deepEqual((await readdir(clientFolder(paidPlain))).sort(), ['selected', 'unselected']);
+  assert.deepEqual((await readdir(clientFolder(paidPlain))).sort(), [basename(clientFolder(paidPlain)), 'Unselected'].sort());
   assert.equal((await queue(artists[0])).length, 0);
   assert.equal((await send(api + '/queue-count')).payload.count, 1);
   assert.equal((await send(records('registrations'))).payload.items.length, 0);
@@ -469,8 +478,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.equal((await list(galleryStudent.student_id))[0].selectionState, 'in_progress');
   assert.equal(first.photos.length, 3);
   assert.equal(first.version, concurrent.version);
-  assert.deepEqual((await readdir(join(path, 'unselected'))).sort(), ['first.png', 'second.png', 'third.png']);
-  assert.deepEqual(await readdir(join(path, 'selected')), []);
+  assert.deepEqual((await readdir(join(path, 'Unselected'))).sort(), ['first.png', 'second.png', 'third.png']);
+  assert.deepEqual(await readdir(join(path, basename(path))), []);
   const image = route + '/image/' + first.photos[0].id + '?' + new URLSearchParams(first.photos[0]);
   await send(image, { token: artists[1].token, status: 403 });
   assert.deepEqual((await send(image, { token: chooser.token })).payload, png);
@@ -523,29 +532,29 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const reopened = await open(otherChooser);
   assert.equal(reopened.photos.filter((photo) => photo.selected).length, 2);
   const revised = await choose(reopened, reopened.photos.filter((photo) => photo.name === 'third.png'), otherChooser);
-  assert.deepEqual(await readdir(join(path, 'selected')), ['third.png']);
-  assert.deepEqual((await readdir(join(path, 'unselected'))).sort(), ['first.png', 'second.png']);
+  assert.deepEqual(await readdir(join(path, basename(path))), ['third.png']);
+  assert.deepEqual((await readdir(join(path, 'Unselected'))).sort(), ['first.png', 'second.png']);
   assert.deepEqual(await readFile(join(plainFolder, 'other.png')), png);
   assert.deepEqual(await readFile(join(path, 'raw.cr3')), png);
 
   // Fixture for a process interrupted after the exclusive hard-link but before
   // source removal. Include a second move blocked by an unrelated destination.
-  const source = join(path, 'unselected', 'first.png');
-  const firstDestination = join(path, 'selected', 'first.png');
+  const source = join(path, 'Unselected', 'first.png');
+  const firstDestination = join(path, basename(path), 'first.png');
   await link(source, firstDestination);
   const fingerprint = async (filename) => {
     const info = await stat(filename, { bigint: true });
     return [Number(info.size), String(Number(info.mtimeNs))];
   };
-  const blocked = join(path, 'selected', 'second.png');
+  const blocked = join(path, basename(path), 'second.png');
   await writeFile(blocked, Buffer.from('existing file must be preserved'));
   const journal = { request: { id: randomUUID(), actor: chooser.id }, moves: [
-    { from: 'unselected/first.png', to: 'selected/first.png', fingerprint: await fingerprint(source) },
-    { from: 'unselected/second.png', to: 'selected/second.png', fingerprint: await fingerprint(join(path, 'unselected', 'second.png')) },
-    { from: 'selected/third.png', to: 'unselected/third.png', fingerprint: await fingerprint(join(path, 'selected', 'third.png')) },
+    { from: 'Unselected/first.png', to: `${basename(path)}/first.png`, fingerprint: await fingerprint(source) },
+    { from: 'Unselected/second.png', to: `${basename(path)}/second.png`, fingerprint: await fingerprint(join(path, 'Unselected', 'second.png')) },
+    { from: `${basename(path)}/third.png`, to: 'Unselected/third.png', fingerprint: await fingerprint(join(path, basename(path), 'third.png')) },
   ], selected: [
-    ['selected/first.png', await fingerprint(source)],
-    ['selected/second.png', await fingerprint(join(path, 'unselected', 'second.png'))],
+    [`${basename(path)}/first.png`, await fingerprint(source)],
+    [`${basename(path)}/second.png`, await fingerprint(join(path, 'Unselected', 'second.png'))],
   ] };
   const db = new DatabaseSync(join(data, 'data.db'));
   try {
@@ -553,21 +562,21 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   } finally { db.close(); }
   await send(route, { token: chooser.token, status: 503 });
   assert.equal(await readFile(blocked, 'utf8'), 'existing file must be preserved');
-  assert.deepEqual(await readFile(join(path, 'unselected', 'second.png')), png);
+  assert.deepEqual(await readFile(join(path, 'Unselected', 'second.png')), png);
   await rm(blocked);
   const recovered = (await send(route, { token: chooser.token })).payload;
   assert.notEqual(recovered.version, revised.version);
   assert.equal(recovered.photos.filter((photo) => photo.selected).length, 2);
-  assert.deepEqual(await readdir(join(path, 'unselected')), ['third.png']);
+  assert.deepEqual(await readdir(join(path, 'Unselected')), ['third.png']);
   assert.equal(createHash('sha256').update(await readFile(firstDestination)).digest('hex'), createHash('sha256').update(png).digest('hex'));
 
   const collisionBytes = Buffer.concat([png, Buffer.from('new export')]);
   await writeFile(join(path, 'first.png'), collisionBytes);
   const withDuplicateName = await open();
   const collision = await choose(withDuplicateName, withDuplicateName.photos.filter((photo) => photo.name === 'first.png'));
-  assert.deepEqual((await readdir(join(path, 'selected'))).sort(), ['first.png', 'first_2.png']);
-  assert.deepEqual(await readFile(join(path, 'selected', 'first.png')), png);
-  assert.deepEqual(await readFile(join(path, 'selected', 'first_2.png')), collisionBytes);
+  assert.deepEqual((await readdir(join(path, basename(path)))).sort(), ['first.png', 'first_2.png']);
+  assert.deepEqual(await readFile(join(path, basename(path), 'first.png')), png);
+  assert.deepEqual(await readFile(join(path, basename(path), 'first_2.png')), collisionBytes);
   const race = await Promise.all([
     send(route + '/confirm', { method: 'POST', token: chooser.token, status: null,
       body: { version: collision.version, requestId: randomUUID(), selected: [collision.photos[0].id] } }),
@@ -885,7 +894,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   async function walkIn(fields, status = 200) {
     const form = new FormData();
     for (const [key, value] of Object.entries({
-      client_kind: 'walkin', family_name: 'Reyes', given_name: 'Family', email: 'family@example.test', mobile_number: '09170000000',
+      client_kind: 'walkin', family_name: 'Reyes', given_name: 'Family', gender: 'female', email: 'family@example.test', mobile_number: '09170000000',
       terms_accepted: 'true', add_ons: '[]', package: walkinPackage.id, session_type: family.id, ...fields,
     })) form.set(key, value);
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');
@@ -1035,7 +1044,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   camState = await cameraApi('scan');
   assert.equal(camState.sessionImported, 3, camState.lastError);
   const clientDir = (await send(`${api}/photo-folder/${onSet.id}`, { method: 'POST', token: photographer })).payload.path;
-  assert.deepEqual((await readdir(clientDir)).sort(), ['IMG_0001.jpg', 'IMG_0002.JPG', 'RAW', 'selected', 'unselected']);
+  assert.deepEqual((await readdir(clientDir)).sort(), ['IMG_0001.jpg', 'IMG_0002.JPG', 'RAW', basename(clientDir), 'Unselected'].sort());
   assert.deepEqual(await readdir(join(clientDir, 'RAW')), ['IMG_0003.CR3']);
   assert.deepEqual((await readdir(cameraDir)).filter((name) => !name.startsWith('.')).sort(),
     ['DCIM', 'before-session.jpg', 'fake.jpg', 'fresh.jpg', 'notes.txt']);
@@ -1231,6 +1240,36 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await patchCatalog('add_ons', wardrobe, { is_active: false });
     assert.equal((await register(studio, [], 200, { no_mua_default_quote: 'none' })).total_amount, 1500);
     await patchCatalog('add_ons', walkinDefault, { is_active: false });
+    const discount = (job, percentage, status = 200) => send(api + '/registrations/' + job.id + '/discount', {
+      method: 'POST', token: cashier, status, body: { percentage, reason: 'Student Council Officer' },
+    }).then(({ payload }) => payload);
+    const complimentary = await register(studio);
+    const complimentarySettled = await discount(complimentary, 100);
+    assert.deepEqual([complimentarySettled.paid_amount, complimentarySettled.balance, complimentarySettled.payment_status], [0, 0, 'fully_paid']);
+    assert.ok(complimentarySettled.job_order_no && complimentarySettled.queue_number);
+    assert.equal((await discount(complimentary, 100)).revenue_discount.at, complimentarySettled.revenue_discount.at);
+    assert.equal((await recordsFor('payments', complimentary)).length, 0);
+    const complimentaryAudit = await auditFor(complimentary);
+    assert.equal(complimentaryAudit.totals.analyticsCollected, 1500);
+    assert.equal(complimentaryAudit.byPackage.find((group) => group.key === studio.id).collected, 1500);
+    await send(`${api}/registrations/${complimentary.id}/cancel`, {
+      method: 'POST', token: admin, body: { reason: 'Client postponed' },
+    });
+    assert.equal((await auditFor(complimentary)).totals.analyticsCollected, 0);
+    const restoredComplimentary = (await send(`${api}/registrations/${complimentary.id}/restore`, { method: 'POST', token: admin })).payload;
+    assert.equal(restoredComplimentary.queue_number, complimentarySettled.queue_number);
+    await shoot(complimentary, 'shooting');
+    await shoot(complimentary, 'done_shooting');
+    const half = await register(studio);
+    const partial = await discount(half, 50);
+    assert.deepEqual([partial.paid_amount, partial.balance, partial.payment_status], [0, 750, 'downpayment']);
+    assert.equal((await auditFor(half)).totals.analyticsCollected, 750);
+    await pay(half, 750);
+    const halfAudit = (await auditFor(half)).totals;
+    assert.deepEqual([halfAudit.analyticsCollected, halfAudit.netCollections, halfAudit.discountCredits], [1500, 750, 750]);
+    await discount(half, 100, 400);
+    await discount(half, 0);
+    assert.equal((await auditFor(half)).totals.analyticsCollected, 750);
     const defaultArtist = await createStaff('defaultartist', 'mua');
     const wardrobePayment = await pay(included, 1550);
     const includedPaid = (await registrations(included, cashier)).payload;
@@ -1350,7 +1389,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const receipt = { registration: settled.orders[0].registration, payments: [mixedFirst, mixedLast], refunds: [], terms: [] };
     assert.equal(receiptRevenueLine(receipt, mixedLast), 'Studio ₱1,500.00 / MUA ₱450.00 / Unallocated ₱-975.00');
     assert.deepEqual(buildRegistrationsCsv([receipt.registration], receipt.payments).split('\r\n')
-      .slice(1).map((line) => line.split(',').slice(-3)), [['1500.00', '450.00', '0.00'], ['1500.00', '450.00', '0.00']]);
+      .slice(1).map((line) => line.split(',').slice(-5)), [['1500.00', '450.00', '0.00', '0.00', '1950.00'], ['1500.00', '450.00', '0.00', '0.00', '1950.00']]);
 
     // Sold prices and ownership are independent from later catalog edits.
     await patchCatalog('packages', studio, { amount: 1800, revenue_category: 'mua' });
@@ -1367,7 +1406,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     })).payload;
     assert.deepEqual(discounted.revenue_terms, { studio: 150000, mua: 30000, unallocated: 0 });
     assert.deepEqual([discounted.total_amount, discounted.balance], [1800, 0]);
-    assert.deepEqual(orderExtras(discounted).at(-1), ['Discount (Complimentary grooming)', -150]);
+    assert.deepEqual(orderExtras(discounted).at(-1), ['Discount credit (7.69%) · Complimentary grooming', -150]);
     assert.equal((await auditFor(mixed)).orders[0].overpaid, 150);
     await refundRoute({ registrationId: mixed.id, amount: 150, method: 'cash', reason: 'Approved complimentary service' });
     assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
@@ -1579,10 +1618,56 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const beforeRestart = (await registrations(docsClient)).payload;
   server.kill();
   await once(server, 'exit');
+  const oldSelected = join(legacyPath, 'selected');
+  await writeFile(join(oldSelected, 'kept.png'), png);
+  const kept = await stat(join(oldSelected, 'kept.png'), { bigint: true });
+  const migrationDb = join(data, 'data.db');
+  const setupMigration = new DatabaseSync(migrationDb);
+  try {
+    setupMigration.prepare('UPDATE registrations SET photo_selection = ? WHERE id = ?')
+      .run(JSON.stringify([['selected/kept.png', [Number(kept.size), String(kept.mtimeNs)]]]), legacyId);
+  } finally { setupMigration.close(); }
+  const migrateArgs = [join(repo, 'scripts', 'migrate-photo-folders.cjs'), migrationDb, photos];
+  assert.match(execFileSync(process.execPath, migrateArgs, { encoding: 'utf8' }), /Preview only/);
+  assert.deepEqual(await readFile(join(oldSelected, 'kept.png')), png);
+  assert.match(execFileSync(process.execPath, [...migrateArgs, '--apply'], { encoding: 'utf8' }), /Committed 1 repositories/);
+  const migratedLeaf = '00050_Corrected_Name_Juan_Carlos';
+  const migratedPath = join(photos, 'ORGANIZATION', 'COURSE', migratedLeaf);
+  assert.deepEqual(await readFile(join(migratedPath, migratedLeaf, 'kept.png')), png);
+  assert.deepEqual(await readFile(join(migratedPath, 'legacy.png')), png);
+  assert.ok((await readdir(migratedPath)).includes('Unselected'));
+  await assert.rejects(stat(legacyPath), { code: 'ENOENT' });
+  assert.match(execFileSync(process.execPath, migrateArgs, { encoding: 'utf8' }), /0 repositories ready/);
+  const orphanLeaf = '999999_Empty_Client';
+  const orphan = join(photos, 'ORGANIZATION', 'COURSE', orphanLeaf);
+  await mkdir(join(orphan, orphanLeaf), { recursive: true });
+  await mkdir(join(orphan, 'Unselected'));
+  const scanner = join(repo, 'scripts', 'clean_orphan_folders.cjs');
+  assert.match(execFileSync(process.execPath, [scanner, '--scan', migrationDb, photos], { encoding: 'utf8' }), /1 empty orphan folders found/);
+  assert.ok((await stat(orphan)).isDirectory());
+  assert.match(execFileSync(process.execPath, [scanner, '--prune', migrationDb, photos], { encoding: 'utf8' }), /1 empty orphan folders removed/);
+  await assert.rejects(stat(orphan), { code: 'ENOENT' });
+  assert.deepEqual(await readFile(join(migratedPath, migratedLeaf, 'kept.png')), png);
+  const verifiedDb = new DatabaseSync(migrationDb, { readOnly: true });
+  try {
+    const migrated = verifiedDb.prepare('SELECT photo_folder, photo_selection FROM registrations WHERE id = ?').get(legacyId);
+    assert.equal(migrated.photo_folder, 'ORGANIZATION/COURSE/' + migratedLeaf);
+    assert.equal(JSON.parse(migrated.photo_selection)[0][0], migratedLeaf + '/kept.png');
+  } finally { verifiedDb.close(); }
   await startServer();
+  assert.equal(await folder({ id: legacyId }), migratedPath);
+  const migratedRoute = api + '/chooser/' + legacyId;
+  const { photos: migratedPhotos } = (await send(migratedRoute, { token: chooser.token })).payload;
+  const keptPhoto = migratedPhotos.find((photo) => photo.name === 'kept.png');
+  assert.equal(keptPhoto.selected, true);
+  assert.deepEqual((await send(migratedRoute + '/image/' + keptPhoto.id + '?' + new URLSearchParams(keptPhoto),
+    { token: chooser.token })).payload, png);
   const afterRestart = (await registrations(docsClient, (await login('cashier', 'password123')).token)).payload;
   assert.deepEqual([afterRestart.job_order_no, afterRestart.queue_number], [beforeRestart.job_order_no, beforeRestart.queue_number]);
-  const afterRestartClient = await register(standard);
+  const afterRestartClient = await register(standard, [], 200, { middle_name: '' });
   await pay(afterRestartClient, 1000);
-  assert.ok(Number((await registrations(afterRestartClient)).payload.job_order_no) > Math.max(...numbers.map(Number)));
+  const { job_order_no: finalJob } = (await registrations(afterRestartClient)).payload;
+  assert.ok(Number(finalJob) > Math.max(...numbers.map(Number)));
+  const finalLeaf = finalJob + '_Dela_Cruz_Juan_Carlos';
+  assert.deepEqual((await readdir(join(photos, 'WORKFLOW', 'MEDIA', finalLeaf))).sort(), [finalLeaf, 'Unselected'].sort());
 });

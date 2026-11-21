@@ -1,5 +1,11 @@
 // Shared by the registration hooks, migration and staff APIs.
-const photoQueue = "(status = 'shooting' OR (status = 'paid' AND queue_number > 0 AND paid_amount > 0 AND (makeup_state = 'completed' OR (makeup_service = '' AND makeup_state = ''))))";
+const paymentSql = "(paid_amount > 0 OR (payment_status = 'fully_paid' AND total_amount = 0))";
+const paymentFilter = "(paid_amount > 0 || (payment_status = 'fully_paid' && total_amount = 0))";
+const photoQueue = "(status = 'shooting' OR (status = 'paid' AND queue_number > 0 AND " + paymentSql + " AND (makeup_state = 'completed' OR (makeup_service = '' AND makeup_state = ''))))";
+function paymentEligible(record) {
+  return record.getFloat("paid_amount") > 0
+    || (record.getString("payment_status") === "fully_paid" && record.getFloat("total_amount") === 0);
+}
 const finishedShoot = ["done_shooting", "completed", "ready_for_pickup", "released"];
 const activeMakeup = ["claimed", "in_progress"];
 
@@ -100,4 +106,4 @@ function summary(app, registration) {
   };
 }
 
-module.exports = { activeMakeup, catalogItem, finishedShoot, json, makeupServices, photographyComplete, photoQueue, purchasedServices, saveMakeupServices, serviceRequirement, staff, summary, withRegistration };
+module.exports = { activeMakeup, catalogItem, finishedShoot, json, makeupServices, paymentEligible, paymentFilter, photographyComplete, photoQueue, purchasedServices, saveMakeupServices, serviceRequirement, staff, summary, withRegistration };
