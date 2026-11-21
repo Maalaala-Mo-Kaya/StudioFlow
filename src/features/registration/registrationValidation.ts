@@ -1,7 +1,7 @@
 export const registrationFields = [
   'client_kind', 'family_name', 'given_name', 'organization', 'level', 'course',
-  'session_type', 'event_date', 'event_venue', 'email',
-  'mobile_number', 'package', 'makeup_look', 'makeup_look_note', 'terms_accepted', 'signature',
+  'session_type', 'event_date', 'event_venue', 'mobile_number',
+  'email', 'package', 'makeup_look', 'makeup_look_note', 'terms_accepted', 'signature',
 ] as const;
 
 type RegistrationField = typeof registrationFields[number];

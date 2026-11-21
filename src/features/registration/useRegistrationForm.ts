@@ -263,9 +263,9 @@ export function useRegistrationForm() {
       if (!selectedLevelId) fieldErrors.level = 'Select your academic level.';
       if (!selectedCourseId) fieldErrors.course = 'Select a course or strand for this school and academic level.';
     }
-    if (!cleanEmail) fieldErrors.email = 'Enter your email address.';
-    else if (!emailPattern.test(cleanEmail)) fieldErrors.email = 'Enter a valid email address.';
-    if (cleanMobile && !mobilePattern.test(cleanMobile.replace(/[ -]/g, ''))) {
+    if (cleanEmail && !emailPattern.test(cleanEmail)) fieldErrors.email = 'Enter a valid email address.';
+    if (!cleanMobile) fieldErrors.mobile_number = 'Enter your mobile number.';
+    else if (!mobilePattern.test(cleanMobile.replace(/[ -]/g, ''))) {
       fieldErrors.mobile_number = 'Enter a valid Philippine mobile number, such as 0917-000-0000.';
     }
     if (!termsAccepted) fieldErrors.terms_accepted = 'Agree to the Terms & Conditions to proceed.';

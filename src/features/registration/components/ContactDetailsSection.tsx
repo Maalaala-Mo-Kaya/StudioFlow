@@ -33,11 +33,12 @@ export const ContactDetailsSection: React.FC<ContactDetailsSectionProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor="registration-mobile_number" className="block text-[11px] font-black text-ink uppercase tracking-wider mb-1.5">
-            Mobile Number <span className="font-normal text-neutral-500">(Optional)</span>
+            Mobile Number <span className="text-red-600">*</span>
           </label>
           <input
             {...validationProps('mobile_number', errors.mobile_number)}
             type="tel"
+            required
             placeholder="0917-000-0000"
             value={mobileNumber}
             onChange={(e) => onMobileNumberChange(e.target.value)}
@@ -47,12 +48,11 @@ export const ContactDetailsSection: React.FC<ContactDetailsSectionProps> = ({
         </div>
         <div>
           <label htmlFor="registration-email" className="block text-[11px] font-black text-ink uppercase tracking-wider mb-1.5">
-            Email Address <span className="text-red-600">*</span>
+            Email Address <span className="font-normal text-neutral-500">(Optional)</span>
           </label>
           <input
             {...validationProps('email', errors.email)}
             type="email"
-            required
             placeholder="name@email.com"
             value={email}
             onChange={(e) => onEmailChange(e.target.value)}

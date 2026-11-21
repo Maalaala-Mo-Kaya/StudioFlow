@@ -167,7 +167,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     for (const [key, value] of Object.entries({
       family_name: 'Dela Cruz', given_name: 'Juan Carlos', middle_name: 'D',
       organization: school.id, level: level.id, course: course.id, package: pkg.id, student_id: studentId,
-      terms_accepted: 'true', email: 'person@example.test', add_ons: JSON.stringify(addOns),
+      terms_accepted: 'true', email: 'person@example.test', mobile_number: '0917-000-0000', add_ons: JSON.stringify(addOns),
       status: 'shooting', paid_amount: '1000', makeup_look: 'full', ...fields,
     })) form.set(key, value);
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');
@@ -246,6 +246,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const liveUpdate = await Promise.race([readEvent('studioflow-workflow'), delay(4000, 'timeout', { ref: false })]);
   assert.deepEqual(liveUpdate, {}, 'The server must notify connected realtime clients.');
   const unpaid = await register(prepared);
+  // The kiosk needs a mobile number (email is optional but must be valid when given).
+  const contactErrors = (fields) => register(standard, [], 400, fields).then((payload) => Object.keys(payload.data || {}));
+  assert.deepEqual(await contactErrors({ mobile_number: '' }), ['mobile_number']);
+  assert.deepEqual(await contactErrors({ mobile_number: '12345' }), ['mobile_number']);
+  assert.deepEqual(await contactErrors({ email: 'not-an-email' }), ['email']);
   // Each job order keeps the package contents it was sold with.
   assert.deepEqual([plain.package_snapshot.inclusions, plain.package_snapshot.photo_selection_limit, plain.package_snapshot.amount],
     [['Makeup and grooming'], 0, 1000]);

@@ -15,16 +15,17 @@ onRecordCreateRequest((e) => {
   if (!record.getString("given_name")) invalid("given_name", "Enter your given name.");
 
   // Keep the contact formats in sync with src/features/registration/registrationValidation.ts.
-  const email = record.getString("email");
-  const emailPattern = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
-  if (!email) invalid("email", "Enter your email address.");
-  else if (!emailPattern.test(email)) invalid("email", "Enter a valid email address.");
-
+  // The mobile number is required (the studio contacts clients by SMS); email is optional.
   const mobile = record.getString("mobile_number");
   const mobilePattern = /^(?:0|\+?63)9\d{9}$/;
-  if (mobile && !mobilePattern.test(mobile.replace(/[ -]/g, ""))) {
+  if (!mobile) invalid("mobile_number", "Enter your mobile number.");
+  else if (!mobilePattern.test(mobile.replace(/[ -]/g, ""))) {
     invalid("mobile_number", "Enter a valid Philippine mobile number, such as 0917-000-0000.");
   }
+
+  const email = record.getString("email");
+  const emailPattern = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
+  if (email && !emailPattern.test(email)) invalid("email", "Enter a valid email address.");
 
   // Client type: school/graduation (default) or walk-in. Each must be switched on in Admin.
   const kind = record.getString("client_kind") || "school";
