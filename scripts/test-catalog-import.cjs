@@ -220,7 +220,7 @@ test('save: imported packages and add-ons reach the database and the kiosk', asy
     }
     const form = new FormData();
     for (const [key, value] of Object.entries({
-      family_name: 'Dela Cruz', given_name: 'Juan', middle_name: 'D', organization: school.id, level: level.id, course,
+      family_name: 'Dela Cruz', given_name: 'Juan', middle_name: 'D', gender: 'male', organization: school.id, level: level.id, course,
       package: packageId, student_id: 'IMPORT-' + ++students, terms_accepted: 'true', mobile_number: '0917-000-0000',
       makeup_look: 'full', add_ons: JSON.stringify(addOns),
     })) form.set(key, value);
