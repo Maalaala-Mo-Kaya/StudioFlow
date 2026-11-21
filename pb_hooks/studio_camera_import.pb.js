@@ -82,6 +82,23 @@ onRecordAfterUpdateSuccess((e) => {
   require(__hooks + "/studio_station_events.js").notify(e.app);
 }, "camera_stations");
 
+// A client sent back to makeup mid-shoot leaves the Photo Floor: any camera linked to them is
+// unlinked (their last shots are filed first), so the next client's photos can't land in their folder.
+onRecordAfterUpdateSuccess((e) => {
+  e.next();
+  const record = e.record;
+  if (record.getString("status") !== "paid" || !record.getString("makeup_service")
+    || record.getString("makeup_state") === "completed") return;
+  try {
+    const camera = require(__hooks + "/studio_camera_import.js");
+    for (const station of e.app.findRecordsByFilter("camera_stations", "active_registration = {:id}", "", 0, 0, { id: record.id })) {
+      camera.endSession(e.app, station.id, record.id);
+    }
+  } catch (err) {
+    console.log("StudioFlow: could not unlink the camera of a client sent to makeup:", err);
+  }
+}, "registrations");
+
 // Background safety net: photographer stations also trigger a scan every few
 // seconds while the Photo Floor page is open.
 cronAdd("studioflow_camera_import", "* * * * *", () => {

@@ -98,8 +98,11 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
     && [walkIn ? 'walkin' : 'school', 'both'].includes(item.client_kind || 'both')
     && !addOns.some((selected) => selected.id === item.id));
   const isCancelled = reg.status === 'cancelled';
-  // Released orders are closed; cancelled ones owe nothing (Restore first).
+  // Released orders are closed; cancelled ones owe nothing (Restore first). The server enforces both.
   const canEditAddOns = !isCancelled && reg.status !== 'released';
+  // Makeup can be added until the shoot is done: during the shoot the client goes back to the MUA queue.
+  const inShoot = reg.status === 'shooting';
+  const photosDone = !['pending_payment', 'paid', 'shooting'].includes(reg.status);
   const addAddOn = () => {
     const item = addOnCatalog.find((entry) => entry.id === addOnToAdd);
     if (!item) return;
@@ -108,8 +111,28 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   };
 
   const cents = (value: number | undefined) => Math.round((value || 0) * 100);
+  const clientKind = walkIn ? 'walkin' : 'school';
+  // Packages on sale for this type of client, plus the order's own package (even if retired since).
+  const packageChoices = packages.filter((pkg) => pkg.id === reg.package
+    || (pkg.is_active && [clientKind, 'both'].includes(pkg.client_kind || 'school')));
   const selectedPkg = packages.find((p) => p.id === packageId);
   const packageChanged = Boolean(selectedPkg) && packageId !== reg.package;
+
+  // Same rule as the server: when the package or add-ons change, the automatic add-on for clients
+  // without makeup is added (order no longer brings makeup) or dropped (it does).
+  const defaultAddOn = addOnCatalog.find((item) => item.is_active && item.default_when_no_mua
+    && [clientKind, 'both'].includes(item.client_kind || 'both'));
+  const isAuto = (item: RegistrationAddOn) => !!item.auto_applied || (!!defaultAddOn && item.id === defaultAddOn.id);
+  const bringsMakeup = !!selectedPkg?.requires_mua
+    || addOns.some((item) => addOnCatalog.find((entry) => entry.id === item.id)?.requires_mua);
+  const autoAddOn = (packageChanged || addOnsChanged) && defaultAddOn && !bringsMakeup
+    ? savedAddOns.find((item) => item.id === defaultAddOn.id) ?? { id: defaultAddOn.id, code: defaultAddOn.code, name: defaultAddOn.name, amount: defaultAddOn.amount }
+    : undefined;
+  const pricedAddOns = packageChanged || addOnsChanged
+    ? [...addOns.filter((item) => !isAuto(item)), ...(autoAddOn ? [autoAddOn] : [])]
+    : addOns;
+  const addsMakeup = addOns.some((item) => !savedIds.has(item.id ?? '')
+    && addOnCatalog.find((entry) => entry.id === item.id)?.requires_mua);
   const discountChanged = studioDiscount !== (reg.revenue_discount?.studio ?? 0) / 100
     || muaDiscount !== (reg.revenue_discount?.mua ?? 0) / 100
     || ((studioDiscount > 0 || muaDiscount > 0) && discountReason.trim() !== (reg.revenue_discount?.reason ?? ''));
@@ -117,8 +140,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const priceChanged = itemsChanged || discountChanged;
   // Same rule as the server: a new package is priced from the catalog; otherwise only the add-ons are swapped.
   const subtotal = packageChanged && selectedPkg
-    ? cents(selectedPkg.amount) + cents(sumAddOnAmounts(addOns)) + cents(reg.other_fees)
-    : cents(reg.total_amount) + discountCents(reg) - cents(sumAddOnAmounts(savedAddOns)) + cents(sumAddOnAmounts(addOns));
+    ? cents(selectedPkg.amount) + cents(sumAddOnAmounts(pricedAddOns)) + cents(reg.other_fees)
+    : cents(reg.total_amount) + discountCents(reg) - cents(sumAddOnAmounts(savedAddOns)) + cents(sumAddOnAmounts(pricedAddOns));
   const totalCents = subtotal - cents(studioDiscount) - cents(muaDiscount);
   const currentTotal = totalCents / 100;
   const paid = reg.paid_amount || 0;
@@ -406,9 +429,11 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 <select
                   value={packageId}
                   onChange={(e) => setPackageId(e.target.value)}
-                  className="w-full p-2 bg-canvas border border-line font-bold"
+                  disabled={!canEditAddOns}
+                  title={!canEditAddOns ? (isCancelled ? 'Restore the job order to change its package.' : 'Released orders can\'t change package.') : undefined}
+                  className="w-full p-2 bg-canvas border border-line font-bold disabled:opacity-60"
                 >
-                  {packages.map((pkg) => (
+                  {packageChoices.map((pkg) => (
                     <option key={pkg.id} value={pkg.id}>
                       {pkg.code} - {pkg.name} ({formatCurrency(pkg.amount)})
                     </option>
@@ -472,7 +497,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                       className="flex-1 min-w-0 p-2 bg-canvas border border-line">
                       <option value="">Choose an add-on to add…</option>
                       {addableAddOns.map((item) => (
-                        <option key={item.id} value={item.id}>
+                        <option key={item.id} value={item.id} disabled={photosDone && !!item.requires_mua}>
                           {item.code ? `${item.code} - ` : ''}{item.name} ({formatCurrency(item.amount, { exact: true })}){item.requires_mua ? ' · makeup / grooming' : ''}
                         </option>
                       ))}
@@ -491,6 +516,24 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
               {addOnsChanged && (
                 <p className="text-[10px] text-neutral-600">
                   Total and balance update when you save. New add-ons are charged at today&apos;s catalog price; the cashier collects any new balance.
+                </p>
+              )}
+              {canEditAddOns && photosDone && addableAddOns.some((item) => item.requires_mua) && (
+                <p className="text-[10px] text-neutral-600">Photos are already done, so makeup or grooming add-ons can&apos;t be added.</p>
+              )}
+              {addsMakeup && (inShoot || reg.makeup_state === 'completed') && (
+                <p role="alert" className="p-2 border border-gold bg-gold-wash text-[11px] leading-relaxed">
+                  {inShoot
+                    ? 'Saving pauses the shoot: the client goes back to the MUA queue for the new makeup, keeps their photo queue number, and the camera is unlinked. Call them again on the Photo Floor once makeup is done.'
+                    : 'Saving sends the client back to the MUA queue for the new makeup. The artist is credited only for the new service.'}
+                </p>
+              )}
+              {defaultAddOn && (packageChanged || addOnsChanged)
+                && autoAddOn?.id !== addOns.find(isAuto)?.id && (
+                <p className="text-[10px] text-neutral-600">
+                  {autoAddOn
+                    ? `${defaultAddOn.name} (${formatCurrency(autoAddOn.amount, { exact: true })}) is added automatically: this order no longer includes makeup or grooming.`
+                    : `${defaultAddOn.name} is removed automatically: this order now includes makeup or grooming.`}
                 </p>
               )}
             </div>

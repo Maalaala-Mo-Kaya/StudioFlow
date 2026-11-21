@@ -20,7 +20,8 @@ interface AdminOrgsTabProps {
   onNewOrgNameChange: (val: string) => void;
   newOrgCode: string;
   onNewOrgCodeChange: (val: string) => void;
-  onAddOrg: (e: React.FormEvent) => void;
+  /** Registers the school; resolves to its id (undefined when it failed). */
+  onAddOrg: (e: React.FormEvent) => Promise<string | undefined>;
   onUpdateOrg: (id: string, name: string, code: string, askLook: boolean) => Promise<void>;
   onToggleOrgActive: (id: string, current: boolean) => Promise<void>;
   onDeleteOrg: (id: string) => Promise<void>;
@@ -83,9 +84,13 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
   const levelChoice = preferredLevelId
     || (levelOptions[0]?.id ?? (newLevelChoices.includes('College') ? 'new:College' : OTHER_LEVEL));
   // A new level picked earlier becomes a real level after the first course is added to it.
+  // A level borrowed from another school becomes this school's own level (same name) once its
+  // first course is added; follow it by name so the choice survives the refresh.
+  const chosenTemplate = levels.find((level) => level.id === levelChoice);
+  const choiceName = levelChoice.startsWith('new:') ? levelChoice.slice(4) : chosenTemplate?.name;
   const selectedLevel = levelOptions.find((level) => level.id === levelChoice)
-    ?? (levelChoice.startsWith('new:')
-      ? levelOptions.find((level) => catalogKey(level.name) === catalogKey(levelChoice.slice(4)))
+    ?? (choiceName !== undefined
+      ? levelOptions.find((level) => catalogKey(level.name) === catalogKey(choiceName))
       : undefined);
   const selectedLevelId = selectedLevel?.id ?? '';
   const selectedLevelName = selectedLevel?.name
@@ -207,6 +212,16 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
     }
   };
 
+  // A newly registered school becomes the selected one, so its first course goes to it.
+  const handleRegisterSchool = async (e: React.FormEvent) => {
+    const id = await onAddOrg(e);
+    if (!id) return;
+    setSelectedSchoolId(id);
+    setPreferredLevelId('');
+    setCustomLevelName('');
+    setEditingCourseId(null);
+  };
+
   const promptDeleteOrg = (org: Organization) => {
     setConfirmModalState({
       isOpen: true,
@@ -256,7 +271,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
             </h3>
 
             {/* Create Org Form */}
-            <form onSubmit={onAddOrg} className="space-y-3 p-4 bg-canvas border-2 border-line mb-5">
+            <form onSubmit={handleRegisterSchool} className="space-y-3 p-4 bg-canvas border-2 border-line mb-5">
               <div>
                 <label className="block text-[10px] font-black uppercase mb-1">
                   School Name <span className="text-red-500">*</span>
@@ -456,14 +471,18 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                     onChange={(e) => setPreferredLevelId(e.target.value)}
                     className="w-full p-2 bg-panel border border-line font-bold"
                   >
-                    {levelOptions.length > 0 && (
-                      <optgroup label="Levels in use">
-                        {levelOptions.map((lvl) => (
+                    {schoolLevels.length > 0 && (
+                      <optgroup label={`Levels at ${selectedSchool?.code || selectedSchool?.name || 'this school'}`}>
+                        {levelOptions.filter((lvl) => lvl.organization === selectedSchool?.id).map((lvl) => (
                           <option key={lvl.id} value={lvl.id}>{lvl.name}</option>
                         ))}
                       </optgroup>
                     )}
-                    <optgroup label="Add another level">
+                    <optgroup label="Add a level">
+                      {/* Level names other schools already use. */}
+                      {levelOptions.filter((lvl) => lvl.organization !== selectedSchool?.id).map((lvl) => (
+                        <option key={lvl.id} value={lvl.id}>{lvl.name}</option>
+                      ))}
                       {newLevelChoices.map((name) => (
                         <option key={name} value={`new:${name}`}>{name}</option>
                       ))}
@@ -480,7 +499,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                       className="w-full mt-2 p-2 bg-panel border border-line font-bold"
                     />
                   )}
-                  {!selectedLevelId && levelReady && (
+                  {levelReady && selectedLevel?.organization !== selectedSchool?.id && (
                     <p className="mt-1 text-[10px] text-neutral-600">
                       &ldquo;{selectedLevelName}&rdquo; is added to {selectedSchool?.code || selectedSchool?.name || 'the school'} with its first course.
                     </p>

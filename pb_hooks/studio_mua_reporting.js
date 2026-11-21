@@ -10,9 +10,24 @@ function staffName(record) {
   return record.getString("name") || record.getString("username") || record.id;
 }
 
+// Which purchased service a completion came from (one add-on, the package, or an admin requirement).
+function sourceKey(source) {
+  return `${source?.source || ""}:${source?.id || source?.name || ""}`;
+}
+
 function logCompletion(app, job, artist, actor, completedAt) {
   const basisForService = earnings.purchasedEarnings(job);
-  const services = new Map(workflow.makeupServices(job).map((source) => [earnings.serviceKey(source), source]));
+  // A client can come back for more makeup (added later on the job order): credit only the services
+  // not already logged for this job, so earlier work is never paid twice.
+  const credited = new Set();
+  for (const log of app.findRecordsByFilter("mua_completions", "job_id = {:id}", "", 0, 0, { id: job.id })) {
+    let sources;
+    try { sources = JSON.parse(log.getString("sources") || "[]"); } catch (_) { sources = []; }
+    for (const source of Array.isArray(sources) ? sources : []) credited.add(sourceKey(source));
+  }
+  const services = new Map(workflow.makeupServices(job)
+    .filter((source) => !credited.has(sourceKey(source)))
+    .map((source) => [earnings.serviceKey(source), source]));
   const collection = app.findCollectionByNameOrId("mua_completions");
   const pkg = workflow.json(job, "package_snapshot");
   for (const [serviceId, source] of services) {

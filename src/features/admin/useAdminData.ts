@@ -139,21 +139,26 @@ export function useAdminData() {
   // All-time figures (the Overview tab can also show today or this month).
   const metrics = useMemo(() => overviewMetrics(registrations, payments, refunds), [registrations, payments, refunds]);
 
-  // Add Organization
-  const handleAddOrg = async (e: React.FormEvent) => {
+  // Add Organization. Returns the new school's id so the Schools tab can select it.
+  const handleAddOrg = async (e: React.FormEvent): Promise<string | undefined> => {
     e.preventDefault();
-    if (!newOrgName.trim()) return;
+    const name = newOrgName.trim();
+    if (!name) return undefined;
     try {
-      await pb.collection('organizations').create({
-        name: newOrgName.trim(),
+      const created = await pb.collection('organizations').create<Organization>({
+        name,
         code: newOrgCode.trim().toUpperCase(),
         is_active: true,
       });
       setNewOrgName('');
       setNewOrgCode('');
-      loadAllData();
+      await loadAllData();
+      toast.success(`School "${name}" registered. Add its levels and courses on the right.`);
+      return created.id;
     } catch (err) {
       console.error('Failed to add organization:', err);
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to register the school.');
+      return undefined;
     }
   };
 
@@ -460,7 +465,7 @@ export function useAdminData() {
       loadAllData();
     } catch (err) {
       console.error('Failed to delete package:', err);
-      toast.error('Failed to delete package.');
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to delete package.');
     }
   };
 
@@ -532,7 +537,7 @@ export function useAdminData() {
       loadAllData();
     } catch (err) {
       console.error('Failed to delete add-on:', err);
-      toast.error('Failed to delete add-on.');
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to delete add-on.');
     }
   };
 

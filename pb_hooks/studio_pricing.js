@@ -38,6 +38,28 @@ function snapshotAddOn(item) {
   };
 }
 
+/** A package's inclusions as a list of text items (saved as a JSON array or a JSON-encoded string). */
+function packageInclusions(pkg) {
+  let value = pkg.getString("inclusions");
+  for (let i = 0; i < 2 && typeof value === "string"; i++) {
+    // Not JSON: an old record holding one plain-text inclusion.
+    try { value = JSON.parse(value || "null"); } catch (_) { return value.trim() ? [value] : []; }
+  }
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()) : [];
+}
+
+/**
+ * What the client bought, frozen on the job order: price, name and the package contents
+ * (inclusions and photo selection limit), so later catalog edits don't change past orders.
+ */
+function snapshotPackage(pkg) {
+  return {
+    id: pkg.id, code: pkg.getString("code"), name: pkg.getString("name"), amount: pkg.getFloat("amount"),
+    revenue_category: pkg.getString("revenue_category"),
+    inclusions: packageInclusions(pkg), photo_selection_limit: pkg.getInt("photo_selection_limit"),
+  };
+}
+
 /**
  * Turns the client's add-on choices into catalog snapshots { id, code, name, amount }.
  * Add-ons already on the job order (`previous`) keep the price they were sold at; new ones must be
@@ -77,4 +99,26 @@ function priceAddOns(app, selections, previous = [], clientKind = "school") {
   });
 }
 
-module.exports = { addOnCents, cents, defaultAddOns, offeredTo, priceAddOns, savedAddOns, snapshotAddOn };
+/**
+ * The automatic add-on (the default for clients without makeup or grooming) follows an edited order:
+ * it is kept or added when the order no longer brings makeup, and dropped when it does.
+ * Works on the order's add-ons as sent (ids) or priced; sets and returns the adjusted list.
+ * Both registration update hooks call it, so the result doesn't depend on which hook runs first.
+ */
+function applyAutoAddOn(app, record, clientKind) {
+  const items = savedAddOns(record);
+  const [defaultAddOn] = defaultAddOns(app, clientKind);
+  const isAuto = (item) => item?.auto_applied || (defaultAddOn && item?.id === defaultAddOn.id);
+  const kept = items.filter((item) => !isAuto(item));
+  record.set("add_ons", kept);
+  const bringsMakeup = require(__hooks + "/studio_workflow.js").purchasedServices(app, record).length > 0;
+  if (!bringsMakeup && defaultAddOn) {
+    // Already on the order: keep the price it was sold at.
+    const sold = items.find((item) => item?.id === defaultAddOn.id && Number.isFinite(item.amount));
+    kept.push(sold ? { ...sold, auto_applied: true } : { ...snapshotAddOn(defaultAddOn), auto_applied: true });
+    record.set("add_ons", kept);
+  }
+  return kept;
+}
+
+module.exports = { addOnCents, applyAutoAddOn, cents, defaultAddOns, offeredTo, packageInclusions, priceAddOns, savedAddOns, snapshotAddOn, snapshotPackage };

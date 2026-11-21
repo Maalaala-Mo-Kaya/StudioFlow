@@ -201,7 +201,11 @@ export interface Registration {
   mobile_number: string;
   email?: string;
   package: string;
-  package_snapshot?: { id: string; code: string; name: string; amount?: number; revenue_category?: RevenueCategory | '' } | null;
+  /** What the client bought, frozen at sale: price, name and package contents. */
+  package_snapshot?: {
+    id: string; code: string; name: string; amount?: number; revenue_category?: RevenueCategory | '';
+    inclusions?: string[]; photo_selection_limit?: number;
+  } | null;
   add_ons?: RegistrationAddOn[];
   other_fees?: number;
   revenue_terms?: RevenueSplit | null;

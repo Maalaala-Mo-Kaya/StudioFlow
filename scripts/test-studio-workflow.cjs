@@ -29,6 +29,10 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const home = await mkdtemp(join(tmpdir(), 'studioflow-workflow-'));
   const data = join(home, 'db');
   const photos = join(home, 'photos');
+  // An empty public folder: otherwise PocketBase serves the repo's deployed pb_public, whose
+  // index fallback answers unknown routes with 200 and hides missing-route (404) checks.
+  const publicDir = join(home, 'public');
+  await mkdir(publicDir);
   const host = 'http://127.0.0.1:' + await port();
   const flags = ['--dir', data, '--hooksDir', join(repo, 'pb_hooks'), '--migrationsDir', join(repo, 'pb_migrations')];
   const options = { env: { ...process.env, STUDIOFLOW_PHOTOS_ROOT: photos }, windowsHide: true };
@@ -59,9 +63,15 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const legacyDb = new DatabaseSync(join(data, 'data.db'));
   try {
     const legacyAddon = legacyDb.prepare("SELECT id, name, code, amount FROM add_ons WHERE code = 'ADD-HAIRMAKEUP'").get();
+    // Inclusions saved the way the admin screen sends them (a JSON-encoded string).
+    legacyDb.prepare(`INSERT INTO packages (id, code, name, amount, inclusions, is_active, created, updated)
+      VALUES ('legacypkg00001', 'LEG', 'Legacy Package', 500, ?, 1, '2026-01-01 00:00:00.000Z', '2026-01-01 00:00:00.000Z')`)
+      .run(JSON.stringify(JSON.stringify(['8x10 frame', 'Soft copies'])));
     legacyDb.prepare(`INSERT INTO registrations
-      (id, job_order_no, family_name, given_name, status, add_ons, paid_amount, total_amount, balance, payment_status)
-      VALUES (?, '00050', 'Dela Cruz', 'Juan Carlos', 'done_shooting', ?, 1000, 1500, 500, 'downpayment')`)
+      (id, job_order_no, family_name, given_name, status, add_ons, paid_amount, total_amount, balance, payment_status,
+        package, package_snapshot)
+      VALUES (?, '00050', 'Dela Cruz', 'Juan Carlos', 'done_shooting', ?, 1000, 1500, 500, 'downpayment', 'legacypkg00001',
+        json_object('id', 'legacypkg00001', 'code', 'LEG', 'name', 'Legacy Package', 'configuredAmount', 500))`)
       .run(legacyId, JSON.stringify([legacyAddon]));
     legacyDb.prepare(`INSERT INTO payments
       (id, registration, amount, payment_type, payment_method, cash_tendered, receipt_no, status, created, updated)
@@ -94,7 +104,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     ]), 80);
   } finally { oldMuaDb.close(); }
   async function startServer() {
-    server = spawn(executable, ['serve', '--http', host.slice(7), ...flags], options);
+    server = spawn(executable, ['serve', '--http', host.slice(7), '--publicDir', publicDir, ...flags], options);
     for (const stream of [server.stdout, server.stderr]) stream.on('data', (chunk) => { logs += chunk; });
     for (let attempt = 0; attempt < 60; attempt++) {
       if (await fetch(host + '/api/health').then((res) => res.ok).catch(() => false)) return;
@@ -157,7 +167,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     for (const [key, value] of Object.entries({
       family_name: 'Dela Cruz', given_name: 'Juan Carlos', middle_name: 'D', gender: 'male', mobile_number: '09170000000',
       organization: school.id, level: level.id, course: course.id, package: pkg.id, student_id: studentId,
-      terms_accepted: 'true', email: 'person@example.test', add_ons: JSON.stringify(addOns),
+      terms_accepted: 'true', email: 'person@example.test', mobile_number: '0917-000-0000', add_ons: JSON.stringify(addOns),
       status: 'shooting', paid_amount: '1000', makeup_look: 'full', ...fields,
     })) form.set(key, value);
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');
@@ -195,6 +205,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.deepEqual([legacyPayment.receipt_no, legacyPayment.balance_before, legacyPayment.balance_after], ['REC-legacy-receipt', 1500, 500]);
   assert.equal(legacy.status, 'done_shooting');
   assert.equal(legacy.job_order_no, '00050');
+  // The upgrade adds the package contents to the saved snapshot and keeps the sold-price fields as saved.
+  assert.deepEqual(legacy.package_snapshot, {
+    id: 'legacypkg00001', code: 'LEG', name: 'Legacy Package', configuredAmount: 500,
+    inclusions: ['8x10 frame', 'Soft copies'], photo_selection_limit: 0,
+  });
   const builtInAddOn = (await send(records('add_ons'))).payload.items.find((item) => item.code === 'ADD-HAIRMAKEUP');
   assert.equal(builtInAddOn.requires_mua, true);
   await registrations(legacy, admin, { family_name: 'Corrected Name' });
@@ -231,6 +246,25 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const liveUpdate = await Promise.race([readEvent('studioflow-workflow'), delay(4000, 'timeout', { ref: false })]);
   assert.deepEqual(liveUpdate, {}, 'The server must notify connected realtime clients.');
   const unpaid = await register(prepared);
+  // The kiosk needs a mobile number (email is optional but must be valid when given).
+  const contactErrors = (fields) => register(standard, [], 400, fields).then((payload) => Object.keys(payload.data || {}));
+  assert.deepEqual(await contactErrors({ mobile_number: '' }), ['mobile_number']);
+  assert.deepEqual(await contactErrors({ mobile_number: '12345' }), ['mobile_number']);
+  assert.deepEqual(await contactErrors({ email: 'not-an-email' }), ['email']);
+  // Each job order keeps the package contents it was sold with.
+  assert.deepEqual([plain.package_snapshot.inclusions, plain.package_snapshot.photo_selection_limit, plain.package_snapshot.amount],
+    [['Makeup and grooming'], 0, 1000]);
+  assert.deepEqual([unpaid.package_snapshot.inclusions, unpaid.package_snapshot.photo_selection_limit], [[], 2]);
+  await patchCatalog('packages', prepared, { inclusions: JSON.stringify(['Changed later']), photo_selection_limit: 9 });
+  assert.deepEqual((await registrations(unpaid)).payload.package_snapshot, unpaid.package_snapshot,
+    'Editing a package does not change orders already placed.');
+  await patchCatalog('packages', prepared, { inclusions: JSON.stringify([]), photo_selection_limit: 2 });
+  // A package or add-on that orders use can't be deleted (deactivate it instead); unused ones can.
+  await send(records('packages', prepared.id), { token: admin, method: 'DELETE', status: 409 });
+  const unusedPackage = await create('packages', { code: 'TMP', name: 'Unused', amount: 0, is_active: true });
+  await send(records('packages', unusedPackage.id), { token: admin, method: 'DELETE', status: 204 });
+  const unusedAddOn = await create('add_ons', { code: 'TMP-ADD', name: 'Unused add-on', amount: 0, is_active: true });
+  await send(records('add_ons', unusedAddOn.id), { token: admin, method: 'DELETE', status: 204 });
   assert.deepEqual([plain.job_order_no, plain.queue_number, unpaid.job_order_no, unpaid.queue_number], [null, null, null, null]);
   assert.deepEqual([(await registrations(plain, cashier)).payload.job_order_no, (await registrations(plain, cashier)).payload.queue_number], [null, null]);
   await pay(plain, 1, 'full', 400);
@@ -1312,7 +1346,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await register(studio, [{ id: groomingAddOn.id }], 400);
     assert.deepEqual((await auditFor(mixed)).totals.revenue, settled.totals.revenue);
     await patchCatalog('packages', studio, { amount: 1500, revenue_category: 'studio' });
-    await send(records('add_ons', groomingAddOn.id), { token: admin, method: 'DELETE', status: 204 });
+    await send(records('add_ons', groomingAddOn.id), { token: admin, method: 'DELETE', status: 409 }); // sold on `mixed`
     assert.deepEqual((await auditFor(mixed)).totals.revenue, settled.totals.revenue);
     await registrations(mixed, cashier, { order_discount: { studio: 0, mua: 50, reason: 'staff discount' } }, 403);
     await registrations(mixed, admin, { order_discount: { studio: 0, mua: 50, reason: '' } }, 400);
@@ -1413,12 +1447,108 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal((await getTeam(replacement)).manage, true);
     assert.ok((await report()).rows.some((row) => row.id === parent.id && row.details.some((detail) => detail.jobId === muaOnly.id)));
     await shoot(mixed, 'shooting');
-    await send(records('packages', studio.id), { token: admin, method: 'DELETE', status: 204 });
+    await send(records('packages', studio.id), { token: admin, method: 'DELETE', status: 409 }); // sold on `mixed`
+    await patchCatalog('packages', studio, { name: 'Renamed later', is_active: false });
     const retained = await auditFor(mixed);
     assert.equal(retained.orders[0].registration.package_snapshot.name, 'Portrait');
     assert.equal(retained.byPackage[0].key, studio.id);
     assert.deepEqual(retained.totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
   });
+
+  // Admin edits of a job order's package and add-ons at each stage.
+  {
+    const plainPkg = await create('packages', { code: 'EDIT', name: 'Edit Portrait', amount: 1000, is_active: true, revenue_category: 'studio' });
+    const retiredPkg = await create('packages', { code: 'RETIRED', name: 'Retired Portrait', amount: 500, is_active: false, revenue_category: 'studio' });
+    const walkinPkg = await create('packages', { code: 'WALK-ONLY', name: 'Walk-in Portrait', amount: 700, is_active: true, client_kind: 'walkin', revenue_category: 'studio' });
+    const lateMakeup = await create('add_ons', { code: 'LATE-MU', name: 'Late makeup', amount: 200, is_active: true, revenue_category: 'mua', requires_mua: true });
+    const lateGrooming = await create('add_ons', { code: 'LATE-GR', name: 'Late grooming', amount: 150, is_active: true, revenue_category: 'mua', requires_mua: true });
+    const lateFrame = await create('add_ons', { code: 'LATE-FR', name: 'Late frame', amount: 300, is_active: true, revenue_category: 'studio' });
+    const editArtist = await createStaff('editartist', 'mua');
+    const edit = (job, body, status = 200) => registrations(job, admin, body, status).then((r) => r.payload);
+    const ids = (job) => job.add_ons.map((item) => item.id);
+    const doMakeup = async (job) => {
+      const version = String((await queue(admin)).find((row) => row.id === job.id).version);
+      await contest(job, admin, 'assign', 200, { artistId: editArtist.id, version });
+      const next = String(Number(version) + 1);
+      await contest(job, admin, 'start', 200, { onBehalf: true, artistId: editArtist.id, version: next });
+      await contest(job, admin, 'complete', 200, { onBehalf: true, artistId: editArtist.id, version: next });
+    };
+    // Completion logs are superuser-only through the API: read them from the database.
+    const credited = async (job) => {
+      const db = new DatabaseSync(join(data, 'data.db'), { readOnly: true });
+      try {
+        return db.prepare('SELECT service_name FROM mua_completions WHERE job_id = ? ORDER BY completed_at, rowid')
+          .all(job.id).map((row) => row.service_name);
+      } finally { db.close(); }
+    };
+
+    // A changed package must be on sale and offered to the client's type.
+    const basic = await register(plainPkg);
+    assert.match((await edit(basic, { package: retiredPkg.id }, 400)).message, /no longer offered/);
+    assert.match((await edit(basic, { package: walkinPkg.id }, 400)).message, /not offered to school clients/);
+
+    // The automatic add-on follows the order when makeup is added or removed.
+    const autoFee = await create('add_ons', {
+      code: 'AUTO-FEE', name: 'Styling fee', amount: 40, is_active: true, client_kind: 'school',
+      revenue_category: 'mua', default_when_no_mua: true,
+    });
+    const withFee = await register(plainPkg, [], 200, { no_mua_default_quote: autoFee.id + ':4000' });
+    assert.deepEqual([ids(withFee), withFee.total_amount], [[autoFee.id], 1040]);
+    await pay(withFee, 1040);
+    const addedMakeup = await edit(withFee, { add_ons: [{ id: autoFee.id }, { id: lateMakeup.id }] });
+    assert.deepEqual([ids(addedMakeup), addedMakeup.total_amount, addedMakeup.balance, addedMakeup.makeup_service],
+      [[lateMakeup.id], 1200, 160, 'Late makeup'], 'Makeup replaces the automatic add-on.');
+    const removedMakeup = await edit(withFee, { add_ons: [] });
+    assert.deepEqual([ids(removedMakeup), removedMakeup.total_amount, removedMakeup.balance, removedMakeup.makeup_service],
+      [[autoFee.id], 1040, 0, 'Styling fee'], 'Without makeup the automatic add-on (and its service) comes back.');
+    assert.equal(removedMakeup.add_ons[0].auto_applied, true);
+    await patchCatalog('add_ons', autoFee, { is_active: false });
+
+    // Fully paid, mid-shoot, the client asks for makeup: back to the MUA queue, then to the shoot.
+    const midShoot = await register(plainPkg);
+    await pay(midShoot, 1000);
+    await shoot(midShoot, 'shooting');
+    const queueNumber = (await registrations(midShoot)).payload.queue_number;
+    assert.equal((await cameraApi('start', { registration: midShoot.id })).client.id, midShoot.id);
+    await drop('before-makeup.jpg');
+    const sentBack = await edit(midShoot, { add_ons: [{ id: lateMakeup.id }] });
+    assert.deepEqual(
+      [sentBack.status, sentBack.makeup_service, sentBack.makeup_state, sentBack.payment_status, sentBack.balance, sentBack.queue_number],
+      ['paid', 'Late makeup', '', 'downpayment', 200, queueNumber]);
+    assert.equal((await cameraApi('scan')).client, null, 'The camera is unlinked when the client leaves for makeup.');
+    const midFolder = (await send(`${api}/photo-folder/${midShoot.id}`, { method: 'POST', token: photographer })).payload.path;
+    assert.ok((await readdir(midFolder)).includes('before-makeup.jpg'), 'Shots taken before the pause stay with the client.');
+    await shoot(midShoot, 'shooting', 400);
+    assert.ok((await queue(admin)).some((row) => row.id === midShoot.id));
+    await doMakeup(midShoot);
+    assert.deepEqual(await credited(midShoot), ['Late makeup']);
+    await shoot(midShoot, 'shooting');
+
+    // A second round mid-shoot credits only the new service.
+    const secondRound = await edit(midShoot, { add_ons: [{ id: lateMakeup.id }, { id: lateGrooming.id }] });
+    assert.deepEqual([secondRound.status, secondRound.makeup_state, secondRound.makeup_service],
+      ['paid', '', 'Late makeup + Late grooming']);
+    await doMakeup(midShoot);
+    assert.deepEqual(await credited(midShoot), ['Late makeup', 'Late grooming'], 'Earlier makeup is not credited twice.');
+    await shoot(midShoot, 'shooting');
+    await shoot(midShoot, 'done_shooting');
+
+    // After the shoot: no new makeup, but other add-ons still bill the client.
+    const lateTouch = await create('add_ons', { code: 'LATE-TU', name: 'Late touch up', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true });
+    assert.match((await edit(midShoot, { add_ons: [{ id: lateMakeup.id }, { id: lateGrooming.id }, { id: lateTouch.id }] }, 409)).message,
+      /Photos are already done/);
+    const framed = await edit(midShoot, { add_ons: [{ id: lateMakeup.id }, { id: lateGrooming.id }, { id: lateFrame.id }] });
+    assert.deepEqual([framed.status, framed.balance, framed.payment_status], ['done_shooting', 650, 'downpayment']);
+    await pay(midShoot, 650, 'additional');
+
+    // Released and cancelled orders keep their items.
+    await send(api + '/production-status', { method: 'POST', token: admin, body: { ids: [midShoot.id], status: 'ready_for_pickup' } });
+    await registrations(midShoot, cashier, { status: 'released', claimed_by: 'Client' });
+    assert.match((await edit(midShoot, { add_ons: [] }, 400)).message, /already released/);
+    await pay(basic, 1000);
+    await send(`${api}/registrations/${basic.id}/cancel`, { method: 'POST', token: admin, body: { reason: 'Client left' } });
+    assert.match((await edit(basic, { add_ons: [{ id: lateFrame.id }] }, 400)).message, /Restore it/);
+  }
 
   // Both export formats use the same row matrix as the dashboard.
   const { muaReportTable } = await import('../src/features/admin/muaPerformance.ts');

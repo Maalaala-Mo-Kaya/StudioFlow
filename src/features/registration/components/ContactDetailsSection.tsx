@@ -38,6 +38,7 @@ export const ContactDetailsSection: React.FC<ContactDetailsSectionProps> = ({
           <input
             {...validationProps('mobile_number', errors.mobile_number)}
             type="tel"
+            required
             placeholder="0917-000-0000"
             value={mobileNumber}
             onChange={(e) => onMobileNumberChange(e.target.value)}

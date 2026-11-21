@@ -97,6 +97,17 @@ export function parsePackageInclusions(inclusions: string[] | string | undefined
 }
 
 /**
+ * The inclusions the client bought: frozen on the job order, or (older orders) the package's current list.
+ */
+export function orderInclusions(reg: {
+  package_snapshot?: { inclusions?: string[] } | null;
+  expand?: { package?: { inclusions?: string[] | string } };
+}): string[] {
+  const sold = reg.package_snapshot?.inclusions;
+  return Array.isArray(sold) ? sold : parsePackageInclusions(reg.expand?.package?.inclusions);
+}
+
+/**
  * Splits a full name from a master roster into `{ givenName, familyName }`.
  */
 export function splitFullName(fullName: string): { givenName: string; familyName: string } {

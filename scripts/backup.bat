@@ -17,15 +17,23 @@ if not exist "pb_data\data.db" (
     exit /b 1
 )
 
-for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set dt=%%I
-set TIMESTAMP=%dt:~0,8%_%dt:~8,6%
+:: Timestamp from PowerShell (wmic is no longer included in current Windows 11 builds).
+set TIMESTAMP=
+for /f "usebackq tokens=*" %%a in (`powershell -NoProfile -Command "Get-Date -Format 'yyyyMMdd_HHmmss'"`) do set TIMESTAMP=%%a
 if "%TIMESTAMP%"=="" (
-    for /f "usebackq tokens=*" %%a in (`powershell -NoProfile -Command "Get-Date -Format 'yyyyMMdd_HHmmss'"`) do set TIMESTAMP=%%a
+    echo [ERROR] Could not read the current date and time. Aborting backup.
+    pause
+    exit /b 1
 )
 
 set BACKUP_DIR=backups\backup_%TIMESTAMP%
 if not exist "backups" mkdir "backups"
 mkdir "%BACKUP_DIR%"
+if not exist "%BACKUP_DIR%" (
+    echo [ERROR] Could not create %BACKUP_DIR%. Aborting backup.
+    pause
+    exit /b 1
+)
 
 echo Creating snapshot in %BACKUP_DIR%...
 powershell -NoProfile -Command "Copy-Item -Path 'pb_data' -Destination '%BACKUP_DIR%\pb_data' -Recurse -Force"
