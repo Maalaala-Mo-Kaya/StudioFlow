@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
@@ -7,20 +8,37 @@ import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { studioDate } from '../../utils/studioDay';
 import type { MuaTeam } from './muaTeam';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
-import { MakeupClientTable, MakeupTeamTable } from './MakeupTables';
+import { MakeupClientTable, MakeupTeamTable, type MakeupTableView } from './MakeupTables';
 import { requiresConfirmation, type MakeupAssignment } from './makeupAssignment';
 import { stationButton, stationCard, StationLayout } from './StationLayout';
+import { StationTabs } from './StationTabs';
 
 type Action = 'assign' | 'claim' | 'start' | 'complete' | 'release';
+const tabs = [
+  { id: 'team', label: 'MUA Team Status' },
+  { id: 'waiting', label: 'Unassigned Clients' },
+  { id: 'assigned', label: 'Assigned Clients' },
+  { id: 'completed', label: 'Completed Services' },
+] as const;
+type MakeupTab = typeof tabs[number]['id'];
+const noRows: MakeupAssignment[] = [];
 
-export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
+export function MakeupPage({ embedded = false, teamSettings }: { embedded?: boolean; teamSettings?: ReactNode }) {
   const { user } = useAuth();
   const { toast } = useToast();
-  const { data, error, refresh } = useWorkflowData<MakeupAssignment[]>('/makeup?completed=0');
+  const [selection, setSelection] = useState<MakeupTab>();
+  const [views, setViews] = useState<Partial<Record<MakeupTab, MakeupTableView>>>({});
   const [date, setDate] = useState(() => studioDate());
   const { data: team, error: teamError, refresh: refreshTeam } = useWorkflowData<MuaTeam>(`/makeup-team?date=${encodeURIComponent(date)}`, undefined, true);
+  const admin = user?.role === 'admin';
+  const manage = admin || !!team?.manage;
+  const availableTabs = tabs.filter(({ id }) => id === 'team' ? manage : id === 'waiting' ? manage || team?.canClaim : true);
+  const defaultTab = admin ? 'waiting' : 'assigned';
+  const activeTab = selection && availableTabs.some(({ id }) => id === selection) ? selection : defaultTab;
+  const queueTab = activeTab === 'waiting' || activeTab === 'assigned';
+  const { data, error, refresh } = useWorkflowData<MakeupAssignment[]>(queueTab ? '/makeup?completed=0' : null);
   const { data: completed, error: completedError, refresh: refreshCompleted } =
-    useWorkflowData<MakeupAssignment[]>(`/makeup-completed?date=${encodeURIComponent(date)}`);
+    useWorkflowData<MakeupAssignment[]>(activeTab === 'completed' ? `/makeup-completed?date=${encodeURIComponent(date)}` : null);
   const workingLock = useRef(false);
   const [working, setWorking] = useState(false);
   const [conflict, setConflict] = useState(false);
@@ -28,12 +46,19 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
   const [release, setRelease] = useState<MakeupAssignment>();
   const [confirmCompletion, setConfirmCompletion] = useState<MakeupAssignment>();
   const [assignment, setAssignment] = useState<{ row: MakeupAssignment; artistId: string }>();
-  const admin = user?.role === 'admin';
-  const manage = !!team?.manage;
-  const targets = team?.artists.filter((artist) => !artist.disabled && (!artist.parent || team.allowSelf)) ?? [];
-  const waiting = useMemo(() => data?.filter((row) => row.state === 'waiting' &&
-    !(unavailable?.id === row.id && unavailable.version === row.version)) ?? [], [data, unavailable]);
-  const active = useMemo(() => data?.filter((row) => row.state === 'claimed' || row.state === 'in_progress') ?? [], [data]);
+  const artists = useMemo(() => team?.artists.filter((artist) => !artist.disabled) ?? [], [team]);
+  const targets = artists.filter((artist) => !artist.parent || team?.allowSelf);
+  const queueRows = useMemo(() => {
+    if (activeTab === 'waiting') return data?.filter((row) => row.state === 'waiting' &&
+      !(unavailable?.id === row.id && unavailable.version === row.version)) ?? noRows;
+    if (activeTab === 'assigned') return data?.filter((row) => row.state === 'claimed' || row.state === 'in_progress') ?? noRows;
+    return noRows;
+  }, [activeTab, data, unavailable]);
+  const view = views[activeTab] ?? {};
+
+  function updateView(change: MakeupTableView) {
+    setViews((current) => ({ ...current, [activeTab]: { ...current[activeTab], ...change } }));
+  }
 
   function refreshTables() {
     refresh();
@@ -114,26 +139,48 @@ export function MakeupPage({ embedded = false }: { embedded?: boolean }) {
   }
 
   return (
-    <StationLayout title="Makeup / Grooming" refresh={refreshTables} embedded={embedded}>
-      {error && <p role="alert" className="text-sm font-bold text-red-700">{error}</p>}
-      {teamError && <p role="alert" className="text-sm font-bold text-red-700">{teamError}</p>}
-      {completedError && <p role="alert" className="text-sm font-bold text-red-700">{completedError}</p>}
-      {!team && !teamError && <p role="status" className="text-sm">Loading MUA team…</p>}
-      {data && <>
-        <label className="flex flex-wrap items-center gap-2 text-xs font-bold">
-          Completion date (Philippine time)
-          <input type="date" className="min-h-10 border border-line bg-panel px-2" value={date}
-            onChange={(event) => setDate(event.target.value || studioDate())} />
-        </label>
-        {manage && team && <MakeupTeamTable artists={team.artists} loading={team.date !== date} />}
-        {(manage || team?.canClaim) && <MakeupClientTable title="Unassigned clients" kind="waiting" rows={waiting}
-          empty="No students are waiting for makeup or grooming." renderAction={waitingActions} />}
-        <MakeupClientTable title={manage ? 'Assigned clients' : 'Your assignments'} kind="assigned" rows={active}
-          empty="No active assignments." renderDetailsActions={assignedActions} />
-        <MakeupClientTable title="Completed services" kind="completed" rows={completed ?? []}
-          loading={!completed && !completedError} empty="No services completed on this date." />
-      </>}
-      {!data && !error && <p role="status">Syncing makeup queue…</p>}
+    <StationLayout title="Makeup / Grooming" badge="MUA Station" liveLabel="Live Queue"
+      description="Manage MUA assignments and service confirmations." refresh={refreshTables} embedded={embedded}>
+      <StationTabs label="Makeup and grooming views" active={activeTab} onChange={setSelection}
+        tabs={availableTabs.map((tab) => ({
+          ...tab,
+          count: tab.id === 'team' && team?.date === date ? artists.length
+            : tab.id === 'completed' ? completed?.length
+              : tab.id === activeTab && data ? queueRows.length : undefined,
+        }))}>
+        {teamError && activeTab !== 'completed' && <p role="alert" className="text-sm font-bold text-red-700">{teamError}</p>}
+        {queueTab && error && <p role="alert" className="text-sm font-bold text-red-700">{error}</p>}
+        {activeTab === 'completed' && completedError && <p role="alert" className="text-sm font-bold text-red-700">{completedError}</p>}
+        {(activeTab === 'team' || activeTab === 'completed') && (
+          <label className="flex flex-wrap items-center gap-2 text-xs font-bold">
+            Completion date (Philippine time)
+            <input type="date" className="min-h-10 border border-line bg-panel px-2" value={date}
+              onChange={(event) => setDate(event.target.value || studioDate())} />
+          </label>
+        )}
+        {activeTab === 'team' ? (
+          <>
+            <MakeupTeamTable artists={team?.date === date ? artists : []}
+              loading={team?.date !== date && !teamError} sort={view.sort ?? null} onSort={(sort) => updateView({ sort })} />
+            {admin && teamSettings && (
+              <details className="border border-line bg-panel">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-gold-soft">Makeup artist team settings</summary>
+                {teamSettings}
+              </details>
+            )}
+          </>
+        ) : (
+          <MakeupClientTable key={activeTab} kind={activeTab} view={view} onViewChange={updateView}
+            title={activeTab === 'completed' ? 'Completed services' : activeTab === 'waiting'
+              ? 'Unassigned clients' : manage ? 'Assigned clients' : 'Your assignments'}
+            rows={activeTab === 'completed' ? completed ?? noRows : queueRows}
+            loading={activeTab === 'completed' ? !completed && !completedError : !data && !error}
+            empty={activeTab === 'completed' ? 'No completed services for this date.' : activeTab === 'waiting'
+              ? 'No unassigned clients waiting for MUA.' : 'No active assigned clients.'}
+            renderAction={activeTab === 'waiting' ? waitingActions : undefined}
+            renderDetailsActions={activeTab === 'assigned' ? assignedActions : undefined} />
+        )}
+      </StationTabs>
       {conflict && (
         <div role="alertdialog" aria-modal="true" aria-labelledby="makeup-conflict" className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
           <div className={`${stationCard} max-w-sm space-y-4`}>

@@ -1,3 +1,17 @@
+import type { Key } from 'react';
+
+export interface TableExpansion {
+  multiple: boolean;
+  keys: readonly Key[];
+}
+
+export const defaultTableExpansion: TableExpansion = { multiple: false, keys: [] };
+
+export function toggleTableRow(expansion: TableExpansion, key: Key): TableExpansion {
+  if (expansion.keys.includes(key)) return { ...expansion, keys: expansion.keys.filter((item) => item !== key) };
+  return { ...expansion, keys: expansion.multiple ? [...expansion.keys, key] : [key] };
+}
+
 export type SortValue = string | number | boolean | Date | null | undefined;
 export type TableSort = { column: string; direction: 'ascending' | 'descending' } | null;
 export type TablePage = { page: number; pageSize: number };

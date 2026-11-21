@@ -1,18 +1,21 @@
 import React from 'react';
-import { Camera, CheckCircle2 } from 'lucide-react';
+import { Camera, Volume2 } from 'lucide-react';
 import { usePhotographerQueue } from './usePhotographerQueue';
-import { PhotographerHeader } from './components/PhotographerHeader';
 import { PhotographerQueueCard } from './components/PhotographerQueueCard';
 import { PhotographerHistoryList } from './components/PhotographerHistoryList';
 import { CameraImportPanel } from './components/CameraImportPanel';
 import { useCameraLink } from './useCameraLink';
 import type { Registration } from '../../types';
+import { playStudioChime } from '../../utils/audio';
+import { StationLayout } from '../workflow/StationLayout';
+import { StationTabs } from '../workflow/StationTabs';
 
 export const PhotographerPage: React.FC = () => {
   const {
     queue,
     recentlyDone,
     loading,
+    loadError,
     activeTab,
     setActiveTab,
     currentlyShootingId,
@@ -34,101 +37,64 @@ export const PhotographerPage: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8">
-      {/* Studio Floor Banner */}
-      <PhotographerHeader onSync={fetchLiveQueue} />
+    <StationLayout title={<>Photographer <span className="text-gold">Session Queue</span></>}
+      badge="Photo Floor" liveLabel="Live Queue" description="Manage clients waiting for photography." refresh={fetchLiveQueue}
+      actions={<button type="button" onClick={playStudioChime}
+        className="btn-tactile flex min-h-11 items-center gap-2 border border-line bg-obsidian-2 px-4 text-xs font-black uppercase tracking-wide text-gold hover:border-gold focus-visible:outline-2">
+        <Volume2 className="size-4" aria-hidden="true" /> Chime
+      </button>}>
+      <StationTabs label="Photography queue views" active={activeTab} onChange={setActiveTab} tabs={[
+        { id: 'queue', label: 'Waiting Queue', count: queue.length },
+        { id: 'history', label: 'Completed Today', count: recentlyDone.length },
+      ]}>
+        {loadError && <p role="alert" className="text-sm font-bold text-red-700">{loadError}</p>}
+        {activeTab === 'queue' && <CameraImportPanel link={camera} />}
 
-      {/* Mode Switcher */}
-      <div className="animate-enter-delay-1 grid grid-cols-2 sm:flex items-center gap-2.5 mb-6">
-        <button
-          type="button"
-          onClick={() => setActiveTab('queue')}
-          className={`btn-tactile min-h-[44px] flex items-center justify-center gap-2 px-5 py-2 text-xs font-black uppercase tracking-wider border-2 cursor-pointer ${
-            activeTab === 'queue'
-              ? 'bg-obsidian text-gold border-line shadow-lux-gold'
-              : 'bg-panel text-neutral-700 border-neutral-300 hover:border-line'
-          }`}
-        >
-          <Camera className="w-4 h-4" />
-          <span>Waiting Queue</span>
-          <span
-            className={`font-mono px-1.5 py-0.5 text-[10px] font-black ${
-              activeTab === 'queue'
-                ? 'bg-gold text-on-gold'
-                : 'bg-neutral-200 text-ink'
-            }`}
-          >
-            {queue.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('history')}
-          className={`btn-tactile min-h-[44px] flex items-center justify-center gap-2 px-5 py-2 text-xs font-black uppercase tracking-wider border-2 cursor-pointer ${
-            activeTab === 'history'
-              ? 'bg-obsidian text-gold border-line shadow-lux-gold'
-              : 'bg-panel text-neutral-700 border-neutral-300 hover:border-line'
-          }`}
-        >
-          <CheckCircle2 className="w-4 h-4" />
-          <span>Completed Today</span>
-          <span
-            className={`font-mono px-1.5 py-0.5 text-[10px] font-black ${
-              activeTab === 'history'
-                ? 'bg-gold text-on-gold'
-                : 'bg-neutral-200 text-ink'
-            }`}
-          >
-            {recentlyDone.length}
-          </span>
-        </button>
-      </div>
-
-      {activeTab === 'queue' && <CameraImportPanel link={camera} />}
-
-      {/* QUEUE CARDS GRID */}
-      {activeTab === 'queue' && (
-        <div className="animate-enter-delay-1">
-          {loading ? (
-            <div className="bg-panel border-2 border-line p-16 text-center font-mono text-neutral-500 text-xs uppercase tracking-widest">
-              Syncing live studio queue...
-            </div>
-          ) : queue.length === 0 ? (
-            <div className="bg-panel border-2 border-line p-12 sm:p-20 text-center shadow-lux">
-              <div className="w-12 h-12 bg-obsidian text-gold flex items-center justify-center mx-auto mb-4">
-                <Camera className="w-6 h-6" />
+        {/* QUEUE CARDS GRID */}
+        {activeTab === 'queue' && (
+          <div className="animate-enter-delay-1">
+            {loading ? (
+              <div className="bg-panel border-2 border-line p-16 text-center font-mono text-neutral-500 text-xs uppercase tracking-widest">
+                Syncing live studio queue...
               </div>
-              <h3 className="text-lg font-black text-ink uppercase tracking-wider">
-                Studio Floor Queue is Clear
-              </h3>
-              <p className="text-xs sm:text-sm text-neutral-500 max-w-sm mx-auto mt-1">
-                New paid clients will appear here with an audio chime as soon as the cashier
-                confirms their payment.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {queue.map((reg, idx) => (
-                <PhotographerQueueCard
-                  key={reg.id}
-                  registration={reg}
-                  index={idx}
-                  isShooting={reg.id === currentlyShootingId || reg.status === 'shooting'}
-                  onCallStudent={callStudent}
-                  onMarkDone={markDone}
-                  cameraName={camera.camera?.enabled ? camera.camera.name : ''}
-                  cameraLinked={linkedId === reg.id}
-                  onLinkCamera={camera.linkClient}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+            ) : queue.length === 0 ? !loadError && (
+              <div className="bg-panel border-2 border-line p-12 sm:p-20 text-center shadow-lux">
+                <div className="w-12 h-12 bg-obsidian text-gold flex items-center justify-center mx-auto mb-4">
+                  <Camera className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-black text-ink uppercase tracking-wider">
+                  Studio Floor Queue is Clear
+                </h3>
+                <p className="text-xs sm:text-sm text-neutral-500 max-w-sm mx-auto mt-1">
+                  New paid clients will appear here with an audio chime as soon as the cashier
+                  confirms their payment.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {queue.map((reg, idx) => (
+                  <PhotographerQueueCard
+                    key={reg.id}
+                    registration={reg}
+                    index={idx}
+                    isShooting={reg.id === currentlyShootingId || reg.status === 'shooting'}
+                    onCallStudent={callStudent}
+                    onMarkDone={markDone}
+                    cameraName={camera.camera?.enabled ? camera.camera.name : ''}
+                    cameraLinked={linkedId === reg.id}
+                    onLinkCamera={camera.linkClient}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
-      {/* COMPLETED SHOOTS HISTORY */}
-      {activeTab === 'history' && <PhotographerHistoryList recentlyDone={recentlyDone} />}
-    </div>
+        {/* COMPLETED SHOOTS HISTORY */}
+        {activeTab === 'history' && (loading && !recentlyDone.length
+          ? <p role="status" className="text-sm text-neutral-600">Loading completed sessions…</p>
+          : (recentlyDone.length > 0 || !loadError) && <PhotographerHistoryList recentlyDone={recentlyDone} />)}
+      </StationTabs>
+    </StationLayout>
   );
 };

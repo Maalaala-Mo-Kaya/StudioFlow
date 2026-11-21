@@ -10,6 +10,7 @@ export function usePhotographerQueue() {
   const [queue, setQueue] = useState<Registration[]>([]);
   const [recentlyDone, setRecentlyDone] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<'queue' | 'history'>('queue');
   const [currentlyShootingId, setCurrentlyShootingId] = useState<string | null>(null);
 
@@ -33,6 +34,7 @@ export function usePhotographerQueue() {
 
       setQueue(queueRes);
       setRecentlyDone(doneRes.items);
+      setLoadError('');
 
       const shooting = queueRes.find((r) => r.status === 'shooting');
       setCurrentlyShootingId(shooting?.id ?? null);
@@ -40,7 +42,7 @@ export function usePhotographerQueue() {
       if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) {
         return;
       }
-      console.error('Failed to load photographer queue:', err);
+      setLoadError(workflowError(err));
     } finally {
       setLoading(false);
     }
@@ -104,6 +106,7 @@ export function usePhotographerQueue() {
     queue,
     recentlyDone,
     loading,
+    loadError,
     activeTab,
     setActiveTab,
     currentlyShootingId,

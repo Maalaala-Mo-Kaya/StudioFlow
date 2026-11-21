@@ -5,7 +5,10 @@ import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
 import { studioDate } from '../../utils/studioDay';
-import { stationButton, stationCard, stationGrid, StationLayout, StationStudentDetails, type StationStudent } from './StationLayout';
+import { DataTable, type DataTableColumn } from '../../components/common/DataTable';
+import { defaultTableExpansion, type TableExpansion } from '../../components/common/dataTableModel';
+import { StationTabs } from './StationTabs';
+import { stationButton, stationCard, stationInput, StationLayout, StationStudentDetails, type StationStudent } from './StationLayout';
 
 const availability = {
   available: 'Photos available',
@@ -58,10 +61,12 @@ interface ChooserList {
 export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
   const { toast } = useToast();
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState<Partial<Record<Done, number>>>({});
   const [filter, setFilter] = useState('');
   // Opens on the clients still to choose: the ones the chooser works through.
   const [done, setDone] = useState<Done>('not_selected');
+  const [expansions, setExpansions] = useState<Partial<Record<Done, TableExpansion>>>({});
+  const page = pages[done] ?? 1;
   const [school, setSchool] = useState('');
   const [course, setCourse] = useState('');
   // Date created (studio day, Manila): all, today, yesterday or a picked date.
@@ -76,9 +81,9 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
   const schools = filters.data?.schools ?? [];
   const chosenSchool = schools.find((item) => item.id === school);
   const filtered = !!(search.trim() || done !== 'not_selected' || school || course || filter || dayMode);
-  const change = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1); };
+  const change = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPages({}); };
   const clearFilters = () => {
-    setSearch(''); setDone('not_selected'); setSchool(''); setCourse(''); setFilter(''); setDayMode(''); setPage(1);
+    setSearch(''); setDone('not_selected'); setSchool(''); setCourse(''); setFilter(''); setDayMode(''); setPages({});
   };
 
   async function open(student: ChooserStudent) {
@@ -93,132 +98,138 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
+  function selectionAction(student: ChooserStudent) {
+    return (
+      <button className={stationButton} type="button" disabled={opening || !['available', 'recovering'].includes(student.availability)}
+        onClick={() => void open(student)}>
+        {student.availability === 'recovering' ? 'Resume transfer' : 'Open photo selection'}
+      </button>
+    );
+  }
+
+  const columns: DataTableColumn<ChooserStudent>[] = [
+    { id: 'job', header: 'Job Order №', accessor: (student) => student.jobOrder, cellClassName: 'whitespace-nowrap font-mono font-bold' },
+    { id: 'name', header: 'Client name', accessor: (student) => student.name, cellClassName: 'font-bold', minWidth: 120 },
+    { id: 'school', header: 'School / Client type', cell: (student) => <>
+      {student.school || '—'}{student.course && <span className="block text-neutral-600">{student.course}</span>}
+    </> },
+    { id: 'package', header: 'Package', accessor: (student) => student.packageName },
+    { id: 'status', header: 'Photo selection status', cell: (student) => (
+      <span className={`inline-block border px-1.5 py-0.5 font-bold ${student.selectionState === 'completed' ? 'border-emerald-600/40 text-emerald-700' : 'border-line text-ink'}`}>
+        {selectionStates[student.selectionState]}
+      </span>
+    ) },
+    { id: 'actions', header: 'Actions', cell: selectionAction, minWidth: 145 },
+  ];
+
   return (
-    <StationLayout title="Photo Chooser" refresh={refresh} embedded={embedded}>
-      {gallery ? <PhotoGallery key={gallery.student.id} initial={gallery} close={() => { setGallery(undefined); refresh(); }} /> : <>
-        <div className={`${stationCard} space-y-3`}>
-          {/* Selection: the main filter, with counts for the current search / school / course */}
-          <div role="group" aria-label="Photo selection" className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            {([
-              ['not_selected', 'Not yet selected', data?.counts?.notSelected],
-              ['selected', 'Already selected', data?.counts?.selected],
-              ['', 'All clients', data?.counts?.all],
-            ] as const).map(([value, label, count]) => (
-              <button key={value || 'all'} type="button" aria-pressed={done === value} onClick={() => change(setDone)(value)}
-                className={`btn-tactile min-h-12 px-3 border-2 text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer ${
-                  done === value ? 'bg-gold text-on-gold border-gold' : 'bg-panel text-ink border-line hover:border-gold'
-                }`}>
-                {label}
-                {count !== undefined && <span className={`font-mono text-[11px] px-1.5 py-0.5 ${done === value ? 'bg-obsidian text-gold' : 'bg-gold-wash text-gold-soft'}`}>{count}</span>}
-              </button>
-            ))}
-          </div>
-
-          {/* Search + school / course (advanced filter) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
-            <label className="block sm:col-span-2 lg:col-span-4">
-              <span className="block mb-1 text-xs font-black uppercase">Search all clients</span>
-              <input type="search" value={search} onChange={(event) => change(setSearch)(event.target.value)}
-                placeholder="Name, student ID, job order, school, course, company or session"
-                className="w-full min-h-11 border-2 border-line bg-panel px-3 py-2 text-sm" />
-            </label>
-            <label className="block lg:col-span-3">
-              <span className="block mb-1 text-xs font-black uppercase">School / client type</span>
-              <select className="w-full min-h-11 border-2 border-line bg-panel px-3 text-sm" value={school}
-                onChange={(event) => { setSchool(event.target.value); setCourse(''); setPage(1); }}>
-                <option value="">All schools &amp; clients</option>
-                {schools.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.clients})</option>)}
-              </select>
-            </label>
-            <label className="block lg:col-span-2">
-              <span className="block mb-1 text-xs font-black uppercase">{chosenSchool?.walkin ? 'Session' : 'Course'}</span>
-              <select className="w-full min-h-11 border-2 border-line bg-panel px-3 text-sm disabled:opacity-50" value={course}
-                disabled={!chosenSchool} onChange={(event) => change(setCourse)(event.target.value)}>
-                <option value="">{chosenSchool ? `All ${chosenSchool.walkin ? 'sessions' : 'courses'}` : 'Choose a school first'}</option>
-                {chosenSchool?.courses.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.clients})</option>)}
-              </select>
-            </label>
-            <div className="block sm:col-span-2 lg:col-span-3">
-              <label htmlFor="chooser-day" className="block mb-1 text-xs font-black uppercase">Job order created</label>
-              <div className="flex gap-2">
-                <select id="chooser-day" className="flex-1 min-w-0 min-h-11 border-2 border-line bg-panel px-3 text-sm" value={dayMode}
-                  onChange={(event) => change(setDayMode)(event.target.value as typeof dayMode)}>
-                  <option value="">All dates</option>
-                  <option value="today">Today</option>
-                  <option value="yesterday">Yesterday</option>
-                  <option value="pick">Pick a date…</option>
-                </select>
-                {dayMode === 'pick' && (
-                  <input type="date" aria-label="Date created" value={pickedDay} max={studioDate()}
-                    onChange={(event) => { if (event.target.value) change(setPickedDay)(event.target.value); }}
-                    className="min-h-11 border-2 border-line bg-panel px-2 text-sm" />
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[11px] text-neutral-600">
-              Showing photographed clients only{search.trim() ? ' that match the search' : ''}.
-              {day && ` Created ${dayMode === 'today' ? 'today' : dayMode === 'yesterday' ? 'yesterday' : 'on ' + day}.`}
-            </p>
-            <button type="button" className={stationButton} disabled={!filtered} onClick={clearFilters}>Clear filters</button>
-          </div>
-
-          {embedded && (
-            <label className="block max-w-xs">
-              <span className="block mb-1 text-xs font-black uppercase">Exact selection status</span>
-              <select className="w-full min-h-11 border-2 border-line bg-panel px-3 text-sm" value={filter}
-                onChange={(event) => change(setFilter)(event.target.value)}>
-                <option value="">Any status</option>
-                {Object.entries(selectionStates).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-          )}
-        </div>
-        {error && <p role="alert" className="text-sm font-bold text-red-700">{error}</p>}
-        {!data && !error && <p role="status">Looking up students…</p>}
-        {data?.items.length === 0 && (
-          <p className="text-sm text-neutral-600">
-            {search.trim() ? 'No photographed clients match this search and these filters. Clients appear here once the photographer marks their shoot done.'
-              : done === 'not_selected' ? 'Everyone photographed in this view has already chosen their photos.'
-              : done === 'selected' ? 'No one in this view has chosen their photos yet.'
-              : 'No completed sessions match this view.'}
-          </p>
-        )}
-        <div className={stationGrid}>
-          {data?.items.map((student) => (
-            <article key={student.id} className={`${stationCard} space-y-3`}>
-              <div className="flex items-start justify-between gap-2">
+    <StationLayout title="Photo Chooser" badge="Photo Selection" liveLabel="Live Status"
+      description="Manage client photo selections and completed selections." refresh={refresh} embedded={embedded}>
+      {gallery ? <PhotoGallery key={gallery.student.id} initial={gallery} close={() => { setGallery(undefined); refresh(); }} /> : (
+        <StationTabs label="Photo selection views" active={done} onChange={setDone} tabs={[
+          { id: 'not_selected', label: 'Not Yet Selected', count: data?.counts?.notSelected },
+          { id: 'selected', label: 'Already Selected', count: data?.counts?.selected },
+          { id: '', label: 'All Clients', count: data?.counts?.all },
+        ]}>
+          {error && <p role="alert" className="text-sm font-bold text-red-700">{error}</p>}
+          <DataTable label="Photo Chooser clients" rows={data?.items ?? []} columns={columns}
+            getRowId={(student) => student.id} pagination={false} loading={!data && !error} loadingMessage="Looking up clients…"
+            filtered={!!(search.trim() || school || course || filter || dayMode)}
+            filteredEmptyMessage="No photographed clients match the current filters."
+            emptyMessage={done === 'not_selected' ? 'No photographed clients are waiting for photo selection.'
+              : done === 'selected' ? 'No completed photo selections.' : 'No photographed clients found.'}
+            headerClassName="uppercase tracking-wide" tableClassName="min-w-[720px] [&_tr:has(button[aria-expanded=true])]:bg-gold-wash"
+            expansion={{ value: expansions[done] ?? defaultTableExpansion,
+              onChange: (next) => setExpansions((current) => ({ ...current, [done]: next })) }}
+            renderExpanded={(student) => (
+              <div className="space-y-3 text-sm">
                 <StationStudentDetails student={student} />
-                {['completed', 'needs_review'].includes(student.selectionState) ? (
-                  <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase border border-emerald-500 text-emerald-700 bg-emerald-50">
-                    <Check size={12} /> Selected
-                  </span>
-                ) : student.photographyComplete && (
-                  <span className="shrink-0 px-2 py-1 text-[10px] font-black uppercase border border-gold text-gold-soft bg-gold-wash">Not yet</span>
+                <dl className="grid gap-2 sm:grid-cols-2">
+                  <div><dt className="font-bold">Photography</dt><dd>{student.photographyComplete ? 'Completed' : 'Pending'}</dd></div>
+                  <div><dt className="font-bold">Photo selection</dt><dd>{selectionStates[student.selectionState]}</dd></div>
+                  <div><dt className="font-bold">Client repository</dt><dd>{availability[student.availability]}</dd></div>
+                  {(student.availability === 'available' || student.availability === 'empty') && (
+                    <div><dt className="font-bold">Selection progress</dt><dd>{student.selectedCount} selected · {student.unselectedCount} unselected</dd></div>
+                  )}
+                </dl>
+                {selectionAction(student)}
+              </div>
+            )}
+            toolbar={
+              <div className="space-y-2 border-b border-line p-2">
+                {/* Search + school / course (advanced filter) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 items-end">
+                  <label className="block sm:col-span-2 lg:col-span-4">
+                    <span className="mb-1 block text-[11px] font-bold uppercase">Search all clients</span>
+                    <input type="search" value={search} onChange={(event) => change(setSearch)(event.target.value)}
+                      placeholder="Name, student ID, job order, school, course, company or session"
+                      className={`${stationInput} w-full`} />
+                  </label>
+                  <label className="block lg:col-span-3">
+                    <span className="mb-1 block text-[11px] font-bold uppercase">School / client type</span>
+                    <select className={`${stationInput} w-full`} value={school}
+                      onChange={(event) => { setSchool(event.target.value); setCourse(''); setPages({}); }}>
+                      <option value="">All schools &amp; clients</option>
+                      {schools.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.clients})</option>)}
+                    </select>
+                  </label>
+                  <label className="block lg:col-span-2">
+                    <span className="mb-1 block text-[11px] font-bold uppercase">{chosenSchool?.walkin ? 'Session' : 'Course'}</span>
+                    <select aria-label={chosenSchool?.walkin ? 'Session' : 'Course'}
+                      className={`${stationInput} w-full disabled:opacity-50`} value={course}
+                      disabled={!chosenSchool} onChange={(event) => change(setCourse)(event.target.value)}>
+                      <option value="">{chosenSchool ? `All ${chosenSchool.walkin ? 'sessions' : 'courses'}` : 'Choose a school first'}</option>
+                      {chosenSchool?.courses.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.clients})</option>)}
+                    </select>
+                  </label>
+                  <div className="block sm:col-span-2 lg:col-span-3">
+                    <label htmlFor="chooser-day" className="mb-1 block text-[11px] font-bold uppercase">Job order created</label>
+                    <div className="flex flex-wrap gap-2">
+                      <select id="chooser-day" className={`${stationInput} flex-1`} value={dayMode}
+                        onChange={(event) => change(setDayMode)(event.target.value as typeof dayMode)}>
+                        <option value="">All dates</option>
+                        <option value="today">Today</option>
+                        <option value="yesterday">Yesterday</option>
+                        <option value="pick">Pick a date…</option>
+                      </select>
+                      {dayMode === 'pick' && (
+                        <input type="date" aria-label="Date created" value={pickedDay} max={studioDate()}
+                          onChange={(event) => { if (event.target.value) change(setPickedDay)(event.target.value); }}
+                          className={stationInput} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[11px] text-neutral-600">
+                    Showing photographed clients only{search.trim() ? ' that match the search' : ''}.
+                    {day && ` Created ${dayMode === 'today' ? 'today' : dayMode === 'yesterday' ? 'yesterday' : 'on ' + day}.`}
+                  </p>
+                  <button type="button" className={stationButton} disabled={!filtered} onClick={clearFilters}>Clear filters</button>
+                </div>
+
+                {embedded && (
+                  <label className="block max-w-xs">
+                    <span className="mb-1 block text-[11px] font-bold uppercase">Exact selection status</span>
+                    <select className={`${stationInput} w-full`} value={filter}
+                      onChange={(event) => change(setFilter)(event.target.value)}>
+                      <option value="">Any status</option>
+                      {Object.entries(selectionStates).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </label>
                 )}
               </div>
-              <div className="border-t border-neutral-300 pt-2 text-sm">
-                <p>{student.photographyComplete ? 'Photography completed' : 'Photography pending'}</p>
-                <p className="font-bold">{selectionStates[student.selectionState]}</p>
-                {(student.availability === 'available' || student.availability === 'empty') && <p>{student.selectedCount} selected · {student.unselectedCount} unselected</p>}
-                {student.availability !== 'available' && student.availability !== 'pending_shoot' && <p>{availability[student.availability]}</p>}
-              </div>
-              <button className={stationButton} type="button" disabled={opening || !['available', 'recovering'].includes(student.availability)}
-                onClick={() => void open(student)}>
-                {student.availability === 'recovering' ? 'Resume transfer' : 'View photos'}
-              </button>
-            </article>
-          ))}
-        </div>
-        {(page > 1 || data?.hasMore) && (
-          <nav aria-label="Student results" className="flex items-center gap-3">
-            <button className={stationButton} type="button" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
-            <span className="font-mono text-xs">Page {page}</span>
-            <button className={stationButton} type="button" disabled={!data?.hasMore} onClick={() => setPage(page + 1)}>Next</button>
-          </nav>
-        )}
-      </>}
+            }
+          />
+          {(page > 1 || data?.hasMore) && (
+            <nav aria-label="Photo Chooser pagination" className="flex flex-wrap items-center justify-end gap-2 border border-line bg-panel p-2 font-mono text-xs">
+              <button type="button" disabled={page <= 1} onClick={() => setPages({ ...pages, [done]: page - 1 })} className={stationButton}>Previous</button>
+              <span aria-live="polite">Page {page}</span>
+              <button type="button" disabled={!data?.hasMore} onClick={() => setPages({ ...pages, [done]: page + 1 })} className={stationButton}>Next</button>
+            </nav>
+          )}
+        </StationTabs>
+      )}
     </StationLayout>
   );
 }

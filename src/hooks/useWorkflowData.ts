@@ -7,12 +7,13 @@ export function workflowError(error: unknown) {
   return error instanceof Error ? error.message : 'The station could not complete the request.';
 }
 
-export function useWorkflowData<T>(path: string, interval = 8_000, keepPreviousData = false) {
+export function useWorkflowData<T>(path: string | null, interval = 8_000, keepPreviousData = false) {
   const [result, setResult] = useState<{ path: string; data?: T; error?: string }>();
   const refreshRef = useRef<() => void>(() => {});
   const refresh = useCallback(() => refreshRef.current(), []);
 
   useEffect(() => {
+    if (path === null) return;
     let live = true;
     let generation = 0;
     let stop: (() => Promise<void>) | undefined;
@@ -43,6 +44,7 @@ export function useWorkflowData<T>(path: string, interval = 8_000, keepPreviousD
     window.addEventListener('focus', refresh);
     return () => {
       live = false;
+      refreshRef.current = () => {};
       window.clearTimeout(debounce);
       window.clearInterval(timer);
       window.removeEventListener('focus', refresh);
@@ -51,7 +53,7 @@ export function useWorkflowData<T>(path: string, interval = 8_000, keepPreviousD
   }, [path, interval, keepPreviousData, refresh]);
 
   return {
-    data: result?.path === path || keepPreviousData ? result?.data : undefined,
+    data: path !== null && (result?.path === path || keepPreviousData) ? result?.data : undefined,
     error: result?.path === path ? result.error : undefined,
     refresh,
   };

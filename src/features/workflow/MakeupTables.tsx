@@ -1,12 +1,13 @@
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { DataTable, type DataTableColumn } from '../../components/common/DataTable';
-import type { TablePage } from '../../components/common/dataTableModel';
+import { defaultTableExpansion, type TableExpansion, type TablePage, type TableSort } from '../../components/common/dataTableModel';
 import { makeupLookLabel } from '../../constants/makeupLook';
 import { useWorkflowData } from '../../hooks/useWorkflowData';
 import { formatQueueNumber } from '../../utils/formatters';
 import { makeupStateLabels, requiresConfirmation, type MakeupAssignment } from './makeupAssignment';
 import type { MuaTeam } from './muaTeam';
+import { stationInput, stationToolbar } from './StationLayout';
 
 const serviceSources = {
   package: 'Selected package', add_on: 'Selected add-on', admin: 'Admin correction', legacy: 'Existing job order',
@@ -20,7 +21,8 @@ const manilaTime = new Intl.DateTimeFormat('en-PH', {
 const instant = (date: string) => Date.parse(date.replace(' ', 'T'));
 const dateTime = (date: string) => Number.isFinite(instant(date)) ? manilaTime.format(instant(date)) : '—';
 const pageSizes = [10, 25, 50];
-const inputClass = 'min-h-10 min-w-0 max-w-full border border-line bg-panel px-2 text-sm text-ink';
+const firstPage = { page: 1, pageSize: pageSizes[0] };
+const completedSort: TableSort = { column: 'time', direction: 'descending' };
 
 interface MakeupDetails {
   details: {
@@ -46,21 +48,32 @@ function status(row: MakeupAssignment) {
 }
 
 type Artist = MuaTeam['artists'][number];
+export interface MakeupTableView {
+  query?: string;
+  service?: string;
+  artist?: string;
+  state?: string;
+  page?: TablePage;
+  sort?: TableSort;
+  expansion?: TableExpansion;
+}
+
 const teamColumns: DataTableColumn<Artist>[] = [
   { id: 'name', header: 'MUA name', accessor: (artist) => artist.name, sortable: true, cellClassName: 'font-bold' },
-  { id: 'role', header: 'Role', accessor: (artist) => artist.parent ? 'Parent' : 'Artist', sortable: true,
-    cell: (artist) => <>{artist.parent ? 'Parent' : 'Artist'}{artist.disabled && <span className="text-neutral-600"> · Disabled</span>}</> },
+  { id: 'role', header: 'Role', accessor: (artist) => artist.parent ? 'Parent' : 'Artist', sortable: true },
   { id: 'pending', header: 'Pending', accessor: (artist) => artist.pending, align: 'right', sortable: true },
   { id: 'progress', header: 'In progress', accessor: (artist) => artist.inProgress, align: 'right', sortable: true },
   { id: 'completed', header: 'Completed', accessor: (artist) => artist.completed, align: 'right', sortable: true },
 ];
 
-export function MakeupTeamTable({ artists, loading }: { artists: MuaTeam['artists']; loading: boolean }) {
+export function MakeupTeamTable({ artists, loading, sort, onSort }: {
+  artists: MuaTeam['artists']; loading: boolean; sort: TableSort; onSort: (sort: TableSort) => void;
+}) {
   return (
     <section className="min-w-0 space-y-2">
       <h2 className="text-sm font-black uppercase">MUA team status</h2>
       <DataTable label="MUA team status" rows={artists} columns={teamColumns} getRowId={(artist) => artist.id}
-        pagination={false} loading={loading} emptyMessage="No MUA accounts have been set up."
+        pagination={false} sorting={{ value: sort, onChange: onSort }} loading={loading} emptyMessage="No active MUA staff found."
         tableClassName="min-w-[440px]" headerClassName="uppercase tracking-wide" />
     </section>
   );
@@ -72,20 +85,19 @@ interface MakeupClientTableProps {
   rows: MakeupAssignment[];
   empty: string;
   loading?: boolean;
+  view: MakeupTableView;
+  onViewChange: (change: MakeupTableView) => void;
   renderAction?: (row: MakeupAssignment) => ReactNode;
   renderDetailsActions?: (row: MakeupAssignment) => ReactNode;
 }
 
 export function MakeupClientTable({
-  title, kind, rows, empty, loading, renderAction, renderDetailsActions,
+  title, kind, rows, empty, loading, view, onViewChange, renderAction, renderDetailsActions,
 }: MakeupClientTableProps) {
   const heading = useId();
-  const [query, setQuery] = useState('');
-  const [service, setService] = useState('');
-  const [artist, setArtist] = useState('');
-  const [state, setState] = useState('');
-  const [page, setPage] = useState<TablePage>({ page: 1, pageSize: pageSizes[0] });
-  const resetPage = () => setPage((current) => ({ ...current, page: 1 }));
+  const { query = '', service = '', artist = '', state = '', page = firstPage,
+    sort = kind === 'completed' ? completedSort : null } = view;
+  const changeFilter = (change: MakeupTableView) => onViewChange({ ...change, page: { ...page, page: 1 } });
   const serviceOptions = useMemo(() => [...new Set(rows.flatMap((row) => row.services?.length
     ? row.services.flatMap((item) => [item.name, ...(item.types?.map((type) => type.name) ?? [])])
     : [serviceNames(row)]))].filter(Boolean).sort((a, b) => a.localeCompare(b)), [rows]);
@@ -128,22 +140,24 @@ export function MakeupClientTable({
     <section aria-labelledby={heading} className="min-w-0 space-y-2">
       <h2 id={heading} className="text-sm font-black uppercase">{title} <span className="font-mono text-gold-soft">({rows.length})</span></h2>
       <DataTable label={title} rows={filteredRows} columns={columns} getRowId={(row) => row.rowKey ?? row.id}
-        pagination={{ pageSizes, value: page, onChange: setPage }}
-        defaultSort={kind === 'completed' ? { column: 'time', direction: 'descending' } : undefined}
+        pagination={{ pageSizes, value: page, onChange: (next) => onViewChange({ page: next }) }}
+        sorting={{ value: sort, onChange: (next) => onViewChange({ sort: next }) }}
+        expansion={{ value: view.expansion ?? defaultTableExpansion, onChange: (next) => onViewChange({ expansion: next }) }}
         loading={loading} emptyMessage={empty} filtered={filtersActive}
         detailsColumnId={kind === 'assigned' ? 'actions' : undefined}
         headerClassName="uppercase tracking-wide" tableClassName="min-w-[650px] [&_tr:has(button[aria-expanded=true])]:bg-gold-wash"
         toolbar={
-          <div onChange={resetPage} className="flex flex-wrap items-center gap-2 border-b border-line p-2">
+          <div className={stationToolbar}>
             <input type="search" aria-label={`Search ${title.toLowerCase()}`} placeholder="Search job, client, service…" value={query}
-              onChange={(event) => setQuery(event.target.value)} className={`${inputClass} w-full sm:w-56`} />
-            <TableFilter name="Service" value={service} onChange={setService} options={serviceOptions.map((name) => [name, name])} />
+              onChange={(event) => changeFilter({ query: event.target.value })} className={`${stationInput} w-full sm:w-56`} />
+            <TableFilter name="Service" value={service} onChange={(next) => changeFilter({ service: next })}
+              options={serviceOptions.map((name) => [name, name])} />
             {kind !== 'waiting' && <>
-              <TableFilter name="Artist" value={artist} onChange={setArtist} options={artistOptions} />
-              <TableFilter name="Status" value={state} onChange={setState} options={(kind === 'completed'
+              <TableFilter name="Artist" value={artist} onChange={(next) => changeFilter({ artist: next })} options={artistOptions} />
+              <TableFilter name="Status" value={state} onChange={(next) => changeFilter({ state: next })} options={(kind === 'completed'
                 ? ['Completed', 'Confirmed'] : ['Claimed', 'In progress']).map((name) => [name, name])} />
             </>}
-            {filtersActive && <button type="button" onClick={() => { setQuery(''); setService(''); setArtist(''); setState(''); resetPage(); }}
+            {filtersActive && <button type="button" onClick={() => changeFilter({ query: '', service: '', artist: '', state: '' })}
               className="min-h-10 px-2 text-xs font-bold text-gold-soft underline">Clear filters</button>}
           </div>
         }
@@ -160,7 +174,7 @@ function TableFilter({ name, value, onChange, options }: {
 }) {
   return (
     <select aria-label={`Filter by ${name.toLowerCase()}`} value={value} onChange={(event) => onChange(event.target.value)}
-      className={`${inputClass} ${value ? 'border-gold bg-gold-wash' : ''}`}>
+      className={`${stationInput} ${value ? 'border-gold bg-gold-wash' : ''}`}>
       <option value="">All {name === 'Status' ? 'statuses' : name.toLowerCase() + 's'}</option>
       {value && !options.some(([id]) => value === id) && <option value={value}>{value}</option>}
       {options.map(([id, label]) => <option value={id} key={id}>{label}</option>)}
