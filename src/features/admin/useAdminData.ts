@@ -13,6 +13,8 @@ import { overviewMetrics } from './overviewMetrics';
 import { refreshClientDocuments } from '../receipts/clientDocuments';
 import type { DateRange, OverallScope, StudentExcelData } from './studentExcel';
 import type { RegistrationEdits } from './components/EditStudentModal';
+import type { DraftAddOn, DraftPackage } from './catalogImport/catalogParser';
+import { saveCatalogDrafts } from './catalogImport/saveCatalog';
 
 export type PackageKind = 'school' | 'walkin' | 'both';
 
@@ -25,7 +27,7 @@ export interface RefundRequest {
   clientKey: string;
 }
 
-export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students' | 'workflow' | 'camera' | 'clients';
+export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students' | 'workflow' | 'camera' | 'clients' | 'catalog-import';
 
 const excelUnavailable = 'The connected PocketBase server did not return an Excel report. Restart it with the latest StudioFlow hooks and migrations, then try again.';
 
@@ -61,6 +63,7 @@ export function useAdminData() {
   const [newPkgKind, setNewPkgKind] = useState<PackageKind>('school');
   const [newPkgRevenue, setNewPkgRevenue] = useState<RevenueCategory>('studio');
   const [newPkgInclusions, setNewPkgInclusions] = useState('');
+  const [newPkgFreebies, setNewPkgFreebies] = useState<string[]>([]);
 
   // Roster CSV Upload State
   const [csvText, setCsvText] = useState('');
@@ -187,12 +190,14 @@ export function useAdminData() {
         client_kind: newPkgKind,
         revenue_category: newPkgRevenue,
         inclusions: JSON.stringify(inclusions),
+        freebies: newPkgFreebies.map((item) => item.trim()).filter(Boolean),
         is_active: true,
       });
 
       setNewPkgCode('');
       setNewPkgName('');
       setNewPkgInclusions('');
+      setNewPkgFreebies([]);
       setNewPkgPhotoLimit(0);
       setNewPkgRequiresMua(false);
       setNewPkgRevenue('studio');
@@ -200,7 +205,8 @@ export function useAdminData() {
       loadAllData();
     } catch (err) {
       console.error('Failed to add package:', err);
-      toast.error('Failed to create the package.');
+      // The server explains refusals, such as a package code that is already used.
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to create the package.');
     }
   };
 
@@ -433,7 +439,7 @@ export function useAdminData() {
   // --- Package & Add-on Mutations (T020) ---
   const handleUpdatePackage = async (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
+    data: { name: string; code: string; amount: number; inclusions: string[]; freebies: string[]; photo_selection_limit: number; requires_mua: boolean; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
   ) => {
     try {
       await pb.collection('packages').update(id, {
@@ -441,6 +447,7 @@ export function useAdminData() {
         code: data.code.trim().toUpperCase(),
         amount: Number(data.amount),
         inclusions: JSON.stringify(data.inclusions),
+        freebies: data.freebies.map((item) => item.trim()).filter(Boolean),
         photo_selection_limit: data.photo_selection_limit,
         requires_mua: data.requires_mua,
         client_kind: data.client_kind,
@@ -545,6 +552,16 @@ export function useAdminData() {
       console.error('Failed to delete add-on:', err);
       toast.error(err instanceof Error && err.message ? err.message : 'Failed to delete add-on.');
     }
+  };
+
+  /**
+   * Saves the packages and add-ons reviewed in Import Catalog. Each one is created active, so the
+   * kiosk and cashier offer it right away. Returns the drafts that could not be saved, with the reason.
+   */
+  const handleImportCatalog = async (packagesToSave: DraftPackage[], addOnsToSave: DraftAddOn[]) => {
+    const result = await saveCatalogDrafts(pb, packagesToSave, addOnsToSave);
+    await loadAllData();
+    return result;
   };
 
   // --- Master Roster Mutations (T021, T022) ---
@@ -680,6 +697,8 @@ export function useAdminData() {
     setNewPkgAmount,
     newPkgInclusions,
     setNewPkgInclusions,
+    newPkgFreebies,
+    setNewPkgFreebies,
     handleAddPackage,
     // Roster Ingestion
     csvText,
@@ -717,6 +736,7 @@ export function useAdminData() {
     handleUpdateAddOn,
     handleToggleAddOnActive,
     handleDeleteAddOn,
+    handleImportCatalog,
     // Master List Mutations
     handleDeleteMasterListItem,
     handleClearMasterList,

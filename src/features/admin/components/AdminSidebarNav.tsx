@@ -10,9 +10,11 @@ import {
   Menu,
   X,
   ChevronRight,
+  ChevronDown,
   ListChecks,
   Aperture,
   Shapes,
+  ScanText,
 } from 'lucide-react';
 import type { AdminTab } from '../useAdminData';
 
@@ -30,6 +32,8 @@ interface NavItem {
   shortLabel: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: number;
+  /** Shown indented under this section, as its sub-tab. */
+  parent?: AdminTab;
 }
 
 export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
@@ -131,6 +135,13 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
       badge: packageCount,
     },
     {
+      id: 'catalog-import',
+      label: 'Import from File',
+      shortLabel: 'Import',
+      icon: ScanText,
+      parent: 'packages',
+    },
+    {
       id: 'clients',
       label: 'Client Types & Sessions',
       shortLabel: 'Client Types',
@@ -181,6 +192,12 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
   };
 
   const activeItem = navItems.find((n) => n.id === activeTab) || navItems[0];
+  // Sub-tabs show only while their section (or the sub-tab itself) is open.
+  const visibleItems = navItems.filter((n) => !n.parent || activeTab === n.parent || activeTab === n.id);
+  const hasChildren = (item: NavItem) => navItems.some((n) => n.parent === item.id);
+  /** A section whose sub-tab is the open page: outlined, not filled, so only one item looks selected. */
+  const childOpen = (item: NavItem) => navItems.some((n) => n.parent === item.id && n.id === activeTab);
+  const expanded = (item: NavItem) => hasChildren(item) && (activeTab === item.id || childOpen(item));
 
   return (
     <>
@@ -247,7 +264,7 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
             </div>
 
           <div className="space-y-1.5 max-[768px]:overflow-y-auto max-[768px]:overscroll-contain max-[768px]:pr-1">
-            {navItems.map((item) => {
+            {visibleItems.map((item) => {
               const isSelected = activeTab === item.id;
               const Icon = item.icon;
               return (
@@ -255,10 +272,13 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
                   key={item.id}
                   type="button"
                   onClick={() => handleSelect(item.id)}
-                  className={`w-full min-h-[42px] px-3.5 py-2 flex items-center justify-between border text-left cursor-pointer transition-colors ${
+                  aria-expanded={hasChildren(item) ? expanded(item) : undefined}
+                  className={`${item.parent ? 'ml-6 w-[calc(100%-1.5rem)] min-h-[38px] animate-enter' : 'w-full min-h-[42px]'} px-3.5 py-2 flex items-center justify-between border text-left cursor-pointer transition-colors ${
                     isSelected
                       ? 'bg-obsidian text-gold border-line font-black'
-                      : 'bg-panel text-neutral-800 border-neutral-300 hover:border-line'
+                      : childOpen(item)
+                        ? 'bg-panel text-gold-soft border-gold font-black'
+                        : 'bg-panel text-neutral-800 border-neutral-300 hover:border-line'
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -292,11 +312,11 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
             <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gold-soft">
               Admin Sections
             </span>
-            <span className="text-[9px] font-mono text-neutral-400">{navItems.length} TABS</span>
+            <span className="text-[9px] font-mono text-neutral-400">{navItems.filter((n) => !n.parent).length} TABS</span>
           </div>
 
           <div className="space-y-1.5">
-            {navItems.map((item) => {
+            {visibleItems.map((item) => {
               const isSelected = activeTab === item.id;
               const Icon = item.icon;
 
@@ -305,10 +325,13 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
                   key={item.id}
                   type="button"
                   onClick={() => onSelectTab(item.id)}
-                  className={`btn-tactile w-full min-h-[44px] px-3 py-2.5 flex items-center justify-between border text-left cursor-pointer transition-all ${
+                  aria-expanded={hasChildren(item) ? expanded(item) : undefined}
+                  className={`btn-tactile ${item.parent ? 'ml-5 w-[calc(100%-1.25rem)] min-h-[36px] py-1.5 animate-enter' : 'w-full min-h-[44px] py-2.5'} px-3 flex items-center justify-between border text-left cursor-pointer transition-all ${
                     isSelected
                       ? 'bg-obsidian text-gold border-line font-black shadow-lux-gold'
-                      : 'bg-canvas text-neutral-700 border-neutral-300 hover:border-line hover:bg-neutral-100'
+                      : childOpen(item)
+                        ? 'bg-canvas text-gold-soft border-gold font-black'
+                        : 'bg-canvas text-neutral-700 border-neutral-300 hover:border-line hover:bg-neutral-100'
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -330,7 +353,9 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
                         {item.badge}
                       </span>
                     )}
-                    {isSelected && <ChevronRight className="w-3.5 h-3.5 text-gold" />}
+                    {expanded(item)
+                      ? <ChevronDown className="w-3.5 h-3.5 text-gold" />
+                      : isSelected && <ChevronRight className="w-3.5 h-3.5 text-gold" />}
                   </div>
                 </button>
               );

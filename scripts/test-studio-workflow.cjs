@@ -76,6 +76,18 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     legacyDb.prepare(`INSERT INTO packages (id, code, name, amount, inclusions, is_active, created, updated)
       VALUES ('legacypkg00001', 'LEG', 'Legacy Package', 500, ?, 1, '2026-01-01 00:00:00.000Z', '2026-01-01 00:00:00.000Z')`)
       .run(JSON.stringify(JSON.stringify(['8x10 frame', 'Soft copies'])));
+    // Duplicate catalog codes from before codes were unique (differing only in case and spaces),
+    // plus two add-ons with no code, which stay allowed.
+    const legacyItem = legacyDb.prepare(`INSERT INTO packages (id, code, name, amount, is_active, created, updated)
+      VALUES (?, ?, ?, 500, 1, ?, ?)`);
+    legacyItem.run('legacypkg00002', 'leg', 'Legacy Copy', '2026-01-02 00:00:00.000Z', '2026-01-02 00:00:00.000Z');
+    legacyItem.run('legacypkg00003', ' LEG ', 'Legacy Copy 2', '2026-01-03 00:00:00.000Z', '2026-01-03 00:00:00.000Z');
+    // Dated after the built-in add-ons (seeded when this test's database was created), so those keep their codes.
+    const legacyAddOn = legacyDb.prepare(`INSERT INTO add_ons (id, code, name, amount, is_active, created, updated)
+      VALUES (?, ?, ?, 50, 1, strftime('%Y-%m-%d %H:%M:%fZ', 'now', ?), strftime('%Y-%m-%d %H:%M:%fZ', 'now', ?))`);
+    legacyAddOn.run('legacyadd00001', 'add-hairmakeup', 'Lowercase Copy', '+1 day', '+1 day');
+    legacyAddOn.run('legacyadd00002', '', 'No Code A', '+2 days', '+2 days');
+    legacyAddOn.run('legacyadd00003', '', 'No Code B', '+3 days', '+3 days');
     legacyDb.prepare(`INSERT INTO registrations
       (id, job_order_no, family_name, given_name, status, add_ons, paid_amount, total_amount, balance, payment_status,
         package, package_snapshot)
@@ -221,6 +233,36 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   });
   const builtInAddOn = (await send(records('add_ons'))).payload.items.find((item) => item.code === 'ADD-HAIRMAKEUP');
   assert.equal(builtInAddOn.requires_mua, true);
+
+  // Unique catalog codes: the upgrade keeps the oldest item's code and renames later duplicates
+  // (matched ignoring case and spaces); add-ons without a code are left alone.
+  const catalogCode = async (collection, id) => (await send(records(collection, id), { token: admin })).payload.code;
+  assert.deepEqual(await Promise.all(['legacypkg00001', 'legacypkg00002', 'legacypkg00003'].map((id) => catalogCode('packages', id))),
+    ['LEG', 'leg-2', 'LEG-3']);
+  assert.equal(await catalogCode('add_ons', builtInAddOn.id), 'ADD-HAIRMAKEUP');
+  assert.deepEqual(await Promise.all(['legacyadd00001', 'legacyadd00002', 'legacyadd00003'].map((id) => catalogCode('add_ons', id))),
+    ['add-hairmakeup-2', '', '']);
+  // The saved job order keeps the code it was sold with.
+  assert.equal(legacy.package_snapshot.code, 'LEG');
+  // New items: a code in use (any case, with spaces) is refused with a clear message; codes are trimmed.
+  const duplicate = await send(records('packages'), { token: admin, method: 'POST', status: 400,
+    body: { code: ' leg ', name: 'Another', amount: 100, is_active: true } });
+  assert.match(duplicate.payload.message, /Code leg is already used by another package/);
+  const renamed = await send(records('packages', 'legacypkg00002'), { token: admin, method: 'PATCH', status: 400, body: { code: 'Leg-3' } });
+  assert.match(renamed.payload.message, /already used/);
+  const trimmed = await create('add_ons', { code: '  UNIQUE-TRIM  ', name: 'Trimmed', amount: 10, is_active: true });
+  assert.equal(trimmed.code, 'UNIQUE-TRIM');
+  await send(records('add_ons'), { token: admin, method: 'POST', status: 400, body: { code: 'unique-trim', name: 'Dup', amount: 10 } });
+  const noCode = await create('add_ons', { code: '', name: 'Another without a code', amount: 10, is_active: true });
+  for (const id of ['legacyadd00001', 'legacyadd00002', 'legacyadd00003', trimmed.id, noCode.id]) {
+    await send(records('add_ons', id), { token: admin, method: 'DELETE', status: 204 });
+  }
+  // Two saves racing with one new code: exactly one wins (the unique index backs up the hook).
+  const codeRace = await Promise.all([1, 2].map((n) => send(records('packages'), { token: admin, method: 'POST', status: 0,
+    body: { code: 'RACE-CODE', name: 'Race ' + n, amount: 100, is_active: true } })));
+  assert.deepEqual(codeRace.map((r) => r.status).sort(), [200, 400]);
+  for (const id of ['legacypkg00002', 'legacypkg00003']) await send(records('packages', id), { token: admin, method: 'DELETE', status: 204 });
+  await send(records('packages', codeRace.find((r) => r.status === 200).payload.id), { token: admin, method: 'DELETE', status: 204 });
   await registrations(legacy, admin, { family_name: 'Corrected Name' });
   assert.equal((await send(`${api}/photo-folder/${legacyId}`, { method: 'POST', token: photographer })).payload.path, legacyPath);
   await registrations(legacy, cashier, { status: 'released', framing_status: 'released' }, 400);

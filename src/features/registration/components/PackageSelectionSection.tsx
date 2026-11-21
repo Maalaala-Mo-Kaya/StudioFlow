@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Info, ArrowRight, Check } from 'lucide-react';
+import { Info, ArrowRight, Check, Gift } from 'lucide-react';
 import type { Package, AddOn } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
 import { PackageDetailsModal } from './PackageDetailsModal';
@@ -114,6 +114,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
           const inclusionsArray = parsePackageInclusions(pkg.inclusions);
           const topInclusions = inclusionsArray.slice(0, 3);
           const remainingCount = inclusionsArray.length - topInclusions.length;
+          const freebieCount = parsePackageInclusions(pkg.freebies).length;
 
           return (
             <div
@@ -186,6 +187,13 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                     )}
                   </div>
                 )}
+
+                {freebieCount > 0 && (
+                  <div className={`flex items-center gap-1.5 mb-3 text-[11px] font-black uppercase ${isSelected ? 'text-gold' : 'text-gold-soft'}`}>
+                    <Gift className="w-3.5 h-3.5 shrink-0" />
+                    <span>+ {freebieCount} free {freebieCount === 1 ? 'item' : 'items'}</span>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2 pt-2">
@@ -199,7 +207,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                   }`}
                 >
                   <Info className="w-3.5 h-3.5" />
-                  <span>View All Inclusions ({inclusionsArray.length})</span>
+                  <span>{freebieCount > 0 ? `View Inclusions & Freebies (${inclusionsArray.length + freebieCount})` : `View All Inclusions (${inclusionsArray.length})`}</span>
                 </button>
 
                 <button

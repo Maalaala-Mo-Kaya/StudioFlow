@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Megaphone, CheckCircle2, Folder, Copy, Check, Aperture } from 'lucide-react';
+import { Megaphone, CheckCircle2, Folder, Copy, Check, Aperture, Gift } from 'lucide-react';
 import type { Registration } from '../../../types';
 import {
   formatClientName,
   formatJobOrderNo,
   formatQueueNumber,
   orderInclusions,
+  orderFreebies,
 } from '../../../utils/formatters';
 import { getPhotoFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
 import { useToast } from '../../../context/ToastContext';
@@ -38,6 +39,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
   const [folderPath, setFolderPath] = useState('');
   const { toast } = useToast();
   const inclusionsArray = orderInclusions(reg);
+  const freebies = orderFreebies(reg);
 
   const handleCopyFolder = async () => {
     try {
@@ -139,6 +141,17 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
               {inclusionsArray.slice(0, 3).map((inc, i) => (
                 <li key={i} className="truncate flex items-center gap-1.5">
                   <span className="text-gold font-mono font-bold">+</span> {inc}
+                </li>
+              ))}
+            </ul>
+          )}
+          {freebies.length > 0 && (
+            <ul className={`text-[11px] space-y-1 mt-2 border-t pt-2 ${
+              isShooting ? 'border-neutral-800 text-gold' : 'border-neutral-200 text-gold-soft'
+            }`}>
+              {freebies.map((item, i) => (
+                <li key={i} className="truncate flex items-center gap-1.5 font-semibold">
+                  <Gift className="w-3 h-3 shrink-0" /> {item}
                 </li>
               ))}
             </ul>

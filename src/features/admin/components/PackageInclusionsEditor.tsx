@@ -5,6 +5,10 @@ interface PackageInclusionsEditorProps {
   inclusions: string[];
   onChange: (inclusions: string[]) => void;
   label?: string;
+  /** Quick-add suggestions; defaults to common inclusions. */
+  presets?: string[];
+  /** What one item is called in hints ("inclusion", "freebie"). */
+  itemName?: string;
 }
 
 const COMMON_INCLUSION_PRESETS = [
@@ -21,6 +25,8 @@ export const PackageInclusionsEditor: React.FC<PackageInclusionsEditorProps> = (
   inclusions,
   onChange,
   label = 'Package Inclusions (Dynamic Repeatable List)',
+  presets = COMMON_INCLUSION_PRESETS,
+  itemName = 'inclusion',
 }) => {
   const [newItemText, setNewItemText] = useState('');
 
@@ -63,10 +69,10 @@ export const PackageInclusionsEditor: React.FC<PackageInclusionsEditorProps> = (
       <div className="p-2.5 bg-canvas border border-neutral-300">
         <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-gold-soft mb-1.5">
           <Sparkles className="w-3 h-3 text-gold" />
-          <span>Quick Preset Inclusions:</span>
+          <span>Quick presets:</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {COMMON_INCLUSION_PRESETS.map((preset) => {
+          {presets.map((preset) => {
             const isAdded = inclusions.includes(preset);
             return (
               <button
@@ -91,7 +97,7 @@ export const PackageInclusionsEditor: React.FC<PackageInclusionsEditorProps> = (
       <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
         {inclusions.length === 0 ? (
           <div className="p-4 text-center border border-dashed border-neutral-300 text-neutral-400 font-sans italic text-xs">
-            No inclusions added yet. Use the presets above or type a new item below.
+            No {itemName}s added yet. Use the presets above or type a new item below.
           </div>
         ) : (
           inclusions.map((item, idx) => (
@@ -107,7 +113,7 @@ export const PackageInclusionsEditor: React.FC<PackageInclusionsEditorProps> = (
                 type="text"
                 value={item}
                 onChange={(e) => handleUpdateItem(idx, e.target.value)}
-                placeholder="Inclusion item description..."
+                placeholder={`${itemName[0].toUpperCase()}${itemName.slice(1)} description...`}
                 className="flex-1 text-xs px-2 py-1 bg-transparent border-0 focus:outline-none text-ink font-semibold"
               />
 
@@ -115,7 +121,7 @@ export const PackageInclusionsEditor: React.FC<PackageInclusionsEditorProps> = (
                 type="button"
                 onClick={() => handleRemoveItem(idx)}
                 className="shrink-0 p-1 text-neutral-400 hover:text-red-600 border border-transparent hover:border-red-600 transition-colors cursor-pointer"
-                title="Remove inclusion"
+                title={`Remove ${itemName}`}
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -136,7 +142,7 @@ export const PackageInclusionsEditor: React.FC<PackageInclusionsEditorProps> = (
               handleAddItem();
             }
           }}
-          placeholder="Type new inclusion and press Enter..."
+          placeholder={`Type a new ${itemName} and press Enter...`}
           className="flex-1 px-3 py-2 bg-panel border border-neutral-400 text-xs focus:outline-none focus:border-line font-semibold"
         />
         <button

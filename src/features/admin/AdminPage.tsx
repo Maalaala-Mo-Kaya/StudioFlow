@@ -5,6 +5,7 @@ import { AdminSidebarNav } from './components/AdminSidebarNav';
 import { AdminAnalyticsTab } from './components/AdminAnalyticsTab';
 import { AdminOrgsTab } from './components/AdminOrgsTab';
 import { AdminPackagesTab } from './components/AdminPackagesTab';
+import { AdminCatalogImportTab } from './components/AdminCatalogImportTab';
 import { AdminRosterTab } from './components/AdminRosterTab';
 import { AdminStaffTab } from './components/AdminStaffTab';
 import { AdminProductionTab } from './components/AdminProductionTab';
@@ -96,6 +97,8 @@ export const AdminPage: React.FC = () => {
               onNewPkgRevenueChange={admin.setNewPkgRevenue}
               newPkgInclusions={admin.newPkgInclusions}
               onNewPkgInclusionsChange={admin.setNewPkgInclusions}
+              newPkgFreebies={admin.newPkgFreebies}
+              onNewPkgFreebiesChange={admin.setNewPkgFreebies}
               onAddPackage={admin.handleAddPackage}
               onUpdatePackage={admin.handleUpdatePackage}
               onTogglePackageActive={admin.handleTogglePackageActive}
@@ -104,6 +107,16 @@ export const AdminPage: React.FC = () => {
               onUpdateAddOn={admin.handleUpdateAddOn}
               onToggleAddOnActive={admin.handleToggleAddOnActive}
               onDeleteAddOn={admin.handleDeleteAddOn}
+            />
+          )}
+
+          {/* Packages & Add-ons → Import from File */}
+          {admin.activeTab === 'catalog-import' && (
+            <AdminCatalogImportTab
+              packages={admin.packages}
+              addOns={admin.addOns}
+              onSave={admin.handleImportCatalog}
+              onOpenCatalog={() => admin.setActiveTab('packages')}
             />
           )}
 
