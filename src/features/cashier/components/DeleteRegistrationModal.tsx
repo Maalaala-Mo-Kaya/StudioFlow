@@ -4,21 +4,6 @@ import type { Registration } from '../../../types';
 
 const reasons = ['Duplicate Registration', 'Incorrect Form', 'Client Requested Cancellation', 'Test Registration', 'Other'];
 
-export function DeleteRegistrationButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      title="Delete unpaid registration"
-      aria-label="Delete unpaid registration"
-      onClick={onClick}
-      className="btn-tactile inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 border border-red-600 px-2 text-[11px] font-black uppercase tracking-wider text-red-700 hover:bg-red-600 hover:text-white lg:min-h-9"
-    >
-      <Trash2 className="size-4" aria-hidden="true" />
-      Delete
-    </button>
-  );
-}
-
 interface DeleteRegistrationModalProps {
   registration: Registration;
   onClose: () => void;

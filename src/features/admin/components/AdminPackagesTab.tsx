@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Edit3, Trash2, Sparkles, Gift } from 'lucide-react';
+import { Plus, Sparkles, Gift } from 'lucide-react';
+import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
 import type { Package, AddOn, RevenueCategory } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
 import { PackageInclusionsEditor } from './PackageInclusionsEditor';
@@ -422,7 +423,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     </div>
                   ) : (
                     <div>
-                      <div className="flex justify-between items-start">
+                      <div className="flex flex-wrap justify-between items-center gap-2">
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-xs font-black bg-obsidian text-gold px-1.5 py-0.5 uppercase">
@@ -437,7 +438,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => onTogglePackageActive(pkg.id, pkg.is_active !== false)}
@@ -449,22 +450,10 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                           >
                             {pkg.is_active !== false ? 'Active' : 'Archived'}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => startEditPkg(pkg)}
-                            className="p-1 hover:bg-neutral-200 border border-neutral-300 cursor-pointer"
-                            title="Edit Package"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => promptDeletePackage(pkg)}
-                            className="p-1 text-red-600 hover:bg-red-50 border border-neutral-300 hover:border-red-600 cursor-pointer"
-                            title="Delete Package"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <span className={recordActionGroup}>
+                            <RecordActionButton variant="edit" recordName={pkg.name} onClick={() => startEditPkg(pkg)} />
+                            <RecordActionButton variant="delete" recordName={pkg.name} onClick={() => promptDeletePackage(pkg)} />
+                          </span>
                         </div>
                       </div>
 
@@ -592,7 +581,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
           {addOns.map((add) => (
             <div
               key={add.id}
-              className={`p-3 border-2 flex justify-between items-center ${
+              className={`p-3 border-2 flex flex-wrap justify-between items-center gap-2 ${
                 add.is_active !== false
                   ? 'bg-panel border-line'
                   : 'bg-neutral-100 border-neutral-300 opacity-60'
@@ -683,7 +672,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                       <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[addOnKind(add)]}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => onToggleAddOnActive(add.id, add.is_active !== false)}
@@ -695,22 +684,10 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     >
                       {add.is_active !== false ? 'Active' : 'Off'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => startEditAddon(add)}
-                      className="p-1 border border-neutral-300 hover:bg-neutral-100 cursor-pointer"
-                      title="Edit Add-on"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => promptDeleteAddOn(add)}
-                      className="p-1 text-red-600 border border-neutral-300 hover:border-red-600 hover:bg-red-50 cursor-pointer"
-                      title="Delete Add-on"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    <span className={recordActionGroup}>
+                      <RecordActionButton variant="edit" recordName={add.name} onClick={() => startEditAddon(add)} />
+                      <RecordActionButton variant="delete" recordName={add.name} onClick={() => promptDeleteAddOn(add)} />
+                    </span>
                   </div>
                 </>
               )}

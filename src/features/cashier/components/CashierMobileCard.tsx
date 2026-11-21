@@ -6,7 +6,7 @@ import { RegistrationStatusBadge } from '../../../components/RegistrationStatusB
 import { isReadyForRelease } from '../../../utils/releaseReadiness';
 import { formatClientName, formatCurrency } from '../../../utils/formatters';
 import { clientDetail, clientGroup } from '../../../utils/clientInfo';
-import { DeleteRegistrationButton } from './DeleteRegistrationModal';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 
 interface CashierMobileCardProps {
   registration: Registration;
@@ -99,7 +99,7 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
         </div>
       )}
 
-      <div className="flex items-center gap-2 pt-1">
+      <div className="flex flex-wrap items-center gap-2 pt-1">
         {reg.status === 'pending_payment' ? (
           <button
             type="button"
@@ -126,9 +126,10 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
           <Printer className="w-4 h-4" /> Stub
         </button>}
 
-        {onOpenDelete && <DeleteRegistrationButton onClick={() => onOpenDelete(reg)} />}
         {reg.balance === 0 && reg.revenue_discount && !['cancelled', 'released'].includes(reg.status) &&
-          <button type="button" className="border border-line px-3 py-2 font-bold" onClick={() => onOpenPayment(reg)}>Edit discount</button>}
+          <RecordActionButton variant="edit" recordName={`discount for ${formatClientName(reg)}`} onClick={() => onOpenPayment(reg)} />}
+        {onOpenDelete &&
+          <RecordActionButton variant="delete" recordName={`unpaid registration for ${formatClientName(reg)}`} onClick={() => onOpenDelete(reg)} />}
         {reg.status !== 'pending_payment' && reg.status !== 'released' && reg.status !== 'cancelled' && (
           <button
             type="button"

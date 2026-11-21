@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { UploadCloud, CheckCircle2, Trash2, Search } from 'lucide-react';
+import { UploadCloud, CheckCircle2, Search } from 'lucide-react';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 import type { Organization, MasterListItem } from '../../../types';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
@@ -137,11 +138,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
     { id: 'section', header: 'Section', sortable: true, accessor: (item) => item.section },
     { id: 'mobile', header: 'Mobile', accessor: (item) => item.mobile_number },
     { id: 'actions', header: 'Actions', cell: (item) => (
-      <button type="button" onClick={() => promptDeleteItem(item)}
-        className="min-h-8 min-w-8 border border-line p-1 text-red-700 hover:bg-red-50"
-        aria-label={'Remove roster record for ' + item.full_name} title="Remove Record">
-        <Trash2 className="mx-auto size-3.5" aria-hidden="true" />
-      </button>
+      <RecordActionButton variant="delete" recordName={`roster record for ${item.full_name}`} onClick={() => promptDeleteItem(item)} />
     ) },
   ];
 

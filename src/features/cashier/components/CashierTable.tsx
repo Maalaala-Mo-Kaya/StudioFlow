@@ -7,7 +7,7 @@ import { formatClientName, formatCurrency } from '../../../utils/formatters';
 import { DataTable } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { CashierMobileCard } from './CashierMobileCard';
-import { DeleteRegistrationButton } from './DeleteRegistrationModal';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 import { clientDetail, clientGroup, clientSummary } from '../../../utils/clientInfo';
 
 interface CashierTableProps {
@@ -144,9 +144,10 @@ export function CashierTable({
             </button>
           ) : null}
 
-          {onOpenDelete && deletableIds.has(reg.id) && <DeleteRegistrationButton onClick={() => onOpenDelete(reg)} />}
           {reg.balance === 0 && reg.revenue_discount && !['cancelled', 'released'].includes(reg.status) &&
-            <button type="button" className="border border-line px-3 py-2 font-bold" onClick={() => onOpenPayment(reg)}>Edit discount</button>}
+            <RecordActionButton variant="edit" recordName={`discount for ${formatClientName(reg)}`} onClick={() => onOpenPayment(reg)} />}
+          {onOpenDelete && deletableIds.has(reg.id) &&
+            <RecordActionButton variant="delete" recordName={`unpaid registration for ${formatClientName(reg)}`} onClick={() => onOpenDelete(reg)} />}
           {reg.job_order_no && <button
             type="button"
             onClick={() => onOpenPrint(reg)}

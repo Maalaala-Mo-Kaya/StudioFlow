@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Sparkles } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 
 interface PackageInclusionsEditorProps {
   inclusions: string[];
@@ -114,17 +115,11 @@ export const PackageInclusionsEditor: React.FC<PackageInclusionsEditorProps> = (
                 value={item}
                 onChange={(e) => handleUpdateItem(idx, e.target.value)}
                 placeholder={`${itemName[0].toUpperCase()}${itemName.slice(1)} description...`}
-                className="flex-1 text-xs px-2 py-1 bg-transparent border-0 focus:outline-none text-ink font-semibold"
+                className="min-w-0 flex-1 text-xs px-2 py-1 bg-transparent border-0 focus:outline-none text-ink font-semibold"
               />
 
-              <button
-                type="button"
-                onClick={() => handleRemoveItem(idx)}
-                className="shrink-0 p-1 text-neutral-400 hover:text-red-600 border border-transparent hover:border-red-600 transition-colors cursor-pointer"
-                title={`Remove ${itemName}`}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              <RecordActionButton variant="delete" recordName={item.trim() || `${itemName} ${idx + 1}`}
+                onClick={() => handleRemoveItem(idx)} />
             </div>
           ))
         )}

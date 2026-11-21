@@ -7,6 +7,7 @@ import type { AddOn, Package, RevenueCategory } from '../../../types';
 import { formatCurrency } from '../../../utils/formatters';
 import { useToast } from '../../../context/ToastContext';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 import { PackageInclusionsEditor } from './PackageInclusionsEditor';
 import { COMMON_FREEBIE_PRESETS } from '../catalogPresets';
 import type { PackageKind } from '../useAdminData';
@@ -368,15 +369,13 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
                         onChange={(e) => updatePackage(row.key, { include: e.target.checked })} />
                       Save this package
                     </label>
-                    <div className="flex gap-1.5">
+                    <div className="flex items-center gap-2">
                       <button type="button" onClick={() => packageToAddOn(row)} title="This is really an add-on"
                         className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase border border-neutral-300 hover:border-line cursor-pointer">
                         <ArrowLeftRight className="w-3 h-3" /> Make add-on
                       </button>
-                      <button type="button" onClick={() => setPackageRows((rows) => rows.filter((p) => p.key !== row.key))} title="Remove"
-                        className="p-1 text-red-600 border border-neutral-300 hover:border-red-600 cursor-pointer">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <RecordActionButton variant="delete" recordName={row.name.trim() || 'draft package'}
+                        onClick={() => setPackageRows((rows) => rows.filter((p) => p.key !== row.key))} />
                     </div>
                   </div>
                   <Field label="Save as">
@@ -496,15 +495,13 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
                     <Field label="Revenue">
                       <RevenueSelect value={row.revenue} onChange={(revenue) => updateAddOn(row.key, { revenue })} />
                     </Field>
-                    <div className="flex gap-1.5 justify-end">
+                    <div className="col-span-2 flex items-center justify-end gap-2 md:col-span-1">
                       <button type="button" onClick={() => addOnToPackage(row)} title="This is really a package"
                         className="flex items-center gap-1 px-2 py-2 text-[10px] font-bold uppercase border border-neutral-300 hover:border-line cursor-pointer">
                         <ArrowLeftRight className="w-3 h-3" /> Package
                       </button>
-                      <button type="button" onClick={() => setAddOnRows((rows) => rows.filter((a) => a.key !== row.key))} title="Remove"
-                        className="p-2 text-red-600 border border-neutral-300 hover:border-red-600 cursor-pointer">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <RecordActionButton variant="delete" recordName={row.name.trim() || 'draft add-on'}
+                        onClick={() => setAddOnRows((rows) => rows.filter((a) => a.key !== row.key))} />
                     </div>
                   </div>
                   {duplicate && (

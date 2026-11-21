@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { GraduationCap, Camera, MapPin, Pencil, Plus, Save, Trash2, ScrollText, Sparkles } from 'lucide-react';
+import { GraduationCap, Camera, MapPin, Plus, Save, ScrollText, Sparkles } from 'lucide-react';
+import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
 import { pb } from '../../../db/pocketbase';
 import { useToast } from '../../../context/ToastContext';
 import { useStudioSettings } from '../../../hooks/useStudioSettings';
@@ -196,7 +197,7 @@ export const AdminClientTypesTab: React.FC = () => {
           </form>
           <ul className="space-y-2">
             {sessionTypes.map((type) => (
-              <li key={type.id} className={`flex items-center justify-between gap-3 border p-3 ${editingId === type.id ? 'border-gold bg-gold-wash' : 'border-neutral-300 bg-canvas'}`}>
+              <li key={type.id} className={`flex flex-wrap items-center justify-between gap-3 border p-3 ${editingId === type.id ? 'border-gold bg-gold-wash' : 'border-neutral-300 bg-canvas'}`}>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-black text-sm uppercase text-ink">{type.name}</span>
@@ -208,7 +209,7 @@ export const AdminClientTypesTab: React.FC = () => {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                   <button type="button" disabled={saving}
                     onClick={async () => {
                       try {
@@ -235,11 +236,13 @@ export const AdminClientTypesTab: React.FC = () => {
                     }`}>
                     {type.makeup_look_off ? 'No look' : 'Look'}
                   </button>
-                  <button type="button" aria-label={`Edit ${type.name}`}
-                    onClick={() => { setEditingId(type.id); setForm({ name: type.name, code: type.code || '', on_location: !!type.on_location, is_active: !!type.is_active }); }}
-                    className="btn-tactile p-2 bg-obsidian text-gold cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button type="button" aria-label={`Remove ${type.name}`} onClick={() => setDeleting(type)}
-                    className="btn-tactile p-2 bg-red-600 text-white cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <span className={recordActionGroup}>
+                    <RecordActionButton variant="edit" recordName={type.name} onClick={() => {
+                      setEditingId(type.id);
+                      setForm({ name: type.name, code: type.code || '', on_location: !!type.on_location, is_active: !!type.is_active });
+                    }} />
+                    <RecordActionButton variant="delete" recordName={type.name} onClick={() => setDeleting(type)} />
+                  </span>
                 </div>
               </li>
             ))}

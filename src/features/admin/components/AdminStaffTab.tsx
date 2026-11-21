@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { UserPlus, Trash2, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { UserPlus, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 import { ResetPasswordModal } from './ResetPasswordModal';
 import type { StaffUser, StaffRole } from '../../../types';
 import { PROTECTED_SYSTEM_USERNAMES } from '../../../constants/studio';
@@ -104,11 +105,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
           </button>
         )}
         {account.id !== user?.id && !PROTECTED_SYSTEM_USERNAMES.includes(account.username) && (
-          <button type="button" onClick={() => promptDeleteStaff(account)} title="Delete Staff Account"
-            aria-label={'Delete staff account ' + account.username}
-            className="grid min-h-8 min-w-8 place-items-center border border-line text-red-700 hover:bg-red-50">
-            <Trash2 className="size-4" aria-hidden="true" />
-          </button>
+          <RecordActionButton variant="delete" recordName={`staff account ${account.username}`} onClick={() => promptDeleteStaff(account)} />
         )}
       </div>
     ) },

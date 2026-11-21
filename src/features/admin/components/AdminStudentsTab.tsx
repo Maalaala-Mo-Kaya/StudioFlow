@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Edit3, Ban, Users, FileDown, RotateCcw } from 'lucide-react';
+import { Ban, Users, FileDown, RotateCcw } from 'lucide-react';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 import type { AddOn, Registration, Organization, Level, Course, Package } from '../../../types';
 import { formatCurrency, formatClientName } from '../../../utils/formatters';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
@@ -329,15 +330,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
           <FileDown className="w-3 h-3 text-gold" />
           <span>PDF</span>
         </button>}
-        <button
-          type="button"
-          onClick={() => setEditingStudent(reg)}
-          title="Edit Student Information"
-          className="btn-tactile inline-flex items-center gap-1 px-2 py-1 bg-obsidian text-gold hover:bg-neutral-800 text-[10px] font-bold uppercase cursor-pointer"
-        >
-          <Edit3 className="w-3 h-3" />
-          <span>Edit</span>
-        </button>
+        <RecordActionButton variant="edit" recordName={formatClientName(reg)} onClick={() => setEditingStudent(reg)} />
         {reg.status === 'cancelled' ? (
           <button
             type="button"
