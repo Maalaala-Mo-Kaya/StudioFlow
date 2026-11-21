@@ -213,10 +213,16 @@ function MakeupAssignmentCard({ row, selected = false, disabled, onToggle, child
         <p className="text-sm font-bold">{serviceNames(row)}</p>
         <p className="text-xs text-neutral-500">{row.artistName || 'Unassigned'}</p>
         {requiresConfirmation(row) && <p className="text-xs font-bold text-gold-soft">Confirmation required</p>}
-        {(look || row.lookNote) && <div className="border border-gold bg-gold-wash px-3 py-2 text-xs text-gold-soft">
+        {(look || (!selected && row.lookNote)) && <div className="border border-gold bg-gold-wash px-3 py-2 text-xs text-gold-soft">
           {look && <p className="font-bold">{look}</p>}
-          {row.lookNote && <p className="whitespace-pre-wrap">{selected ? row.lookNote : 'Client note'}</p>}
+          {!selected && row.lookNote && <p>Client note</p>}
         </div>}
+        {selected && row.lookNote && (
+          <dl className="space-y-1 pt-2">
+            <dt className="text-xs font-bold text-ink">Client Note:</dt>
+            <dd className="whitespace-pre-wrap border border-gold bg-gold-wash px-3 py-2 text-sm text-ink">{row.lookNote}</dd>
+          </dl>
+        )}
       </div>
       {selected && <details className="border border-line bg-canvas px-3 py-2">
         <summary className="cursor-pointer text-xs font-bold text-gold-soft">Client details</summary>
