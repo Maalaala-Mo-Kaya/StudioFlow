@@ -8,14 +8,15 @@ import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { studioDate } from '../../utils/studioDay';
 import type { MuaTeam } from './muaTeam';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
-import { MakeupClientTable, MakeupTeamTable, type MakeupTableView } from './MakeupTables';
+import { MakeupClientTable, type MakeupTableView } from './MakeupTables';
+import { MuaTeamOverview } from './MuaTeamOverview';
 import { requiresConfirmation, type MakeupAssignment } from './makeupAssignment';
 import { stationButton, stationCard, StationLayout } from './StationLayout';
 import { StationTabs } from './StationTabs';
 
 type Action = 'assign' | 'claim' | 'start' | 'complete' | 'release';
 const tabs = [
-  { id: 'team', label: 'MUA Team Status' },
+  { id: 'team', label: 'MUA Team Overview' },
   { id: 'waiting', label: 'Unassigned Clients' },
   { id: 'assigned', label: 'Assigned Clients' },
   { id: 'completed', label: 'Completed Services' },
@@ -29,7 +30,8 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
   const [selection, setSelection] = useState<MakeupTab>();
   const [views, setViews] = useState<Partial<Record<MakeupTab, MakeupTableView>>>({});
   const [date, setDate] = useState(() => studioDate());
-  const { data: team, error: teamError, refresh: refreshTeam } = useWorkflowData<MuaTeam>(`/makeup-team?date=${encodeURIComponent(date)}`, undefined, true);
+  const teamPath = `/makeup-team?date=${encodeURIComponent(date)}${selection === 'team' ? '&overview=1' : ''}`;
+  const { data: team, error: teamError, refresh: refreshTeam } = useWorkflowData<MuaTeam>(teamPath, undefined, true);
   const admin = user?.role === 'admin';
   const manage = admin || !!team?.manage;
   const availableTabs = tabs.filter(({ id }) => id === 'team' ? manage : id === 'waiting' ? manage || team?.canClaim : true);
@@ -151,7 +153,7 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
         {teamError && activeTab !== 'completed' && <p role="alert" className="text-sm font-bold text-red-700">{teamError}</p>}
         {queueTab && error && <p role="alert" className="text-sm font-bold text-red-700">{error}</p>}
         {activeTab === 'completed' && completedError && <p role="alert" className="text-sm font-bold text-red-700">{completedError}</p>}
-        {(activeTab === 'team' || activeTab === 'completed') && (
+        {activeTab === 'completed' && (
           <label className="flex flex-wrap items-center gap-2 text-xs font-bold">
             Completion date (Philippine time)
             <input type="date" className="min-h-10 border border-line bg-panel px-2" value={date}
@@ -160,8 +162,8 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
         )}
         {activeTab === 'team' ? (
           <>
-            <MakeupTeamTable artists={team?.date === date ? artists : []}
-              loading={team?.date !== date && !teamError} sort={view.sort ?? null} onSort={(sort) => updateView({ sort })} />
+            <MuaTeamOverview team={team} date={date} onDateChange={setDate} failed={!!teamError}
+              sort={view.sort ?? null} onSort={(sort) => updateView({ sort })} />
             {admin && teamSettings && (
               <details className="border border-line bg-panel">
                 <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-gold-soft">Makeup artist team settings</summary>

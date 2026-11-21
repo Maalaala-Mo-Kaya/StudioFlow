@@ -8,6 +8,7 @@ routerAdd("GET", "/api/studioflow/makeup-team", (e) => {
   let result;
   const today = reporting.studioDate(Date.now());
   const date = e.request.url.query().get("date") || today;
+  const overview = e.request.url.query().get("overview") === "1";
   const instant = new Date(date);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(instant.getTime())
     || instant.toISOString().slice(0, 10) !== date) throw new BadRequestError("Choose a valid report date.");
@@ -18,22 +19,34 @@ routerAdd("GET", "/api/studioflow/makeup-team", (e) => {
       result = { manage: false, canClaim: perms.canClaim, date, today, artists: [] };
       return;
     }
-    const active = tx.findRecordsByFilter("registrations",
-      "status = 'paid' && " + workflow.paymentFilter + " && (makeup_state = 'claimed' || makeup_state = 'in_progress')", "", 0, 0);
+    const staff = tx.findRecordsByFilter("users", "role = 'mua'", "name,id", 0, 0);
+    const roster = overview ? new Map(staff.filter((artist) => !artist.getBool("disabled")).map((artist) => [artist.id, artist])) : undefined;
+    const until = overview && date < today
+      ? new Date(new Date(date + "T00:00:00+08:00").getTime() + 86400000).toISOString().replace("T", " ") : "";
+    const assignments = until ? team.assignmentsBefore(tx, until) : overview && date > today ? []
+      : tx.findRecordsByFilter("registrations",
+        "status = 'paid' && " + workflow.paymentFilter + " && (makeup_state = 'claimed' || makeup_state = 'in_progress')", "", 0, 0)
+        .map((job) => ({ id: job.id, artistId: job.getString("makeup_artist"), state: job.getString("makeup_state"), job }));
     const loads = new Map();
-    for (const job of active) {
-      const id = job.getString("makeup_artist");
+    const workload = { pending: 0, inProgress: 0 };
+    for (const { artistId: id, state, job, id: jobId, serviceCount } of assignments) {
+      if (roster && !roster.has(id)) continue;
       const counts = loads.get(id) || { pending: 0, inProgress: 0 };
-      counts[job.getString("makeup_state") === "claimed" ? "pending" : "inProgress"]++;
+      const key = state === "claimed" ? "pending" : "inProgress";
+      counts[key]++;
+      if (overview) {
+        workload[key] += serviceCount || reporting.uncreditedServices(tx, job || tx.findRecordById("registrations", jobId), until).size;
+      }
       loads.set(id, counts);
     }
-    const completed = new Map(reporting.dailyReport(tx, date, today).rows.map((row) => [row.id, row.totalClients]));
-    const artists = tx.findRecordsByFilter("users", "role = 'mua'", "name,id", 0, 0).map((artist) => ({
+    const report = reporting.dailyReport(tx, date, today, false, roster);
+    const completed = new Map(report.rows.map((row) => [row.id, overview ? row.totalServices : row.totalClients]));
+    const artists = (roster ? Array.from(roster.values()) : staff).map((artist) => ({
       id: artist.id, name: actorName(artist), disabled: artist.getBool("disabled"),
       parent: artist.id === perms.parentId, pending: loads.get(artist.id)?.pending || 0,
       inProgress: loads.get(artist.id)?.inProgress || 0, completed: completed.get(artist.id) || 0,
     }));
-    result = { ...perms, date, today, artists };
+    result = { ...perms, date, today, artists, ...(overview ? { report, workload } : {}) };
   });
   e.response.header().set("Cache-Control", "private, no-store");
   return e.json(200, result);

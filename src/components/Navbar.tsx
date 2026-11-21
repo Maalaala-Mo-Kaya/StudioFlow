@@ -10,6 +10,16 @@ interface NavbarProps {
   queueCount?: number;
 }
 
+function StudioStatus({ queueCount }: { queueCount: number }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-[10px] font-mono text-neutral-400 tracking-wider uppercase">
+      <span aria-hidden="true" className="size-1.5 shrink-0 bg-gold animate-status-pulse" />
+      <span className="truncate">LAN System Online</span>
+      {queueCount > 0 && <span className="truncate text-gold font-bold">• {queueCount} Active in Queue</span>}
+    </div>
+  );
+}
+
 export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCount = 0 }) => {
   const { user, logout } = useAuth();
   const stations = user?.role === 'admin' ? ADMIN_STATION_LINKS
@@ -35,44 +45,38 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
     >
       <div aria-hidden="true" className="gold-rule absolute inset-x-0 bottom-0" />
       <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex h-16 items-center justify-between gap-2 sm:gap-3">
           {/* Studio Masthead Identity */}
           <button
             type="button"
             onClick={handleMastheadClick}
-            className="flex min-w-0 items-center gap-2 sm:gap-3.5 text-left group focus:outline-none cursor-pointer"
+            className="group flex min-w-0 shrink-0 items-center gap-2 text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-gold md:shrink md:gap-3.5"
           >
             <img
               src="/logo/hi-light-gold.jpg"
               alt={STUDIO_INFO.shortCode}
-              className="h-12 w-auto shrink-0 mix-blend-lighten transition-transform duration-300 group-hover:scale-[1.03]"
+              className="h-10 w-auto shrink-0 mix-blend-lighten transition-transform duration-300 group-hover:scale-[1.03] min-[360px]:h-12"
             />
-            <div className="hidden min-[420px]:block border-l border-gold/25 pl-3">
+            <div className="hidden min-w-0 border-l border-gold/25 pl-3 md:block">
               <div className="flex items-center gap-2.5">
-                <span className="font-display font-semibold text-sm sm:text-base tracking-[0.18em] uppercase text-foil">
+                <span className="truncate font-display font-semibold text-base tracking-[0.18em] uppercase text-foil">
                   Hi-Light Studio
                 </span>
-                <span className="hidden sm:inline-block text-[10px] font-mono uppercase tracking-widest text-neutral-500 border-l border-neutral-800 pl-2.5">
+                <span className="hidden shrink-0 whitespace-nowrap text-[10px] font-mono uppercase tracking-widest text-neutral-500 border-l border-neutral-800 pl-2.5 2xl:inline-block">
                   {STUDIO_INFO.shortAddress}
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-[10px] font-mono text-neutral-400 tracking-wider uppercase">
-                <span className="w-1.5 h-1.5 bg-gold inline-block animate-status-pulse" />
-                <span>LAN System Online</span>
-                {queueCount > 0 && user && (
-                  <span className="text-gold font-bold">• {queueCount} Active in Queue</span>
-                )}
-              </div>
+              <StudioStatus queueCount={user ? queueCount : 0} />
             </div>
           </button>
 
           {/* Right Side: Minimal Staff Session or Single Login Trigger */}
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <ThemeToggle />
             {user && (
-              <div className="flex items-center gap-2 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 {stations.length > 0 && (
-                  <nav aria-label="Staff stations" className="hidden lg:flex items-center border border-neutral-800 bg-obsidian-2">
+                  <nav aria-label="Staff stations" className="hidden shrink-0 items-center border border-neutral-800 bg-obsidian-2 xl:flex">
                     {stations.map((st) => (
                       <button
                         key={st.id}
@@ -89,10 +93,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
                   </nav>
                 )}
 
-                <div className="flex items-center gap-2.5 border border-neutral-800 bg-obsidian-2 px-3 py-1.5">
-                  <div className="text-right">
-                    <div className="max-w-[27vw] sm:max-w-40 truncate text-xs font-bold text-white leading-none">{user.name}</div>
-                    <div className="text-[9px] font-mono font-bold text-gold uppercase tracking-widest mt-1">
+                <div className="flex min-w-0 items-center gap-2 border border-neutral-800 bg-obsidian-2 px-2 py-1.5 sm:gap-2.5 sm:px-3">
+                  <div className="min-w-0 max-w-[34vw] text-right sm:max-w-40">
+                    <div className="truncate text-xs font-bold text-white leading-none" title={user.name}>{user.name}</div>
+                    <div className="mt-1 truncate text-[9px] font-mono font-bold text-gold uppercase tracking-widest">
                       ROLE // {user.role}
                     </div>
                   </div>
@@ -100,8 +104,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
                   <button
                     type="button"
                     onClick={handleSignOut}
+                    aria-label="Sign out"
                     title="Sign out"
-                    className="btn-tactile ml-1 px-2.5 py-1.5 bg-obsidian hover:bg-panel text-neutral-300 hover:text-ink border border-neutral-700 text-[10px] font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer"
+                    className="btn-tactile flex shrink-0 items-center gap-1.5 border border-neutral-700 bg-obsidian px-2.5 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-300 hover:bg-panel hover:text-ink cursor-pointer sm:ml-1"
                   >
                     <LogOut className="w-3 h-3" />
                     <span className="hidden sm:inline">Exit</span>
@@ -112,9 +117,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
           </div>
         </div>
 
-        {/* Mobile Admin Station Bar */}
+        <div className="pb-1.5 md:hidden">
+          <StudioStatus queueCount={user ? queueCount : 0} />
+        </div>
+
+        {/* Station navigation on smaller screens */}
         {stations.length > 0 && (
-          <nav aria-label="Staff stations" className="grid grid-cols-3 sm:flex lg:hidden border-t border-neutral-800 bg-obsidian-2 py-1.5 gap-1">
+          <nav aria-label="Staff stations" className="grid grid-cols-3 sm:flex xl:hidden border-t border-neutral-800 bg-obsidian-2 py-1.5 gap-1">
             {stations.map((st) => (
               <button
                 key={st.id}

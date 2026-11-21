@@ -161,7 +161,7 @@ export function DataTable<Row, Id extends string = string>({
       ) : toolbar}
       <div ref={viewport} role="region" aria-label={label} tabIndex={0}
         className={`@container min-h-0 min-w-0 flex-auto overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold ${renderCompactRow ? 'hidden md:block' : ''} ${viewportClassName}`}>
-        <table aria-label={label} className={`w-full border-separate border-spacing-0 text-left text-xs ${tableClassName}`}>
+        <table aria-label={label} className={`studio-data-table w-full border-separate border-spacing-0 text-left text-xs ${tableClassName}`}>
           <thead className={`sticky top-0 z-10 bg-obsidian text-[11px] font-black text-gold ${headerClassName}`}>
             <tr>
               {visible.map((column) => {
@@ -198,7 +198,7 @@ export function DataTable<Row, Id extends string = string>({
                   <tr className={`${interactive ? 'cursor-pointer' : ''} ${isOpen ? 'bg-gold-wash' : ''} ${rowClassName?.(row) ?? 'hover:bg-canvas'}`}
                     onClick={interactive ? (event) => { if (!clickedControl(event)) activateRow(row, key); } : undefined}>
                     {visible.map((column) => (
-                      <td key={column.id} className={`border-b border-neutral-200 px-3 py-2 ${alignment[column.align ?? 'left']} ${column.cellClassName ?? ''}`}>
+                      <td key={column.id} className={`border-b border-neutral-200 px-3 py-4 md:py-2 ${alignment[column.align ?? 'left']} ${column.cellClassName ?? ''}`}>
                         {column === detailsColumn && interactive && (
                           <button type="button" aria-label={detailsColumnId ? (isOpen ? 'Hide details' : 'View details')
                             : renderExpanded ? (isOpen ? 'Collapse row' : 'Expand row') : 'Open row'}

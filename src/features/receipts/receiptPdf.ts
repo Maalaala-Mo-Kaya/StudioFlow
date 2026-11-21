@@ -6,7 +6,7 @@ import { pb } from '../../db/pocketbase';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import {
   orderExtras, receiptRevenueLine,
-  isCounted, jobOrderMarks, soldPackagePrice, loadReceiptData, loadRefundSignature, methodLabel, paymentTypeLabel, peso, receiptDate, receiptLabel, refundAcknowledgment, refundFigures, signatureUrl, statusLabel,
+  isCounted, isComplimentarySettlement, jobOrderMarks, paymentDiscount, soldPackagePrice, loadReceiptData, loadRefundSignature, methodLabel, paymentTypeLabel, peso, receiptDate, receiptLabel, refundAcknowledgment, refundFigures, signatureUrl, statusLabel,
   visiblePayments, profileCells, profileLine,
   type ReceiptData, type ReceiptPaper, type RefundSlipData,
 } from './receiptData';
@@ -105,6 +105,7 @@ function drawSignature(doc: jsPDF, data: string | null, cx: number, bottom: numb
 function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'studio', top: number, cashierName: string, signature: string | null) {
   const { registration: reg, payments } = data;
   const isCustomer = copy === 'customer';
+  const complimentary = isComplimentarySettlement(reg);
   const x = 0.32;
   const w = 8.5 - 2 * x;
   const right = x + w;
@@ -115,7 +116,7 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   put(doc, STUDIO_INFO.tagline, x, y + 0.3, { size: 7, italic: true, color: [68, 68, 68] });
   put(doc, STUDIO_INFO.address, x, y + 0.41, { size: 6.5, color: [68, 68, 68] });
   put(doc, `${STUDIO_INFO.hours} · Tel. ${STUDIO_INFO.phone}`, x, y + 0.51, { size: 6.5, bold: true, color: [51, 51, 51] });
-  badge(doc, isCustomer ? 'CUSTOMER CLAIM STUB' : 'STUDIO ACCOUNTING COPY', right, y, 'right');
+  badge(doc, complimentary ? 'COMPLIMENTARY SETTLEMENT RECEIPT' : isCustomer ? 'CUSTOMER CLAIM STUB' : 'STUDIO ACCOUNTING COPY', right, y, 'right');
   put(doc, formatJobOrderNo(reg.job_order_no).replace('№', 'No.'), right, y + 0.42, { size: 16, bold: true, mono: true, color: RED, align: 'right' });
   doc.setFont('courier', 'bold');
   doc.setFontSize(16);
@@ -187,7 +188,7 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   const { rows, hidden } = visiblePayments(payments);
   if (!rows.length) {
     box(doc, x, ty, tableW, 0.17);
-    put(doc, 'No payment recorded yet', x + tableW / 2, ty + 0.115, { size: 6.5, italic: true, color: GREY, align: 'center' });
+    put(doc, complimentary ? 'Settled with discount credit' : 'No payment recorded yet', x + tableW / 2, ty + 0.115, { size: 6.5, italic: true, color: GREY, align: 'center' });
     ty += 0.17;
   }
   for (const payment of rows) {
@@ -364,6 +365,20 @@ function drawReceiptSlip(doc: jsPDF, data: ReceiptData, payment: PaymentRecord, 
   row('PAYMENT FOR', paymentTypeLabel(payment), y);
   row('METHOD', methodLabel(payment.payment_method) + (payment.remarks ? ` · ${payment.remarks}` : ''), y += 0.14);
   row('PREVIOUS BALANCE', php(payment.balance_before), y += 0.14);
+  const discount = paymentDiscount(payment);
+  if (discount) {
+    row(`DISCOUNT CREDIT (${Number(discount.percentage.toFixed(2))}%)`, php(-discount.amount), y += 0.13);
+    doc.setFont('helvetica', 'normal');
+    const reason = `Reason · ${discount.reason}`;
+    let size = 6;
+    doc.setFontSize(size);
+    let lines: string[] = doc.splitTextToSize(reason, w);
+    while (lines.length * (size * PT + 0.01) > 0.38 && size > 3.5) {
+      doc.setFontSize(size -= 0.5);
+      lines = doc.splitTextToSize(reason, w);
+    }
+    for (const line of lines) put(doc, line, x, y += size * PT + 0.01, { size, color: GREY });
+  }
 
   y += 0.07;
   rule(doc, x, y, right, y, 1.5);
@@ -567,13 +582,13 @@ export async function downloadJobOrderPdfFor(registration: Registration, cashier
  * Saves PDF copies of a job order's paperwork into the client's folder (<folder>\RECEIPTS on the
  * photo drive): JO-<no>.pdf, one OR-….pdf per payment and one RF-….pdf per refund, all redrawn
  * from the current records (voided receipts and cancel / refund stamps included).
- * Returns false when there is nothing to save yet (no payment, so no client folder).
+ * Returns false when there is nothing to save yet (no payment or complimentary settlement).
  * The database stays the official record; these copies are for staff browsing the drive.
  */
 export async function saveClientDocuments(registrationId: string): Promise<boolean> {
   const data = await loadReceiptData(registrationId);
   const reg = data.registration;
-  if (!reg.job_order_no || !data.payments.length) return false;
+  if (!reg.job_order_no || (!data.payments.length && !isComplimentarySettlement(reg))) return false;
   const files: Array<[name: string, doc: jsPDF]> = [
     [`JO-${reg.job_order_no}.pdf`, await buildJobOrderPdf(data, reg.prepared_by || 'Cashier Staff')],
   ];

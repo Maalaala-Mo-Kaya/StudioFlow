@@ -3,6 +3,7 @@ import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { workflowApi, workflowError } from '../../hooks/useWorkflowData';
 import type { PaymentRecord, RefundRecord, Registration } from '../../types';
 import { studioDayStartUtc } from '../../utils/studioDay';
 import { randomId } from '../../utils/randomId';
@@ -10,6 +11,7 @@ import { refreshClientDocuments } from '../receipts/clientDocuments';
 import { clientSummary } from '../../utils/clientInfo';
 import { isReadyForRelease } from '../../utils/releaseReadiness';
 import { ALL_CLIENTS, matchesClientGroup } from '../../utils/clientGroup';
+import type { CashierPaymentIntent } from './components/PaymentModal';
 import {
   cashierFilterOptions, defaultCashierColumns, emptyCashierFilters, matchesCashierFilters,
   type CashierColumnId, type CashierFilterKey, type CashierFilters,
@@ -87,7 +89,7 @@ export function useCashierState() {
   const [isProcessing, setIsProcessing] = useState(false);
   const submittingPayment = useRef(false);
   // Sent with the payment so a retried request can find the payment the server already saved.
-  const clientKey = useRef<string | null>(null);
+  const confirmationAttempt = useRef<{ payload: string; key: string } | null>(null);
 
   // Print Modal State
   const [printReg, setPrintReg] = useState<Registration | null>(null);
@@ -233,14 +235,11 @@ export function useCashierState() {
       };
       const mode: CollectionMode = !canUseCollectionMode(hydrated, 'full')
         ? 'additional' : latest.payment_type === 'downpayment' ? 'initial' : 'full';
-      const paymentCentavos = mode === 'initial'
-        ? Math.min(balanceCentavos, Math.round(totalCentavos / 200) * 100)
-        : balanceCentavos;
       if (submittingPayment.current) return;
-      clientKey.current = null;
+      confirmationAttempt.current = null;
       setSelectedReg(hydrated);
       setPaymentType(mode);
-      setAmountPaid(mode === 'additional' ? '' : String(fromCentavos(paymentCentavos)));
+      setAmountPaid('');
       setRemarks('');
       setCashReceived('');
     } catch (err) {
@@ -286,81 +285,46 @@ export function useCashierState() {
     }
   };
 
-  const handleConfirmPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleConfirmPayment = async ({ balanceDue, discount, amount }: CashierPaymentIntent) => {
     if (!selectedReg || submittingPayment.current) return;
-    if (!canUseCollectionMode(selectedReg, paymentType)) {
-      toast.error('This collection mode is unavailable for the current job order.');
-      return;
+    const request = {
+      updated: selectedReg.updated,
+      balanceDue,
+      discount,
+      payment: amount === undefined ? undefined : {
+        amount, type: paymentType, method: paymentMethod, cashierName,
+        cash: paymentMethod === 'cash' ? Number(cashReceived) : 0,
+        remarks: remarks.trim(),
+      },
+    };
+    const payload = JSON.stringify(request);
+    if (confirmationAttempt.current?.payload !== payload) {
+      confirmationAttempt.current = { payload, key: randomId() };
     }
-    const amount = Number(amountPaid);
-    const amountCentavos = toCentavos(amount);
-    const balanceCentavos = toCentavos(selectedReg.balance);
-    const discountSettlement = paymentType !== 'initial' && !!selectedReg.revenue_discount && amountCentavos === balanceCentavos && balanceCentavos % 100 !== 0;
-    const moneyPattern = discountSettlement ? /^\d+(\.\d{1,2})?$/ : /^\d+$/;
-    if (!moneyPattern.test(amountPaid) || !Number.isFinite(amount)
-      || amountCentavos < (discountSettlement ? 1 : 100) || amountCentavos > balanceCentavos) {
-      toast.error('Please enter a valid payment amount.');
-      return;
-    }
-    const cash = Number(cashReceived);
-    if (paymentMethod === 'cash' && (!moneyPattern.test(cashReceived) || toCentavos(cash) < amountCentavos)) {
-      toast.error('Enter the cash received. It must cover the payment amount.');
-      return;
-    }
+    const clientKey = confirmationAttempt.current.key;
     submittingPayment.current = true;
     setIsProcessing(true);
     try {
-      const key = clientKey.current ??= randomId();
-      const payments = pb.collection('payments');
-      const saved = await payments.create<PaymentRecord>({
-        registration: selectedReg.id,
-        amount: fromCentavos(amountCentavos),
-        payment_type: paymentType,
-        payment_method: paymentMethod,
-        cashier_name: cashierName,
-        cashier_id: user?.id || '',
-        cash_tendered: paymentMethod === 'cash' ? fromCentavos(toCentavos(cash)) : 0,
-        client_key: key,
-        remarks: remarks.trim(),
-      }, { requestKey: null }).catch(async (err: unknown) => {
-        // The server may have saved the payment before the response was lost.
-        return payments.getFirstListItem<PaymentRecord>(pb.filter('registration = {:registration} && client_key = {:key}', {
-          registration: selectedReg.id, key,
-        }), { requestKey: null, cache: 'no-store' }).catch(() => { throw err; });
-      });
-
-      setSelectedReg(null);
-      refreshClientDocuments(selectedReg.id, toast.warning);
-      toast.success(saved.change_amount
-        ? `Payment recorded. Change: ₱${saved.change_amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
-        : 'Payment recorded successfully.');
-      const updated = await pb.collection('registrations').getOne<Registration>(selectedReg.id, {
-        expand: 'organization,level,course,package,session_type',
-        requestKey: null,
-        cache: 'no-store',
-      }).catch((err: unknown) => {
-        console.error('Failed to load the job order for the receipt:', err);
-        toast.error('Payment was recorded. Refresh the job order to print the receipt.');
-        fetchRegistrations();
-        return null;
-      });
-      if (!updated) return;
-
-      // Instant 0ms optimistic UI update for Cashier Table
-      setRegistrations((prev) =>
-        prev.map((r) => (r.id === selectedReg.id ? updated : r))
+      const confirm = () => pb.send<{ registration: Registration; paymentId: string; changeAmount: number }>(
+        `${workflowApi}/registrations/${selectedReg.id}/confirm-payment`,
+        { method: 'POST', body: { ...request, clientKey }, requestKey: null },
       );
-
+      const result = await confirm().catch((error: unknown) => {
+        if (error instanceof ClientResponseError && (error.status === 0 || error.status >= 500)) return confirm();
+        throw error;
+      });
+      const updated = { ...result.registration, expand: selectedReg.expand };
+      setRegistrations((prev) => prev.map((reg) => reg.id === updated.id ? updated : reg));
+      setSelectedReg(null);
       setPrintReg(updated);
-      setPrintPaymentId(saved.id);
-
-      // Trigger background sync
-      fetchRegistrations();
-    } catch (err: unknown) {
-      console.error('Failed to process payment:', err);
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      toast.error('Payment processing failed: ' + msg);
+      setPrintPaymentId(result.paymentId || undefined);
+      refreshClientDocuments(updated.id, toast.warning);
+      toast.success(result.changeAmount
+        ? `Payment recorded. Change: ₱${result.changeAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
+        : result.paymentId ? 'Payment recorded successfully.' : 'Discount settlement recorded.');
+      void fetchRegistrations();
+    } catch (error: unknown) {
+      toast.error(workflowError(error));
     } finally {
       submittingPayment.current = false;
       setIsProcessing(false);

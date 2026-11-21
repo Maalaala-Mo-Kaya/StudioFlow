@@ -14,7 +14,7 @@ import {
 interface PrintReceiptModalProps {
   registration: Registration;
   cashierName: string;
-  /** Open on this payment. Its form is chosen automatically (job order for the first payment, receipt after). */
+  /** Open the preview for the specified payment. */
   paymentId?: string;
   onClose: () => void;
 }
@@ -149,7 +149,13 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({ registrati
                   className="btn-tactile flex-1 sm:flex-initial min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-1.5 bg-canvas text-ink border border-line text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50">
                   {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />} PDF
                 </button>
-                <button type="button" onClick={() => window.print()} disabled={!data}
+                <button type="button" onClick={() => {
+                  try {
+                    window.print();
+                  } catch {
+                    toast.error('Printing could not start. You can print this saved receipt again.');
+                  }
+                }} disabled={!data}
                   className="btn-tactile flex-1 sm:flex-initial min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-1.5 bg-gold text-on-gold border border-line text-xs font-black uppercase tracking-widest cursor-pointer disabled:opacity-50">
                   <Printer className="w-4 h-4" /> Print
                 </button>

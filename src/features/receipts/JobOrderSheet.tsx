@@ -5,7 +5,7 @@ import { STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import {
   orderExtras, receiptRevenueLine,
-  isCounted, jobOrderMarks, methodLabel, soldPackagePrice, paymentTypeLabel, peso, receiptDate, receiptLabel, signatureUrl, statusLabel, visiblePayments, profileCells,
+  isCounted, isComplimentarySettlement, jobOrderMarks, methodLabel, soldPackagePrice, paymentTypeLabel, peso, receiptDate, receiptLabel, signatureUrl, statusLabel, visiblePayments, profileCells,
   type ReceiptData,
 } from './receiptData';
 
@@ -38,6 +38,7 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
   const latest = [...payments].reverse().find(isCounted);
   const credit = reg.status === 'cancelled' ? 0 : discountCents(reg) / 100;
   const settled = reg.balance <= 0 && reg.paid_amount + credit > 0;
+  const complimentary = isComplimentarySettlement(reg);
   const marks = jobOrderMarks(reg);
   const cancelled = reg.status === 'cancelled';
   const refundNumbers = data.refunds.map((refund) => refund.refund_no).filter(Boolean);
@@ -64,7 +65,7 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
         </div>
         <div className="shrink-0 text-right">
           <div className="inline-block border border-[#0a0a0a] px-2 py-[1px] font-mono text-[7.5px] font-bold uppercase tracking-[0.18em]">
-            {isCustomer ? 'Customer Claim Stub' : 'Studio Accounting Copy'}
+            {complimentary ? 'Complimentary Settlement Receipt' : isCustomer ? 'Customer Claim Stub' : 'Studio Accounting Copy'}
           </div>
           <div className="mt-[2px] flex items-baseline justify-end gap-2">
             <span className="text-[7px] font-black uppercase tracking-wider">Job Order</span>
@@ -121,7 +122,7 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={isCustomer ? 6 : 7} className="border border-[#0a0a0a] px-[4px] py-[3px] text-center italic text-[#666]">No payment recorded yet</td></tr>
+              <tr><td colSpan={isCustomer ? 6 : 7} className="border border-[#0a0a0a] px-[4px] py-[3px] text-center italic text-[#666]">{complimentary ? 'Settled with discount credit' : 'No payment recorded yet'}</td></tr>
             )}
             {rows.map((payment) => <PaymentRow key={payment.id} payment={payment} studio={!isCustomer} />)}
             {hidden > 0 && (

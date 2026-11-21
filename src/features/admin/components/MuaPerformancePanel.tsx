@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from 'react';
-import { DataTable, type DataTableColumn } from '../../../components/common/DataTable';
+import { MuaAnalyticsTable } from '../../workflow/MuaAnalyticsTable';
 import { pb } from '../../../db/pocketbase';
 import { useToast } from '../../../context/ToastContext';
 import { useWorkflowData, workflowApi, workflowError } from '../../../hooks/useWorkflowData';
 import { randomId } from '../../../utils/randomId';
 import { stationButton, stationCard } from '../../workflow/StationLayout';
-import { formatMuaAmount, muaEarningsTable, muaReportTable, type MuaCompletion, type MuaPerformanceReport } from '../muaPerformance';
+import { formatMuaAmount, type MuaCompletion, type MuaPerformanceReport } from '../muaPerformance';
 
 const studioTime = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
 const sourceLabels: Record<string, string> = {
@@ -64,60 +64,35 @@ export function MuaPerformancePanel() {
               {key === 'performance' ? 'Performance' : 'Earnings'}
             </button>)}
           </div>
-          <ArtistReportTable key={`${report.date}:${tab}`} report={report} earnings={tab === 'earnings'} refresh={refresh} />
+          <MuaAnalyticsTable key={`${report.date}:${tab}`} report={report} earnings={tab === 'earnings'}
+            renderDetails={(artist) => <AdminArtistDetails artist={artist} date={report.date} earnings={tab === 'earnings'} refresh={refresh} />} />
         </>
       )}
     </section>
   );
 }
 
-function ArtistReportTable({ report, earnings, refresh }: {
-  report: MuaPerformanceReport; earnings: boolean; refresh: () => void;
+function AdminArtistDetails({ artist, date, earnings, refresh }: {
+  artist: MuaPerformanceReport['rows'][number]; date: string; earnings: boolean; refresh: () => void;
 }) {
-  const matrix = earnings ? muaEarningsTable(report) : muaReportTable(report);
-  const rows = report.rows.map((artist, index) => ({ artist, values: matrix.rows[index].slice(2) }));
-  const valueText = (value: string | number) => earnings ? formatMuaAmount(Number(value)) : value;
-  const valueIds = [...report.columns.map(({ id }) => 'service:' + id), 'total'];
-  const columns: DataTableColumn<typeof rows[number]>[] = [
-    { id: 'name', header: 'MUA Name', sortable: true, accessor: ({ artist }) => artist.name, cellClassName: 'font-bold' },
-    ...matrix.headers.slice(2).map((header, index): DataTableColumn<typeof rows[number]> => ({
-      id: valueIds[index], header, sortable: true, align: 'right', cellClassName: 'font-mono',
-      accessor: ({ values }) => Number(values[index]), cell: ({ values }) => valueText(values[index]),
-    })),
-  ];
-
   return (
-    <DataTable label={earnings ? 'Daily MUA earnings' : 'Daily MUA counts'}
-      rows={rows} columns={columns} getRowId={({ artist }) => artist.id} pagination={false}
-      emptyMessage="No completions recorded for this date." tableClassName="whitespace-nowrap" headerClassName="uppercase"
-      footer={() => (
-        <tr className="border-t border-line bg-gold-wash font-black">
-          <th scope="row" className="px-3 py-2 text-left">TOTAL</th>
-          {matrix.total.slice(2).map((value, index) => (
-            <td key={valueIds[index]} className="px-3 py-2 text-right font-mono">{valueText(value)}</td>
-          ))}
-        </tr>
-      )}
-      renderExpanded={({ artist }) => (
-        <section className="space-y-2 whitespace-normal" aria-label={artist.name + ' service details'}>
-          <h4 className="font-black uppercase">{earnings ? 'MUA earnings details' : 'MUA performance details'}</h4>
-          <p className="text-sm">{artist.name} · {report.date} · {artist.totalClients} clients</p>
-          {!artist.details.length && <p className="text-sm text-neutral-600">No services completed.</p>}
-          <ul className="divide-y divide-neutral-200">
-            {artist.details.map((item) => (
-              <li key={item.id} className="py-2 text-sm">
-                <p className="font-bold">{studioTime.format(new Date(item.completedAt.replace(' ', 'T')))} · {item.studentName} · {item.serviceName}</p>
-                <p>Job order {item.jobOrder} · {item.sources.map(({ source, name }) => `${name} (${sourceLabels[source]})`).join(', ')}</p>
-                {item.packageName && !item.sources.some(({ source }) => source === 'package') && <p>Portrait package {item.packageName}</p>}
-                <p className="text-neutral-600">Performed by {item.artistName} · Recorded by {item.actorName}</p>
-                {item.reviewReason && <p className="font-semibold text-amber-700">Review required. {item.reviewReason}</p>}
-                {earnings && <EarningsDetails item={item} refresh={refresh} />}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    />
+    <section className="space-y-2 whitespace-normal" aria-label={artist.name + ' service details'}>
+      <h4 className="font-black uppercase">{earnings ? 'MUA earnings details' : 'MUA performance details'}</h4>
+      <p className="text-sm">{artist.name} · {date} · {artist.totalClients} clients</p>
+      {!artist.details.length && <p className="text-sm text-neutral-600">No services completed.</p>}
+      <ul className="divide-y divide-neutral-200">
+        {artist.details.map((item) => (
+          <li key={item.id} className="py-2 text-sm">
+            <p className="font-bold">{studioTime.format(new Date(item.completedAt.replace(' ', 'T')))} · {item.studentName} · {item.serviceName}</p>
+            <p>Job order {item.jobOrder} · {item.sources.map(({ source, name }) => `${name} (${sourceLabels[source]})`).join(', ')}</p>
+            {item.packageName && !item.sources.some(({ source }) => source === 'package') && <p>Portrait package {item.packageName}</p>}
+            <p className="text-neutral-600">Performed by {item.artistName} · Recorded by {item.actorName}</p>
+            {item.reviewReason && <p className="font-semibold text-amber-700">Review required. {item.reviewReason}</p>}
+            {earnings && <EarningsDetails item={item} refresh={refresh} />}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

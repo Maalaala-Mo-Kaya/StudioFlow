@@ -1,6 +1,31 @@
 @import "tailwindcss";
 @import "@fontsource-variable/cinzel";
 
+@layer components {
+  .studio-data-table > thead > tr {
+    background-color: inherit;
+  }
+
+  .studio-data-table > :is(thead, tbody, tfoot) > tr > :is(th, td):first-child:not([colspan]) {
+    position: sticky;
+    inset-inline-start: 0;
+    z-index: 1;
+    background-color: inherit;
+    background-image: linear-gradient(var(--color-panel), var(--color-panel));
+  }
+
+  /* Preserve row highlights over an opaque surface so scrolling cells cannot show through. */
+  .studio-data-table > :is(thead, tbody, tfoot) > tr > :is(th, td):first-child:not([colspan])::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-color: inherit;
+    border-inline-end: 1px solid var(--color-line);
+  }
+}
+
 /*
  * Hi-Light luxury theme, Night (default) and Day (<html data-theme="light">).
  * Components use the semantic colors below (bg-canvas, bg-panel, text-ink, border-line,
