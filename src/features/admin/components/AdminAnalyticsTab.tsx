@@ -551,7 +551,6 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         columns={ledgerColumns}
         getRowId={({ registration }) => registration.id}
         defaultSort={{ column: 'job', direction: 'ascending' }}
-        viewportClassName="h-[600px]"
         tableClassName="font-mono"
         headerClassName="uppercase tracking-wider"
         filtered={Boolean(searchQuery.trim()) || filterSchool !== 'all' || filterPaymentStatus !== 'all'}

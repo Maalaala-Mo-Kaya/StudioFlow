@@ -160,7 +160,7 @@ export function DataTable<Row, Id extends string = string>({
         </div>
       ) : toolbar}
       <div ref={viewport} role="region" aria-label={label} tabIndex={0}
-        className={`@container min-h-0 min-w-0 overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold ${renderCompactRow ? 'hidden md:block' : ''} ${viewportClassName}`}>
+        className={`@container min-h-0 min-w-0 flex-auto overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold ${renderCompactRow ? 'hidden md:block' : ''} ${viewportClassName}`}>
         <table aria-label={label} className={`w-full border-separate border-spacing-0 text-left text-xs ${tableClassName}`}>
           <thead className={`sticky top-0 z-10 bg-obsidian text-[11px] font-black text-gold ${headerClassName}`}>
             <tr>

@@ -191,8 +191,7 @@ export function CashierTable({
       filtered={filtered}
       emptyMessage={pickupMode ? 'No orders are waiting for pickup.' : 'No cashier records available.'}
       filteredEmptyMessage="No records matching current filter."
-      className="animate-enter-delay-1 md:h-[660px]"
-      viewportClassName="flex-1"
+      className="animate-enter-delay-1"
       headerClassName="font-mono uppercase tracking-wider"
       rowClassName={() => 'hover:bg-gold-wash/50 transition'}
       renderCompactRow={(reg) => (

@@ -409,7 +409,6 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
         visibleColumnIds={visibleColumnIds}
         getRowId={(reg) => reg.id}
         defaultSort={{ column: 'student', direction: 'ascending' }}
-        viewportClassName="h-[600px]"
         headerClassName="uppercase tracking-wider"
         filtered={Boolean(searchQuery.trim()) || clientGroupFilter !== 'all' || Object.values(filters).some((values) => values.length > 0)}
         emptyMessage="No client registrations yet."
