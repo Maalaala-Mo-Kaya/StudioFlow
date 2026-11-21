@@ -167,16 +167,16 @@ The PocketBase server creates photo directories under `C:\StudioFlow_Photos` by 
 C:\StudioFlow_Photos\
   └── [School Code]\
         └── [Course Code]\
-              └── [JobOrder]_[FamilyName]_[GivenName]_[RegistrationID]\
-                    ├── selected\
-                    └── unselected\
+              └── 0018_Dela_Cruz_Juan_Santos\
+                    ├── 0018_Dela_Cruz_Juan_Santos\
+                    └── Unselected\
 ```
 
 **Camera auto-import:** in **Admin → Camera Import** (or **Set Up** on the Photo Floor), add a camera and choose its output folder on the server PC with **Browse**. Set the same folder as the save folder in the camera's tethering or Wi-Fi transfer software. On the Photo Floor, pick the camera for that device. **Call Client** links the camera to the client, every finished shot moves into the client's job folder within a few seconds, and **Mark Done** sends the last shots and unlinks the camera. Photos taken with no client linked stay in the camera folder until someone sends them to a client.
 
-Use **Copy Path** in the photographer queue to find the server folder for a job order. From a remote station, use your studio's file share for that folder; a local drive path refers to the server's disk. Put finished image exports in the job folder or its `unselected` subfolder. Opening the gallery moves supported exports from the job folder into `unselected`. After confirmation, the server keeps both folders and the saved selection in sync. JPEG, PNG, WebP, GIF, and AVIF exports are supported. RAW files and unrecognized files stay where the photographer placed them. Avoid editing the `selected` and `unselected` folders by hand once selection has started.
+Use **Copy Path** in the photographer queue to find the server folder for a job order. From a remote station, use your studio's file share for that folder. Put finished exports in the job folder or `Unselected`. Opening the gallery moves supported exports from the job folder into `Unselected`. Confirmed selections move into the subfolder named after the job folder. RAW files and unrecognized files stay where the photographer placed them.
 
-Legacy folders retain their original paths when they can be matched to a unique job order. If two legacy folders both contain photos for one job, a studio administrator should verify which folder belongs to the registration and reconcile the files before opening the gallery.
+Existing folders keep working under their saved names. To rename them, stop PocketBase and pause writes to the photo share, then back up the database and photo root together. From the StudioFlow directory run `node scripts/migrate-photo-folders.cjs "<path to data.db>" "<photo root>"` to preview. Review unmatched or skipped folders, then add `--apply` to rename verified bindings and update the database. For an interrupted migration, keep PocketBase stopped and use `--resume` with the same paths. If recovery requires restoring a backup, restore both the database and photo root together. An unbound legacy folder can be attached using **Copy Path** once its unique job order and folder have been verified.
 
 If a transfer pauses, restore access to the original files and choose **Resume transfer** on the student card. Keep the photo root and the database backed up together. The database contains folder mappings and any unfinished transfers.
 

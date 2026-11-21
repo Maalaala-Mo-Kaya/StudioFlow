@@ -119,10 +119,10 @@ function exists(path) {
 }
 
 // A destination name that is free in the job folder and both selection folders.
-function freeName(student, sub, name) {
+function freeName(student, folder, sub, name) {
   const ext = $filepath.ext(name);
   const stem = name.slice(0, name.length - ext.length);
-  const groups = sub ? [sub] : ["", "selected", "unselected"];
+  const groups = sub ? [sub] : ["", ...Object.values(storage.photoDirectories(student, folder))];
   for (let n = 1; n < 10000; n++) {
     const candidate = n === 1 ? name : stem + "_" + n + ext;
     if (groups.every((group) => !storage.statEntry(student, group ? group + "/" + candidate : candidate))) {
@@ -168,7 +168,7 @@ function deliver(app, staged, registration) {
   if (!student) throw new Error("The client folder could not be opened.");
   try {
     if (sub) student.mkdirAll(sub, 0o750);
-    const rel = freeName(student, sub, name);
+    const rel = freeName(student, folder, sub, name);
     let moved = false;
     if (!forceCopy()) {
       try {
@@ -328,9 +328,10 @@ function findStation(app, id) {
 
 function photoCount(app, registration) {
   try {
-    const root = storage.openStudent(storage.photoFolder(app, registration));
+    const folder = storage.photoFolder(app, registration);
+    const root = storage.openStudent(folder);
     if (!root) return 0;
-    try { return storage.inventory(root).length; } finally { root.close(); }
+    try { return storage.inventory(root, folder).length; } finally { root.close(); }
   } catch (_) {
     return null;
   }

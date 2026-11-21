@@ -186,9 +186,9 @@ routerAdd("GET", "/api/studioflow/chooser/{id}/image/{photo}", (e) => {
   workflow.staff(e.app, e.auth, ["admin", "chooser"]);
   const record = e.app.findRecordById("registrations", e.request.pathValue("id"));
   if (workflow.json(record, "photo_pending")) throw new ApiError(409, "The gallery is being updated.");
-  return selection.gallery(e.app, record, (root) => {
+  return selection.gallery(e.app, record, (root, folder) => {
     const query = e.request.url.query();
-    const photo = storage.image(root, query.get("group"), query.get("name"), e.request.pathValue("photo"));
+    const photo = storage.image(root, folder, query.get("group"), query.get("name"), e.request.pathValue("photo"));
     const file = root.open(photo.path);
     try {
       if (!file.stat().mode().isRegular()) throw new NotFoundError("Photo not found.");
