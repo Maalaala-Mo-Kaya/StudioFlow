@@ -2011,4 +2011,98 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal(ledger.find((p) => p.id !== revised.paymentId).discount_snapshot.studio, 15000);
   });
 
+  await t.test('package builder validates choices, deduplicates charges and preserves the sold version', async () => {
+    const addOn = await create('add_ons', {
+      code: 'BUILDER-MUA', name: 'Builder Makeup', amount: 160, is_active: true, revenue_category: 'mua', requires_mua: true,
+    });
+    const builder = { advertisedPrints: 15, sections: [
+      { id: 'wardrobe', title: 'Wardrobe', type: 'options', min: 1, max: 1, choices: [
+        { id: 'coat', name: 'Coat & Tie', recommendation: 'male', preselect: true },
+        { id: 'barong', name: 'Barong' }, { id: 'filipiniana', name: 'Filipiniana', recommendation: 'female', preselect: true },
+      ] },
+      { id: 'makeup', title: 'Makeup', type: 'options', min: 0, max: 1,
+        when: { section: 'wardrobe', choice: 'filipiniana' },
+        choices: [{ id: 'paid', name: 'Makeup upgrade', paid: true, addOn: addOn.id },
+          { id: 'included', name: 'Included makeup', addOn: addOn.id }] },
+    ] };
+    const metadata = { code: 'BUILDER', name: 'Builder Graduation', amount: 1000, revenue_category: 'studio', is_active: false };
+    const draft = await create('packages', { ...metadata, draft_content: { ...metadata, builder }, builder_unpublished: true });
+    assert.equal(draft.builder, null);
+    assert.deepEqual(draft.builder_draft.builder, builder);
+    const publicDraft = await send(records('packages', draft.id), { status: 404 });
+    assert.equal(publicDraft.payload.builder_draft, undefined);
+    const invalid = { ...builder, sections: [...builder.sections].reverse() };
+    await send(records('packages', draft.id), { token: admin, method: 'PATCH', status: 400, body: {
+      builder: invalid, builder_unpublished: false, is_active: true,
+    } });
+    const published = await patchCatalog('packages', draft, {
+      builder, builder_unpublished: false, draft_content: null, is_active: true,
+    });
+    assert.ok(published.builder_version > 0);
+    const input = (answers, quotedAddOns = { [addOn.id]: 16000 }) => ({
+      version: published.builder_version, quotedBase: 100000, quotedAddOns, answers,
+    });
+    const fields = (value) => ({ package_options: JSON.stringify(value) });
+    await register(published, [], 400);
+    await register(published, [], 400, fields(input({ wardrobe: ['coat', 'barong'] })));
+    await register(published, [], 400, fields(input({ wardrobe: ['coat'], makeup: ['paid'] })));
+    await register(published, [], 400, fields(input({ wardrobe: ['unknown'] })));
+    await register(published, [], 400, fields(input({ wardrobe: ['filipiniana'], makeup: ['paid'] }, { [addOn.id]: 1 })));
+    const student = await register(published, [{ id: addOn.id }], 200,
+      fields(input({ wardrobe: ['filipiniana'], makeup: ['paid'] })));
+    assert.equal(student.total_amount, 1160);
+    assert.equal(student.add_ons.filter((item) => item.id === addOn.id).length, 1);
+    assert.equal(student.add_ons.find((item) => item.id === addOn.id).package_option, true);
+    assert.equal(student.makeup_services[0].id, addOn.id);
+    assert.deepEqual(student.revenue_terms, { studio: 100000, mua: 16000, unallocated: 0 });
+    assert.match(student.package_snapshot.configuration.summary, /Filipiniana.*Makeup upgrade/);
+    await registrations(student, admin, { add_ons: [] });
+    assert.equal((await registrations(student)).payload.total_amount, 1160);
+
+    const editable = await register(published, [], 200, fields(input({ wardrobe: ['coat'] }, {})));
+    const revised = (await registrations(editable, admin, {
+      package_options: input({ wardrobe: ['filipiniana'], makeup: ['paid'] }),
+    })).payload;
+    assert.equal(revised.total_amount, 1160);
+    assert.match(revised.makeup_service, /Builder Makeup/);
+    assert.match(revised.package_snapshot.configuration.summary, /Filipiniana/);
+    const included = await register(published, [{ id: addOn.id }], 200,
+      fields(input({ wardrobe: ['filipiniana'], makeup: ['included'] }, { [addOn.id]: 0 })));
+    assert.equal(included.total_amount, 1000);
+    assert.equal(included.makeup_services[0].id, addOn.id);
+    assert.equal(included.package_snapshot.configuration.selections.at(-1).amount, 0);
+    await pay(student, 1160);
+    const updated = await patchCatalog('packages', published, {
+      name: 'Renamed package', amount: 1200, draft_content: { ...metadata, builder: invalid },
+    });
+    assert.ok(updated.builder_version > published.builder_version);
+    await register(updated, [], 400, fields(input({ wardrobe: ['coat'] }, {})));
+    const sold = (await registrations(student)).payload;
+    assert.equal(sold.package_snapshot.name, 'Builder Graduation');
+    assert.equal(sold.package_snapshot.configuration.version, published.builder_version);
+    assert.equal(sold.total_amount, 1160);
+    const { buildRegistrationsCsv } = await vite.ssrLoadModule('/src/utils/csv.ts');
+    const csv = buildRegistrationsCsv([sold], []);
+    assert.match(csv, /"Package choices"/);
+    assert.match(csv, /Wardrobe: Filipiniana; Makeup: Makeup upgrade/);
+    const report = (await send(api + '/student-excel', { token: admin })).payload;
+    const row = report.rows.find((entry) => entry.jobOrder === sold.job_order_no);
+    const { buildStudentWorkbook } = await vite.ssrLoadModule('/src/features/admin/studentExcel.ts');
+    const sheet = buildStudentWorkbook({ ...report, rows: [row] }).worksheets[0];
+    const headers = sheet.getRow(1).values;
+    assert.equal(sheet.getRow(2).getCell(headers.indexOf('PACKAGE CHOICES')).value, sold.package_snapshot.configuration.summary);
+    assert.equal(sheet.getRow(2).getCell(headers.indexOf('TOTAL DUE')).value, 1160);
+
+    const { resolveAnswers, configurationErrors } = await vite.ssrLoadModule('/src/features/packages/packageBuilder.ts');
+    assert.deepEqual(resolveAnswers(builder, {}, 'male', true), { wardrobe: ['coat'] });
+    assert.deepEqual(resolveAnswers(builder, {}, 'female', true), { wardrobe: ['filipiniana'], makeup: [] });
+    assert.deepEqual(resolveAnswers(builder, {}, '', true), { wardrobe: [] });
+    assert.deepEqual(resolveAnswers(builder, { wardrobe: ['barong'] }, 'male', true), { wardrobe: ['barong'] });
+    const multiple = { sections: [{ ...builder.sections[0], min: 2, max: 3 }] };
+    assert.match(configurationErrors(multiple, { wardrobe: ['coat'] }).wardrobe, /2 and 3/);
+    assert.deepEqual(configurationErrors(multiple, { wardrobe: ['coat', 'barong'] }), {});
+    assert.deepEqual(configurationErrors(multiple, { wardrobe: ['coat', 'barong', 'filipiniana'] }), {});
+    assert.match(configurationErrors(multiple, { wardrobe: ['coat', 'coat'] }).wardrobe, /Review/);
+  });
+
 });

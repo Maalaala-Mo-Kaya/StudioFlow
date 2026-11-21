@@ -102,7 +102,8 @@ function summary(app, registration) {
     // Walk-ins: "Walk-in" (or their company) in place of the school, the session type in place of the course.
     school: walkin ? (registration.getString("client_org") || "Walk-in") : school?.getString("name") || "",
     course: course?.getString("name") || "",
-    packageName: pkg?.getString("name") || json(registration, "package_snapshot")?.name || "",
+    packageName: json(registration, "package_snapshot")?.name || pkg?.getString("name") || "",
+    packageConfiguration: json(registration, "package_snapshot")?.configuration?.summary || "",
     photographyComplete: photographyComplete(registration),
     queueNumber: registration.getInt("queue_number") || null,
   };

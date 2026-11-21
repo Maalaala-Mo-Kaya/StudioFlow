@@ -12,6 +12,7 @@ import { getPhotoFolderPath, copyFolderPathToClipboard } from '../../../utils/fo
 import { useToast } from '../../../context/ToastContext';
 import { workflowError } from '../../../hooks/useWorkflowData';
 import { clientDetail, clientGroup } from '../../../utils/clientInfo';
+import { SoldPackageChoices } from '../../packages/SoldPackageChoices';
 
 interface PhotographerQueueCardProps {
   registration: Registration;
@@ -124,9 +125,9 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
           }`}
         >
           <div className="flex items-center justify-between font-mono text-xs font-black uppercase">
-            <span className="text-gold-soft">{reg.expand?.package?.code || 'PKG-A'}</span>
+            <span className="text-gold-soft">{reg.package_snapshot?.code || reg.expand?.package?.code || 'PKG-A'}</span>
             <span className="truncate ml-2">
-              {reg.expand?.package?.name || 'Pictorial Package'}
+              {reg.package_snapshot?.name || reg.expand?.package?.name || 'Pictorial Package'}
             </span>
           </div>
           {inclusionsArray.length > 0 && (
@@ -155,6 +156,9 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
               ))}
             </ul>
           )}
+          {reg.package_snapshot?.configuration?.selections.length ? (
+            <div className="mt-2 border-t border-neutral-500/20 pt-2"><SoldPackageChoices registration={reg} /></div>
+          ) : null}
 
           {/* Safe Pictorial Directory Helper (T042 / AC021) */}
           <div className="mt-3 pt-2 border-t border-neutral-500/20 flex items-center justify-between text-[10px] font-mono">

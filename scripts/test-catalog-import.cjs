@@ -4,7 +4,7 @@
 // hooks and migrations. The app's TypeScript is loaded through Vite's runnerImport.
 // Run: npm run test:catalog   (set POCKETBASE_TEST_BINARY to use another PocketBase binary)
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { mkdtemp, mkdir, rm } = require('node:fs/promises');
 const { createServer } = require('node:net');
@@ -12,6 +12,7 @@ const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { test } = require('node:test');
 const { setTimeout: delay } = require('node:timers/promises');
+const { promisify } = require('node:util');
 
 const repo = resolve(__dirname, '..');
 const executable = process.env.POCKETBASE_TEST_BINARY || join(repo, 'pocketbase.exe');
@@ -275,5 +276,28 @@ test('save: imported packages and add-ons reach the database and the kiosk', asy
     // Merging into a package that no longer exists is reported, not silently skipped.
     const gone = await saveCatalogDrafts(pb, [{ ...merge, mergeInto: 'doesnotexist123' }], []);
     assert.deepEqual([gone.updated, gone.failed.length], [0, 1]);
+  });
+
+  await t.test('brochure seed creates private drafts or kiosk packages and skips existing codes', async () => {
+    const seed = (...args) => promisify(execFile)(process.execPath, [join(repo, 'scripts/seed-graduation-packages.mjs'), ...args], {
+      env: { ...process.env, STUDIOFLOW_PB_URL: host, STUDIOFLOW_ADMIN_USER: 'admin', STUDIOFLOW_ADMIN_PASSWORD: 'password123' },
+    });
+    const packages = pb.collection('packages');
+    const seeded = () => packages.getFullList({ filter: 'code ~ "GRAD-"' });
+    const seenAtKiosk = async () => (await new PocketBase(host).send('/api/studioflow/registration-catalog', {})).packages
+      .filter(({ code }) => code.startsWith('GRAD-'));
+    assert.match((await seed()).stdout, /6 created, 0 already present/);
+    const drafts = await seeded();
+    assert.equal(drafts.length, 6);
+    assert.ok(drafts.every((item) => item.builder_unpublished && item.builder_draft.builder.sections.length));
+    assert.equal((await seenAtKiosk()).length, 0);
+    assert.match((await seed('--publish')).stdout, /0 created, 6 already present/);
+    assert.deepEqual(await seeded(), drafts);
+    await Promise.all(drafts.map((item) => packages.delete(item.id)));
+    assert.match((await seed('--publish')).stdout, /6 created, 0 already present/);
+    const published = await seenAtKiosk();
+    assert.equal(published.length, 6);
+    assert.ok(published.every((item) => item.is_active && item.builder_version === 1 && item.builder_review === undefined));
+    assert.match((await seeded()).find(({ code }) => code === 'GRAD-SPECIAL').builder_review, /16×20 Premium.*13×16/s);
   });
 });

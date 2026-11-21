@@ -240,5 +240,19 @@ To build, deploy to PocketBase, and start the server on port 8090, run:
 | `npm run build` | Bundles production-optimized static assets to `/dist` |
 | `npm run lint` | Runs ESLint type and code quality checks |
 | `npm run test:workflow` | Runs the isolated PocketBase integration suite with Node.js 22.13+ |
+| `npm run seed:graduation` | Adds the six graduation brochure packages as drafts |
+
+### Seed graduation packages for demo and handover
+
+Start StudioFlow with `run.bat` and leave the server window open. PocketBase applies the package builder migration on startup. In a separate PowerShell window, use a StudioFlow admin account to add the six brochures under **Admin → Packages & Add-ons**.
+
+```powershell
+$studioPassword = Read-Host "StudioFlow admin password" -AsSecureString
+$env:STUDIOFLOW_ADMIN_PASSWORD = [pscredential]::new('studioflow', $studioPassword).GetNetworkCredential().Password
+npm run seed:graduation
+Remove-Item Env:STUDIOFLOW_ADMIN_PASSWORD
+```
+
+The script defaults to the `admin` staff account at `http://127.0.0.1:8090`. Set `STUDIOFLOW_ADMIN_USER` or `STUDIOFLOW_PB_URL` to use a different account or server. Use `npm run seed:graduation -- --publish` on a mock database to make newly added packages available in the school booking form immediately. Each run skips codes already in the catalog, including drafts. Publish any previously seeded drafts from the Admin catalog after reviewing the brochure discrepancies. The handover reset's **Keep setup** mode preserves the seeded packages.
 
 ---

@@ -3,6 +3,8 @@
 import { ClientResponseError, type default as PocketBase } from 'pocketbase';
 import { lineKey, type DraftAddOn, type DraftPackage } from './catalogParser';
 import { parsePackageInclusions } from '../../../utils/formatters';
+import { definition } from '../../packages/packageBuilder';
+import type { Package } from '../../../types';
 
 export interface CatalogSaveResult {
   created: number;
@@ -44,10 +46,20 @@ export async function saveCatalogDrafts(pb: PocketBase, packages: DraftPackage[]
     try {
       if (pkg.mergeInto) {
         // Read the package as it is now, so items another admin just added are kept.
-        const current = await pb.collection('packages').getOne(pkg.mergeInto, { requestKey: null });
+        const current = await pb.collection('packages').getOne<Package>(pkg.mergeInto, { requestKey: null });
+        const builder = definition(current);
+        const additions = (['inclusions', 'freebies'] as const).flatMap((field) => {
+          const existing = parsePackageInclusions(current[field]);
+          const items = mergeList(existing, pkg[field]).slice(existing.length).map((name) => ({ name }));
+          return items.length ? [{
+            id: 'import-' + field + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2),
+            type: 'inclusions' as const, title: field === 'freebies' ? 'Imported freebies' : 'Imported inclusions',
+            freebies: field === 'freebies', items,
+          }] : [];
+        });
+        if (!additions.length) { updated++; continue; }
         await pb.collection('packages').update(pkg.mergeInto, {
-          inclusions: JSON.stringify(mergeList(parsePackageInclusions(current.inclusions), pkg.inclusions)),
-          freebies: mergeList(parsePackageInclusions(current.freebies), pkg.freebies),
+          builder: { ...builder, sections: [...builder.sections, ...additions] },
         }, { requestKey: null });
         updated++;
         continue;
@@ -62,6 +74,8 @@ export async function saveCatalogDrafts(pb: PocketBase, packages: DraftPackage[]
         revenue_category: pkg.revenue,
         inclusions: JSON.stringify(pkg.inclusions.map((item) => item.trim()).filter(Boolean)),
         freebies: pkg.freebies.map((item) => item.trim()).filter(Boolean),
+        builder: definition({ inclusions: pkg.inclusions.map((item) => item.trim()).filter(Boolean),
+          freebies: pkg.freebies.map((item) => item.trim()).filter(Boolean) }),
         is_active: true,
       }, { requestKey: null });
       created++;

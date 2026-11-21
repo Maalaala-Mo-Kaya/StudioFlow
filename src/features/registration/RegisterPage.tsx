@@ -138,7 +138,10 @@ export const RegisterPage: React.FC = () => {
             <PackageSelectionSection
               packages={form.packages}
               selectedPackageId={form.selectedPackageId}
-              onSelectPackage={form.setSelectedPackageId}
+              onSelectPackage={form.selectPackage}
+              gender={form.gender}
+              packageConfiguration={form.packageConfiguration}
+              catalogAddOns={form.catalogAddOns}
               addOnsList={form.addOnsList}
               defaultAddOn={form.defaultAddOn}
               selectedAddOns={form.selectedAddOns}
@@ -198,6 +201,8 @@ export const RegisterPage: React.FC = () => {
             selectedCourseId={form.selectedCourseId}
             packages={form.packages}
             selectedPackageId={form.selectedPackageId}
+            packageOptionsSummary={form.packageOptionsSummary}
+            packageAddOnAmount={form.packageAddOnAmount}
             addOnsList={form.addOnsList}
             defaultAddOn={form.defaultAddOn}
             selectedAddOns={form.selectedAddOns}

@@ -1,3 +1,5 @@
+import type { PackageDefinition, PackageDraft, SoldPackageConfiguration } from '../features/packages/packageBuilder';
+
 export type StaffRole = 'admin' | 'cashier' | 'photographer' | 'mua' | 'chooser';
 
 export interface StaffUser {
@@ -128,6 +130,11 @@ export interface RevenueSplit {
 }
 
 export interface Package {
+  builder?: PackageDefinition | null;
+  builder_version?: number;
+  builder_draft?: PackageDraft | null;
+  builder_review?: string;
+  builder_unpublished?: boolean;
   revenue_category?: RevenueCategory | '';
   id: string;
   code: string;
@@ -158,6 +165,7 @@ export interface AddOn {
 }
 
 export interface RegistrationAddOn {
+  package_option?: boolean;
   auto_applied?: boolean;
   revenue_category?: RevenueCategory | '';
   id?: string;
@@ -207,6 +215,7 @@ export interface Registration {
   package_snapshot?: {
     id: string; code: string; name: string; amount?: number; revenue_category?: RevenueCategory | '';
     inclusions?: string[]; freebies?: string[]; photo_selection_limit?: number;
+    configuration?: SoldPackageConfiguration;
   } | null;
   add_ons?: RegistrationAddOn[];
   other_fees?: number;

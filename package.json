@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "test:workflow": "node --test scripts/test-studio-workflow.cjs",
     "test:catalog": "node --test scripts/test-catalog-import.cjs",
+    "seed:graduation": "node scripts/seed-graduation-packages.mjs",
     "check:excel": "node scripts/check-excel-math.mjs",
     "preview": "vite preview"
   },

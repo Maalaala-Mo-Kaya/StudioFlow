@@ -3,13 +3,18 @@ import { Info, ArrowRight, Check, Gift } from 'lucide-react';
 import type { Package, AddOn } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
 import { PackageDetailsModal } from './PackageDetailsModal';
+import { PackageImage } from '../../packages/PackageShowcase';
+import { hasOptions, selectedChoices, type PackageConfiguration } from '../../packages/packageBuilder';
 import { validationProps, type RegistrationErrors } from '../registrationValidation';
 import { RegistrationFieldError } from './RegistrationFieldError';
 
 interface PackageSelectionSectionProps {
   packages: Package[];
   selectedPackageId: string | null;
-  onSelectPackage: (id: string) => void;
+  onSelectPackage: (id: string, configuration?: PackageConfiguration) => void;
+  gender: string;
+  packageConfiguration?: PackageConfiguration;
+  catalogAddOns: AddOn[];
   addOnsList: AddOn[];
   defaultAddOn?: AddOn;
   selectedAddOns: string[];
@@ -26,6 +31,9 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   packages,
   selectedPackageId,
   onSelectPackage,
+  gender,
+  packageConfiguration,
+  catalogAddOns,
   addOnsList,
   defaultAddOn,
   selectedAddOns,
@@ -38,7 +46,9 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
 }) => {
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const [viewedIndex, setViewedIndex] = useState(0);
+  const [canScroll, setCanScroll] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
+  const count = packages.length;
   const viewingPackage = packages.find((pkg) => pkg.id === detailsId) ?? null;
 
   const updateViewedIndex = useCallback((track: HTMLDivElement) => {
@@ -55,7 +65,10 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   useEffect(() => {
     const track = trackRef.current;
     if (!track) return;
-    const update = () => updateViewedIndex(track);
+    const update = () => {
+      setCanScroll(track.scrollWidth > track.clientWidth + 1);
+      updateViewedIndex(track);
+    };
     const resizeObserver = new ResizeObserver(update);
     update();
     resizeObserver.observe(track);
@@ -67,7 +80,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       {...validationProps('package', errors.package)}
       aria-labelledby="sec-packages"
       tabIndex={-1}
-      className="scroll-mt-(--registration-scroll-offset) aria-invalid:outline-2 aria-invalid:outline-offset-8 aria-invalid:outline-red-600"
+      className="@container/package-rail scroll-mt-(--registration-scroll-offset) aria-invalid:outline-2 aria-invalid:outline-offset-8 aria-invalid:outline-red-600"
     >
       <div className="flex items-center justify-between gap-2 pb-2.5 border-b-2 border-line mb-5">
         <h2
@@ -79,7 +92,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
         </h2>
         {packages.length > 0 && (
           <div className="shrink-0 flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2 font-mono">
-            {packages.length > 1 && (
+            {canScroll && (
               <span className="text-[10px] text-neutral-500 uppercase flex items-center gap-1">
                 Swipe or Scroll
                 <ArrowRight className="w-3 h-3 text-gold-soft" aria-hidden="true" />
@@ -104,9 +117,18 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
         role="group"
         aria-label="Available packages"
         tabIndex={0}
-        className={`${packages.length ? 'flex' : 'hidden'} overflow-x-auto gap-4 pb-4 snap-x snap-mandatory scrollbar-thin -mx-2 px-2 scroll-px-2 [--package-width:min(85vw,100%)] sm:[--package-width:min(320px,100%)] ${
-          // Leave room for the last card to reach the leading snap position on wide screens.
-          packages.length > 1 ? 'after:shrink-0 after:-ml-4 after:w-[calc(100%-var(--package-width))]' : ''
+        className={`${count ? 'flex' : 'hidden'} overflow-x-auto gap-4 pb-4 snap-x snap-mandatory scrollbar-thin -mx-2 px-2 scroll-px-2 ${
+          count > 1
+            ? '[--package-width:calc(100%-3rem)] after:shrink-0 after:-ml-4 after:w-[calc(100%-var(--package-width))]'
+            : '[--package-width:min(100%,20rem)]'
+        } ${
+          count === 2 ? '@min-[35rem]/package-rail:[--package-width:min(20rem,calc((100%-1rem)/2))] @min-[35rem]/package-rail:after:hidden' : ''
+        } ${
+          count > 2 ? '@min-[35rem]/package-rail:[--package-width:calc((100%-4rem)/2)]' : ''
+        } ${
+          count === 3 ? '@min-[51rem]/package-rail:[--package-width:min(20rem,calc((100%-2rem)/3))] @min-[51rem]/package-rail:after:hidden' : ''
+        } ${
+          count > 3 ? '@min-[51rem]/package-rail:[--package-width:calc((100%-5rem)/3)]' : ''
         }`}
       >
         {packages.map((pkg) => {
@@ -132,6 +154,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
               )}
 
               <div>
+                <PackageImage src={pkg.builder?.cover} alt="" className="mb-3 h-36 w-full object-cover" />
                 <span
                   className={`font-mono text-[11px] font-black uppercase tracking-widest block ${
                     isSelected ? 'text-gold' : 'text-gold-soft'
@@ -165,6 +188,9 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                     {pkg.description}
                   </p>
                 )}
+                {isSelected && selectedChoices(pkg, packageConfiguration).map(({ section, choice }) => (
+                  <p key={section.id + ':' + choice.id} className="text-xs text-gold">{section.title} · {choice.name}</p>
+                ))}
 
                 {/* Compact Inclusions Summary (Max 3 Items) */}
                 {topInclusions.length > 0 && (
@@ -207,20 +233,20 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                   }`}
                 >
                   <Info className="w-3.5 h-3.5" />
-                  <span>{freebieCount > 0 ? `View Inclusions & Freebies (${inclusionsArray.length + freebieCount})` : `View All Inclusions (${inclusionsArray.length})`}</span>
+                  <span>View package details</span>
                 </button>
 
                 <button
                   type="button"
                   aria-pressed={isSelected}
-                  onClick={() => onSelectPackage(pkg.id)}
+                  onClick={() => hasOptions(pkg) ? setDetailsId(pkg.id) : onSelectPackage(pkg.id)}
                   className={`w-full min-h-[38px] flex items-center justify-center text-[11px] font-black uppercase tracking-widest cursor-pointer transition ${
                     isSelected
                       ? 'bg-gold text-on-gold'
                       : 'bg-canvas text-ink border border-neutral-300'
                   }`}
                 >
-                  {isSelected ? '✓ Chosen Package' : 'Choose Package'}
+                  {hasOptions(pkg) ? (isSelected ? 'Edit package choices' : 'Configure package') : isSelected ? '✓ Chosen Package' : 'Choose Package'}
                 </button>
               </div>
             </div>
@@ -333,6 +359,9 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       {/* Package Inclusions Details Modal */}
       <PackageDetailsModal
         pkg={viewingPackage}
+        gender={gender}
+        addOns={catalogAddOns}
+        configuration={packageConfiguration}
         isSelected={viewingPackage?.id === selectedPackageId}
         onSelect={onSelectPackage}
         onClose={() => setDetailsId(null)}

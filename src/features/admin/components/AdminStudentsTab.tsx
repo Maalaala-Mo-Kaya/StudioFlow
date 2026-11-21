@@ -9,6 +9,7 @@ import { getRegistrationAddOns } from '../../../utils/registrationAddOns';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
 import { StudentDirectoryFilters } from './StudentDirectoryFilters';
+import { SoldPackageChoices } from '../../packages/SoldPackageChoices';
 import { StudentOverall } from './StudentOverall';
 import { overallLevelKey } from '../studentOverallData';
 import { RegistrationAddOnsDropdown } from './RegistrationAddOnsDropdown';
@@ -283,15 +284,17 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
     </>,
     package: (reg: Registration) => {
       const addOns = getRegistrationAddOns(reg.add_ons);
+      const pkg = reg.package_snapshot || reg.expand?.package;
       return (
         <div className="min-w-28">
           <div className="font-bold text-ink">
-            {reg.expand?.package?.name || reg.expand?.package?.code || '—'}
+            {pkg?.name || pkg?.code || '—'}
           </div>
           <div className="text-[10px] text-neutral-600">
-            {reg.expand?.package?.name && reg.expand.package.code ? `${reg.expand.package.code} · ` : ''}
+            {pkg?.name && pkg.code ? `${pkg.code} · ` : ''}
             Billed {formatCurrency(reg.total_amount, { exact: true })}
           </div>
+          <SoldPackageChoices registration={reg} showPrice />
           {addOns.length > 0 && (
             <RegistrationAddOnsDropdown
               addOns={addOns}
@@ -359,7 +362,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
     student: (reg: Registration) => `${reg.family_name} ${reg.given_name}`,
     school: (reg: Registration) => clientSummary(reg, true),
     contact: (reg: Registration) => `${reg.section || ''} ${reg.mobile_number || ''}`,
-    package: (reg: Registration) => reg.expand?.package?.name || reg.expand?.package?.code,
+    package: (reg: Registration) => reg.package_snapshot?.name || reg.expand?.package?.name || reg.expand?.package?.code,
     balance: (reg: Registration) => reg.balance,
     status: (reg: Registration) => reg.status,
   };

@@ -88,13 +88,13 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
     { key: 'total', width: 14, style: { numFmt: PESO } }, { key: 'billed', width: 14, style: { numFmt: PESO } },
     { key: 'paid', width: 14, style: { numFmt: PESO } }, { key: 'refunded', width: 14, style: { numFmt: PESO } },
     { key: 'balance', width: 14, style: { numFmt: PESO } }, { key: 'overpaid', width: 14, style: { numFmt: PESO } },
-    { key: 'note', width: 34 },
+    { key: 'note', width: 34 }, { key: 'configuration', width: 45, style: { alignment: { wrapText: true } } },
   ];
   ordersSheet.getCell('A1').value = `${STUDIO_INFO.name} · Job Orders`;
   ordersSheet.getCell('A1').font = { bold: true, size: 14 };
   ordersSheet.getCell('A2').value = isPeriod ? `Job orders made in the period. ${range}` : `All job orders. ${range}`;
   ordersSheet.getRow(4).values = ['JO №', 'Date made', 'Client', 'School / Client', 'Course / Session', 'Package', 'Status',
-    'Job order total', 'Counted in gross', 'Paid', 'Refunded', 'Balance', 'Refund due (overpaid)', 'Note'];
+    'Job order total', 'Counted in gross', 'Paid', 'Refunded', 'Balance', 'Refund due (overpaid)', 'Note', 'Package choices'];
   headerRowStyle(ordersSheet, 4);
   const firstOrder = 5;
   for (const order of audit.orders) {
@@ -107,7 +107,7 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
       jo: reg.job_order_no || '', made: when(reg.created), client: clientName(reg), group: clientGroup(reg, true),
       detail: clientDetail(reg, true), pkg: reg.package_snapshot?.code || reg.expand?.package?.code || '', status: ORDER_STATUS[reg.status] ?? reg.status,
       total: order.total, billed: order.billed, paid: order.paid, refunded: order.refunded, balance: order.balance,
-      overpaid: order.overpaid, note: notes,
+      overpaid: order.overpaid, note: notes, configuration: reg.package_snapshot?.configuration?.summary ?? '',
     });
   }
   const lastOrder = firstOrder + audit.orders.length - 1;

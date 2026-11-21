@@ -89,7 +89,7 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
         {/* Every add-on on its own line, never cut off: the client shows this to each station. */}
         <div className="col-span-4 min-w-0 border-b border-r border-[#0a0a0a] px-[5px] py-[2px]">
           <div className="font-mono text-[7px] font-bold uppercase tracking-wider text-[#666]">
-            Add-ons{extras.length ? ` (${extras.length})` : ''}
+            {reg.package_snapshot?.configuration?.selections.length ? 'Package choices and add-ons' : 'Add-ons'}{extras.length ? ` (${extras.length})` : ''}
           </div>
           {extras.length ? (
             <ol className="grid grid-cols-2 gap-x-[14px]">

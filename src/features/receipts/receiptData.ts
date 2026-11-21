@@ -110,10 +110,16 @@ export function soldPackagePrice(reg: Registration): number {
 
 export function orderExtras(reg: Registration): [string, number][] {
   const addOns = getRegistrationAddOns(reg.add_ons);
+  const choices = reg.package_snapshot?.configuration?.selections ?? [];
+  const choiceAddOns = new Set(choices.map((item) => item.addOn).filter(Boolean));
   const credit = discountCents(reg) / 100;
   const percentage = reg.revenue_discount?.percentage ?? (credit ? credit * 100 / (reg.total_amount + credit) : 0);
   return [
-    ...addOns.map((item): [string, number] => [item.name + (item.revenue_category === 'mua' ? ' (MUA)' : ''), item.amount]),
+    ...choices.map((item): [string, number] => [
+      `${item.name} (${item.amount > 0 ? 'package option' : 'included'})`, item.amount,
+    ]),
+    ...addOns.filter((item) => !item.package_option || !choiceAddOns.has(item.id)).map((item): [string, number] =>
+      [item.name + (item.revenue_category === 'mua' ? ' (MUA)' : ''), item.amount]),
     ...(reg.other_fees ? [['Other fees', reg.other_fees] as [string, number]] : []),
     ...(credit && reg.status !== 'cancelled' ? [[`Discount credit (${Number(percentage.toFixed(2))}%) · ${reg.revenue_discount?.reason}`, -credit] as [string, number]] : []),
   ];

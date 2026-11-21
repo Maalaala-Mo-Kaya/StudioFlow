@@ -47,10 +47,12 @@ const when = (value: string) => {
  */
 export function buildRegistrationsCsv(registrations: Registration[], payments: PaymentRecord[], refunds: RefundRecord[] = []) {
   const audit = buildAudit(registrations, payments, refunds);
+  const hasChoices = registrations.some((reg) => reg.package_snapshot?.configuration?.summary);
   const headers = [
     'Job Order No', 'Queue No', 'Family Name', 'Given Name', 'School / Client', 'Course / Session', 'Section', 'Mobile',
     'Package', 'Job Order Total', 'Counted In Gross', 'Paid', 'Refunded', 'Net Paid', 'Balance', 'Status', 'Payment Status', 'Prepared By',
     'Date Registered (PH time)', 'Note', 'Studio revenue', 'Other Payment - MUA', 'Unallocated cash', 'Discount credit', 'Operational collected',
+    ...(hasChoices ? ['Package choices'] : []),
   ];
   const rows = audit.orders.map(({ registration: r, total, billed, paid, refunded, net, balance, cancelled, overpaid, revenue, discountCredit, operationalCollected }) => [
     cell(r.job_order_no), cell(r.queue_number || ''), cell(r.family_name), cell(r.given_name),
@@ -59,6 +61,7 @@ export function buildRegistrationsCsv(registrations: Registration[], payments: P
     cell(r.status), cell(r.payment_status), cell(r.prepared_by), cell(when(r.created)),
     cell([cancelled && 'Cancelled: only money still held counts', overpaid > 0 && `Refund due ${money(overpaid)}`].filter(Boolean).join('; ')),
     money(revenue.studio), money(revenue.mua), money(revenue.unallocated), money(discountCredit), money(operationalCollected),
+    ...(hasChoices ? [cell(r.package_snapshot?.configuration?.summary)] : []),
   ]);
   const { totals } = audit;
   const totalRow = [
@@ -66,6 +69,7 @@ export function buildRegistrationsCsv(registrations: Registration[], payments: P
     '', money(totals.gross), money(totals.paidOnOrders), money(totals.refundedOnOrders),
     money(totals.paidOnOrders - totals.refundedOnOrders), money(totals.outstanding), '', '', '', '', '',
     money(totals.revenue.studio), money(totals.revenue.mua), money(totals.revenue.unallocated), money(totals.discountCredits), money(totals.analyticsCollected),
+    ...(hasChoices ? [''] : []),
   ];
   return [headers.map(cell).join(','), ...rows.map((row) => row.join(',')), totalRow.join(',')].join('\r\n');
 }

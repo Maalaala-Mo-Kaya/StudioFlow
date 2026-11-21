@@ -1,4 +1,5 @@
 import React from 'react';
+import { SoldPackageChoices } from '../../packages/SoldPackageChoices';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { Registration } from '../../../types';
@@ -187,9 +188,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             <div className="flex justify-between">
               <span className="text-neutral-400 uppercase">Package:</span>
               <span className="font-bold text-gold">
-                {selectedReg.expand?.package?.name || 'Pictorial Package'}
+                {selectedReg.package_snapshot?.name || selectedReg.expand?.package?.name || 'Pictorial Package'}
               </span>
             </div>
+            <SoldPackageChoices registration={selectedReg} showPrice />
             <div className="flex justify-between">
               <span className="text-neutral-400 uppercase">Original Job Amount:</span>
               <span className="font-black text-white">

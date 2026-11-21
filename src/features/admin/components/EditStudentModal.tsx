@@ -19,8 +19,11 @@ import { isWalkIn } from '../../../utils/clientInfo';
 import { useStudioSettings } from '../../../hooks/useStudioSettings';
 import { MAKEUP_LOOKS, MAKEUP_LOOK_NOTE_MAX } from '../../../constants/makeupLook';
 import { discountCents, revenueTerms } from '../../../utils/revenue';
+import { PackageDetailsModal } from '../../registration/components/PackageDetailsModal';
+import { configuredAddOns, hasOptions, packageQuote, selectedChoices, type PackageConfiguration } from '../../packages/packageBuilder';
 
 export type RegistrationEdits = Omit<Partial<Registration>, 'add_ons'> & {
+  package_options?: ReturnType<typeof packageQuote>;
   mua_correction?: 'required' | 'waived';
   review_mua_amount?: number;
   review_revenue_reason?: string;
@@ -60,6 +63,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [organizationId, setOrganizationId] = useState(reg.organization || '');
   const [courseId, setCourseId] = useState(reg.course || '');
   const [packageId, setPackageId] = useState(reg.package || '');
+  const [packageOptions, setPackageOptions] = useState<ReturnType<typeof packageQuote>>();
+  const [showPackageOptions, setShowPackageOptions] = useState(false);
   const [pictorialDate, setPictorialDate] = useState(reg.pictorial_date?.slice(0, 10) ?? '');
   const [status, setStatus] = useState<RegistrationStatus>(reg.status);
   const [framingStatus, setFramingStatus] = useState<FramingStatus>(
@@ -118,6 +123,17 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
     || (pkg.is_active && [clientKind, 'both'].includes(pkg.client_kind || 'school')));
   const selectedPkg = packages.find((p) => p.id === packageId);
   const packageChanged = Boolean(selectedPkg) && packageId !== reg.package;
+  const savedConfiguration = reg.package_snapshot?.configuration;
+  const configuring = packageChanged || !!packageOptions;
+  const canConfigure = canEditAddOns && !!selectedPkg?.is_active
+    && (packageChanged || reg.status === 'pending_payment') && hasOptions(selectedPkg);
+  const missingOptions = packageChanged && !!selectedPkg && hasOptions(selectedPkg)
+    && packageOptions?.version !== selectedPkg.builder_version;
+  const configured = configuredAddOns(selectedPkg, packageOptions, addOnCatalog);
+  const orderAddOns = configuring ? [
+    ...addOns.filter((item) => !item.package_option && !configured.has(item.id ?? '')),
+    ...[...configured.values()].map((item) => ({ ...item, package_option: true })),
+  ] : addOns;
 
   // Same rule as the server: when the package or add-ons change, the automatic add-on for clients
   // without makeup is added (order no longer brings makeup) or dropped (it does).
@@ -125,22 +141,22 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
     && [clientKind, 'both'].includes(item.client_kind || 'both'));
   const isAuto = (item: RegistrationAddOn) => !!item.auto_applied || (!!defaultAddOn && item.id === defaultAddOn.id);
   const bringsMakeup = !!selectedPkg?.requires_mua
-    || addOns.some((item) => addOnCatalog.find((entry) => entry.id === item.id)?.requires_mua);
-  const autoAddOn = (packageChanged || addOnsChanged) && defaultAddOn && !bringsMakeup
+    || orderAddOns.some((item) => !isAuto(item) && addOnCatalog.find((entry) => entry.id === item.id)?.requires_mua);
+  const autoAddOn = (configuring || addOnsChanged) && defaultAddOn && !bringsMakeup
     ? savedAddOns.find((item) => item.id === defaultAddOn.id) ?? { id: defaultAddOn.id, code: defaultAddOn.code, name: defaultAddOn.name, amount: defaultAddOn.amount }
     : undefined;
-  const pricedAddOns = packageChanged || addOnsChanged
-    ? [...addOns.filter((item) => !isAuto(item)), ...(autoAddOn ? [autoAddOn] : [])]
-    : addOns;
-  const addsMakeup = addOns.some((item) => !savedIds.has(item.id ?? '')
+  const pricedAddOns = configuring || addOnsChanged
+    ? [...orderAddOns.filter((item) => !isAuto(item)), ...(autoAddOn ? [autoAddOn] : [])]
+    : orderAddOns;
+  const addsMakeup = orderAddOns.some((item) => !savedIds.has(item.id ?? '')
     && addOnCatalog.find((entry) => entry.id === item.id)?.requires_mua);
   const discountChanged = studioDiscount !== (reg.revenue_discount?.studio ?? 0) / 100
     || muaDiscount !== (reg.revenue_discount?.mua ?? 0) / 100
     || ((studioDiscount > 0 || muaDiscount > 0) && discountReason.trim() !== (reg.revenue_discount?.reason ?? ''));
-  const itemsChanged = packageChanged || addOnsChanged;
+  const itemsChanged = configuring || addOnsChanged;
   const priceChanged = itemsChanged || discountChanged;
   // Same rule as the server: a new package is priced from the catalog; otherwise only the add-ons are swapped.
-  const subtotal = packageChanged && selectedPkg
+  const subtotal = configuring && selectedPkg
     ? cents(selectedPkg.amount) + cents(sumAddOnAmounts(pricedAddOns)) + cents(reg.other_fees)
     : cents(reg.total_amount) + discountCents(reg) - cents(sumAddOnAmounts(savedAddOns)) + cents(sumAddOnAmounts(pricedAddOns));
   const totalCents = subtotal - cents(studioDiscount) - cents(muaDiscount);
@@ -151,9 +167,15 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const refundDue = priceChanged && !isCancelled ? Math.max(0, paid - currentTotal) : 0;
   const beforePhotography = ['pending_payment', 'paid'].includes(reg.status);
   const canCorrectMua = beforePhotography && !reg.makeup_state;
+  const storedAnswers = !packageChanged && savedConfiguration && selectedPkg?.builder
+    ? Object.fromEntries(selectedPkg.builder.sections.filter((section) => section.type === 'options'
+      && Object.hasOwn(savedConfiguration.answers, section.id)).map((section) => [
+      section.id, savedConfiguration.answers[section.id].filter((id) => section.choices?.some((choice) => choice.id === id)).slice(0, section.max),
+    ])) : undefined;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (missingOptions) { setShowPackageOptions(true); return; }
     setIsSubmitting(true);
     try {
       await onSave(reg.id, {
@@ -175,6 +197,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
           course: courseId,
         }),
         package: packageId,
+        ...(packageOptions ? { package_options: packageOptions } : {}),
         ...(!itemsChanged && reviewAmount !== '' ? { review_mua_amount: Number(reviewAmount), review_revenue_reason: reviewReason.trim() } : {}),
         ...(canEditAddOns && discountChanged ? { order_discount: { studio: studioDiscount, mua: muaDiscount, reason: discountReason.trim() } } : {}),
         ...(addOnsChanged ? { add_ons: addOns.map((item) => (item.id ? { id: item.id } : { code: item.code, name: item.name })) } : {}),
@@ -429,7 +452,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 </label>
                 <select
                   value={packageId}
-                  onChange={(e) => setPackageId(e.target.value)}
+                  onChange={(e) => { setPackageId(e.target.value); setPackageOptions(undefined); }}
                   disabled={!canEditAddOns}
                   title={!canEditAddOns ? (isCancelled ? 'Restore the job order to change its package.' : 'Released orders can\'t change package.') : undefined}
                   className="w-full p-2 bg-canvas border border-line font-bold disabled:opacity-60"
@@ -452,6 +475,20 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 </span>
               </div>
             </div>
+            {packageOptions && selectedPkg ? (
+              <ul className="space-y-1 border border-line p-2" aria-label="Updated package choices">
+                {selectedChoices(selectedPkg, packageOptions).map(({ section, choice }) =>
+                  <li key={section.id + ':' + choice.id}>{section.title} · {choice.name}</li>)}
+              </ul>
+            ) : !packageChanged && savedConfiguration?.summary && (
+              <p className="border border-line p-2"><strong>Package choices</strong> · {savedConfiguration.summary}</p>
+            )}
+            {canConfigure && <button type="button" onClick={() => setShowPackageOptions(true)}
+              className="min-h-10 border border-gold px-3 font-bold text-gold-soft">
+              {missingOptions ? 'Configure package choices' : 'Edit package choices'}
+            </button>}
+            {canConfigure && !packageChanged && savedConfiguration?.version !== selectedPkg?.builder_version &&
+              <p className="text-xs text-gold-soft">Editing choices uses the current catalog package and pricing.</p>}
             {refundDue > 0 && (
               <div role="alert" className="p-3 border-2 border-red-600 bg-red-50 text-red-900 leading-relaxed">
                 <strong>The client already paid {formatCurrency(reg.paid_amount, { exact: true })}</strong>, more than the new total of {formatCurrency(currentTotal, { exact: true })}.
@@ -461,10 +498,10 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
             )}
             <div className="space-y-2 border-t border-neutral-200 pt-2">
               <h4 className="font-black uppercase">Add-ons</h4>
-              {addOns.length === 0 && <p className="text-neutral-500">No add-ons on this job order.</p>}
-              {addOns.length > 0 && (
+              {orderAddOns.length === 0 && <p className="text-neutral-500">No add-ons on this job order.</p>}
+              {orderAddOns.length > 0 && (
                 <ul className="space-y-1">
-                  {addOns.map((item, index) => {
+                  {orderAddOns.map((item, index) => {
                     const isNew = !item.id || !savedIds.has(item.id);
                     const catalogItem = addOnCatalog.find((entry) => entry.id === item.id);
                     return (
@@ -477,10 +514,10 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                           )}
                         </span>
                         <span className="flex shrink-0 items-center gap-2">
-                          <span title={isNew ? 'Today\'s catalog price' : 'Price it was sold at'}>{formatCurrency(item.amount, { exact: true })}</span>
-                          {canEditAddOns && (
+                          <span title={isNew ? 'Today\'s catalog price' : 'Price it was sold at'}>{item.package_option && !item.amount ? 'Included' : formatCurrency(item.amount, { exact: true })}</span>
+                          {canEditAddOns && !item.package_option && (
                             <RecordActionButton variant="delete" recordName={item.name}
-                              onClick={() => setAddOns((current) => current.filter((_, i) => i !== index))} />
+                              onClick={() => setAddOns((current) => current.filter((entry) => entry !== item))} />
                           )}
                         </span>
                       </li>
@@ -494,7 +531,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                     <select value={addOnToAdd} onChange={(e) => setAddOnToAdd(e.target.value)} aria-label="Add-on to add"
                       className="flex-1 min-w-0 p-2 bg-canvas border border-line">
                       <option value="">Choose an add-on to add…</option>
-                      {addableAddOns.map((item) => (
+                      {addableAddOns.filter((item) => !configured.has(item.id)).map((item) => (
                         <option key={item.id} value={item.id} disabled={photosDone && !!item.requires_mua}>
                           {item.code ? `${item.code} - ` : ''}{item.name} ({formatCurrency(item.amount, { exact: true })}){item.requires_mua ? ' · makeup / grooming' : ''}
                         </option>
@@ -677,6 +714,13 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
           </div>
         </form>
       </div>
+      {showPackageOptions && selectedPkg && <PackageDetailsModal
+        pkg={selectedPkg} isSelected gender={gender}
+        addOns={addOnCatalog.filter((item) => [clientKind, 'both'].includes(item.client_kind || 'both'))}
+        configuration={packageOptions ?? (storedAnswers ? { version: selectedPkg.builder_version ?? 0, answers: storedAnswers } : undefined)}
+        onSelect={(_, configuration: PackageConfiguration) => setPackageOptions(packageQuote(selectedPkg, configuration, addOnCatalog))}
+        onClose={() => setShowPackageOptions(false)}
+      />}
     </div>,
     document.body
   );

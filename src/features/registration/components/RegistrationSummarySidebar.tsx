@@ -13,6 +13,8 @@ interface RegistrationSummarySidebarProps {
   selectedCourseId: string;
   packages: Package[];
   selectedPackageId: string | null;
+  packageOptionsSummary: string[];
+  packageAddOnAmount: number;
   addOnsList: AddOn[];
   defaultAddOn?: AddOn;
   selectedAddOns: string[];
@@ -36,6 +38,8 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
   selectedCourseId,
   packages,
   selectedPackageId,
+  packageOptionsSummary,
+  packageAddOnAmount,
   addOnsList,
   defaultAddOn,
   selectedAddOns,
@@ -113,6 +117,10 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
                   {selectedPkg.name}
                 </span>
               </div>
+              {packageOptionsSummary.length > 0 && <ul className="mt-2 space-y-1 text-xs text-neutral-300">
+                {packageOptionsSummary.map((option, index) => <li key={index}>{option}</li>)}
+              </ul>}
+              {packageAddOnAmount > 0 && <p className="mt-2 text-xs text-gold">Paid package choices +{formatCurrency(packageAddOnAmount)}</p>}
             </div>
             <span className="font-black text-gold text-sm shrink-0 ml-2">
               {formatCurrency(selectedPkg.amount)}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check } from 'lucide-react';
 import type { Registration } from '../../../types';
+import { SoldPackageChoices } from '../../packages/SoldPackageChoices';
 
 interface RegistrationConfirmationProps {
   record: Registration;
@@ -39,6 +40,12 @@ export const RegistrationConfirmation: React.FC<RegistrationConfirmationProps> =
           </span>
           <span className="mt-1 block break-all font-mono text-xl font-black text-white">{record.id}</span>
         </div>
+        {record.package_snapshot?.configuration?.selections.length ? (
+          <div className="mt-4 space-y-2 border border-line bg-obsidian-2 p-4">
+            <p className="font-bold text-gold">{record.package_snapshot.name}</p>
+            <SoldPackageChoices registration={record} showPrice />
+          </div>
+        ) : null}
 
         <div className="flex flex-col sm:flex-row gap-3 mt-7">
           <button

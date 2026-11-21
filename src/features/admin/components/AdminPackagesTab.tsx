@@ -3,8 +3,7 @@ import { Plus, Sparkles, Gift } from 'lucide-react';
 import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
 import type { Package, AddOn, RevenueCategory } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
-import { PackageInclusionsEditor } from './PackageInclusionsEditor';
-import { COMMON_FREEBIE_PRESETS } from '../catalogPresets';
+import { PackageBuilderEditor } from '../../packages/PackageBuilderEditor';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
 import type { PackageKind } from '../useAdminData';
@@ -12,29 +11,7 @@ import type { PackageKind } from '../useAdminData';
 interface AdminPackagesTabProps {
   packages: Package[];
   addOns: AddOn[];
-  newPkgCode: string;
-  onNewPkgCodeChange: (val: string) => void;
-  newPkgName: string;
-  onNewPkgNameChange: (val: string) => void;
-  newPkgAmount: number;
-  onNewPkgAmountChange: (val: number) => void;
-  newPkgPhotoLimit: number;
-  onNewPkgPhotoLimitChange: (val: number) => void;
-  newPkgRequiresMua: boolean;
-  onNewPkgRequiresMuaChange: (val: boolean) => void;
-  newPkgKind: PackageKind;
-  onNewPkgKindChange: (val: PackageKind) => void;
-  newPkgRevenue: RevenueCategory;
-  onNewPkgRevenueChange: (value: RevenueCategory) => void;
-  newPkgInclusions: string;
-  onNewPkgInclusionsChange: (val: string) => void;
-  newPkgFreebies: string[];
-  onNewPkgFreebiesChange: (val: string[]) => void;
-  onAddPackage: (e: React.FormEvent) => void;
-  onUpdatePackage: (
-    id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; freebies: string[]; photo_selection_limit: number; requires_mua: boolean; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
-  ) => Promise<void>;
+  onPackagesSaved: () => void | Promise<void>;
   onTogglePackageActive: (id: string, current: boolean) => Promise<void>;
   onDeletePackage: (id: string) => Promise<void>;
   onAddAddOn: (name: string, code: string, amount: number, requiresMua: boolean, clientKind: PackageKind, revenue: RevenueCategory | '', defaultWhenNoMua: boolean) => Promise<void>;
@@ -46,26 +23,7 @@ interface AdminPackagesTabProps {
 export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   packages,
   addOns,
-  newPkgCode,
-  onNewPkgCodeChange,
-  newPkgName,
-  onNewPkgNameChange,
-  newPkgAmount,
-  onNewPkgAmountChange,
-  newPkgPhotoLimit,
-  onNewPkgPhotoLimitChange,
-  newPkgRequiresMua,
-  onNewPkgRequiresMuaChange,
-  newPkgKind,
-  onNewPkgKindChange,
-  newPkgRevenue,
-  onNewPkgRevenueChange,
-  newPkgInclusions,
-  onNewPkgInclusionsChange,
-  newPkgFreebies,
-  onNewPkgFreebiesChange,
-  onAddPackage,
-  onUpdatePackage,
+  onPackagesSaved,
   onTogglePackageActive,
   onDeletePackage,
   onAddAddOn,
@@ -75,17 +33,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
 }) => {
   const { toast } = useToast();
 
-  // Editing Package State
-  const [editingPkgId, setEditingPkgId] = useState<string | null>(null);
-  const [editPkgCode, setEditPkgCode] = useState('');
-  const [editPkgName, setEditPkgName] = useState('');
-  const [editPkgAmount, setEditPkgAmount] = useState(0);
-  const [editPkgPhotoLimit, setEditPkgPhotoLimit] = useState(0);
-  const [editPkgRequiresMua, setEditPkgRequiresMua] = useState(false);
-  const [editPkgRevenue, setEditPkgRevenue] = useState<RevenueCategory | ''>('');
-  const [editPkgKind, setEditPkgKind] = useState<PackageKind>('school');
-  const [editPkgInclusionsArray, setEditPkgInclusionsArray] = useState<string[]>([]);
-  const [editPkgFreebies, setEditPkgFreebies] = useState<string[]>([]);
+  const [builder, setBuilder] = useState<Package | 'new' | null>(null);
 
   // Add-on Form State
   const [newAddonName, setNewAddonName] = useState('');
@@ -118,40 +66,6 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     message: '',
     action: async () => {},
   });
-
-  const startEditPkg = (pkg: Package) => {
-    setEditingPkgId(pkg.id);
-    setEditPkgCode(pkg.code);
-    setEditPkgName(pkg.name);
-    setEditPkgAmount(pkg.amount);
-    setEditPkgPhotoLimit(pkg.photo_selection_limit ?? 0);
-    setEditPkgRequiresMua(!!pkg.requires_mua);
-    setEditPkgRevenue(pkg.revenue_category || '');
-    setEditPkgKind((pkg.client_kind || 'school') as PackageKind);
-    setEditPkgInclusionsArray(parsePackageInclusions(pkg.inclusions));
-    setEditPkgFreebies(parsePackageInclusions(pkg.freebies));
-  };
-
-  const handleSavePkgEdit = async () => {
-    if (!editingPkgId) return;
-    try {
-      await onUpdatePackage(editingPkgId, {
-        code: editPkgCode,
-        name: editPkgName,
-        amount: editPkgAmount,
-        inclusions: editPkgInclusionsArray,
-        freebies: editPkgFreebies,
-        photo_selection_limit: editPkgPhotoLimit,
-        requires_mua: editPkgRequiresMua,
-        client_kind: editPkgKind,
-        revenue_category: editPkgRevenue,
-      });
-      toast.success(`Package "${editPkgName}" updated successfully`);
-      setEditingPkgId(null);
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update package');
-    }
-  };
 
   const startEditAddon = (add: AddOn) => {
     setEditingAddonId(add.id);
@@ -226,96 +140,12 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     });
   };
 
-  const newPkgInclusionsList = newPkgInclusions
-    ? newPkgInclusions.split('\n').filter(Boolean)
-    : [];
-
   return (
     <div className="space-y-8 animate-enter font-mono text-xs">
-      {/* SECTION 1: PACKAGES MANAGEMENT (T020) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
-        {/* Create Package Card */}
-        <div className="bg-panel border-2 border-line shadow-lux p-6">
-          <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink pb-3 border-b-2 border-line mb-4">
-            Create Portrait Package
-          </h3>
-          <form onSubmit={onAddPackage} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-black uppercase mb-1">
-                  Package Code <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="PKG-D"
-                  value={newPkgCode}
-                  onChange={(e) => onNewPkgCodeChange(e.target.value)}
-                  className="w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-canvas focus:bg-panel uppercase font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-black uppercase mb-1">
-                  Amount (₱) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  required
-                  min="0"
-                  value={newPkgAmount}
-                  onChange={(e) => onNewPkgAmountChange(Number(e.target.value))}
-                  className="w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-canvas focus:bg-panel font-black"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-black uppercase mb-1">
-                Package Title / Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Executive Graduation Package"
-                value={newPkgName}
-                onChange={(e) => onNewPkgNameChange(e.target.value)}
-                className="w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-canvas focus:bg-panel font-semibold"
-              />
-            </div>
-
-            <PackageKindInput value={newPkgKind} onChange={onNewPkgKindChange} />
-            <RevenueInput value={newPkgRevenue} onChange={(value) => {
-              onNewPkgRevenueChange(value || 'studio');
-              if (value !== 'mua') onNewPkgRequiresMuaChange(false);
-            }} />
-            <PhotoLimitInput value={newPkgPhotoLimit} onChange={onNewPkgPhotoLimitChange} />
-            <MuaRequirementInput checked={newPkgRequiresMua} onChange={onNewPkgRequiresMuaChange}
-              revenue={newPkgRevenue} amount={newPkgAmount} />
-
-            {/* Dynamic Form List for Inclusions */}
-            <PackageInclusionsEditor
-              inclusions={newPkgInclusionsList}
-              onChange={(items) => onNewPkgInclusionsChange(items.join('\n'))}
-              label="Package Inclusions (Repeatable List)"
-            />
-
-            <PackageInclusionsEditor
-              inclusions={newPkgFreebies}
-              onChange={onNewPkgFreebiesChange}
-              label="Freebies"
-              presets={COMMON_FREEBIE_PRESETS}
-              itemName="freebie"
-            />
-
-            <button
-              type="submit"
-              className="btn-tactile w-full min-h-[44px] py-2.5 bg-obsidian text-gold border border-line font-black uppercase tracking-widest cursor-pointer"
-            >
-              Save Package to Catalog
-            </button>
-          </form>
-        </div>
-
+      {builder && <PackageBuilderEditor key={builder === "new" ? "new" : builder.id}
+        pkg={builder === "new" ? undefined : builder} addOns={addOns}
+        onSaved={onPackagesSaved} onClose={() => setBuilder(null)} />}
+      <div>
         {/* Manage Existing Packages Card */}
         <div className="bg-panel border-2 border-line shadow-lux p-6 flex flex-col justify-between">
           <div>
@@ -326,6 +156,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
               <span className="font-mono text-[10px] bg-obsidian text-gold px-2 py-0.5 font-bold">
                 {packages.length} Packages
               </span>
+              <button type="button" onClick={() => setBuilder("new")} className="min-h-10 border border-gold bg-gold px-3 font-black text-on-gold">Create package</button>
             </div>
 
             <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
@@ -338,90 +169,6 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                       : 'bg-neutral-100 border-neutral-300 opacity-60'
                   }`}
                 >
-                  {editingPkgId === pkg.id ? (
-                    <div className="space-y-3 bg-canvas p-3 border border-line">
-                      <div className="text-[11px] font-black uppercase text-gold-soft border-b pb-1">
-                        Editing Package // {pkg.code}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-neutral-600 mb-0.5">
-                            Package Code
-                          </label>
-                          <input
-                            type="text"
-                            value={editPkgCode}
-                            onChange={(e) => setEditPkgCode(e.target.value)}
-                            className="w-full p-1.5 border border-line uppercase font-bold bg-panel"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-neutral-600 mb-0.5">
-                            Amount (₱)
-                          </label>
-                          <input
-                            type="number"
-                            value={editPkgAmount}
-                            onChange={(e) => setEditPkgAmount(Number(e.target.value))}
-                            className="w-full p-1.5 border border-line font-bold bg-panel"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black uppercase text-neutral-600 mb-0.5">
-                          Package Title / Name
-                        </label>
-                        <input
-                          type="text"
-                          value={editPkgName}
-                          onChange={(e) => setEditPkgName(e.target.value)}
-                          className="w-full p-1.5 border border-line bg-panel font-semibold"
-                        />
-                      </div>
-
-                      <PhotoLimitInput value={editPkgPhotoLimit} onChange={setEditPkgPhotoLimit} />
-                      <PackageKindInput value={editPkgKind} onChange={setEditPkgKind} />
-                      <RevenueInput value={editPkgRevenue} onChange={(value) => {
-                        setEditPkgRevenue(value);
-                        if (value !== 'mua') setEditPkgRequiresMua(false);
-                      }} />
-                      <MuaRequirementInput checked={editPkgRequiresMua} onChange={setEditPkgRequiresMua}
-                        revenue={editPkgRevenue} amount={editPkgAmount} />
-
-                      {/* Repeatable Inclusions Editor in Edit Mode */}
-                      <PackageInclusionsEditor
-                        inclusions={editPkgInclusionsArray}
-                        onChange={setEditPkgInclusionsArray}
-                        label="Edit Inclusions List"
-                      />
-                      <PackageInclusionsEditor
-                        inclusions={editPkgFreebies}
-                        onChange={setEditPkgFreebies}
-                        label="Edit Freebies"
-                        presets={COMMON_FREEBIE_PRESETS}
-                        itemName="freebie"
-                      />
-
-                      <div className="flex gap-2 justify-end pt-2 border-t border-neutral-300">
-                        <button
-                          type="button"
-                          onClick={() => setEditingPkgId(null)}
-                          className="btn-tactile px-3 py-1.5 bg-panel border border-line font-bold uppercase cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSavePkgEdit}
-                          className="btn-tactile px-4 py-1.5 bg-obsidian text-gold font-black uppercase border border-line cursor-pointer"
-                        >
-                          ✓ Save Changes
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
                     <div>
                       <div className="flex flex-wrap justify-between items-center gap-2">
                         <div>
@@ -441,6 +188,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                           <button
                             type="button"
+                            disabled={pkg.builder_unpublished}
                             onClick={() => onTogglePackageActive(pkg.id, pkg.is_active !== false)}
                             className={`px-2 py-0.5 text-[10px] font-bold uppercase border cursor-pointer ${
                               pkg.is_active !== false
@@ -448,10 +196,10 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                                 : 'bg-neutral-200 text-neutral-600 border-neutral-400'
                             }`}
                           >
-                            {pkg.is_active !== false ? 'Active' : 'Archived'}
+                            {pkg.builder_unpublished ? 'Draft' : pkg.is_active !== false ? 'Active' : 'Archived'}
                           </button>
                           <span className={recordActionGroup}>
-                            <RecordActionButton variant="edit" recordName={pkg.name} onClick={() => startEditPkg(pkg)} />
+                            <RecordActionButton variant="edit" recordName={pkg.name} onClick={() => setBuilder(pkg)} />
                             <RecordActionButton variant="delete" recordName={pkg.name} onClick={() => promptDeletePackage(pkg)} />
                           </span>
                         </div>
@@ -485,7 +233,6 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                         </div>
                       )}
                     </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -709,16 +456,6 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     </div>
   );
 };
-
-function PhotoLimitInput({ value, onChange }: { value: number; onChange: (value: number) => void }) {
-  return (
-    <label className="block text-[11px] font-black uppercase">
-      Photo selection limit <span className="font-normal normal-case">(0 for unlimited)</span>
-      <input type="number" min="0" step="1" value={value} onChange={(event) => onChange(Number(event.target.value))}
-        className="mt-1 w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-panel font-bold" />
-    </label>
-  );
-}
 
 const revenueLabels = { studio: 'Studio revenue', mua: 'Other Payment — MUA', '': 'Revenue review needed' };
 

@@ -19,9 +19,14 @@ onRecordCreateRequest((e) => {
     e.app = tx;
     try {
       const workflow = require(__hooks + "/studio_workflow.js");
+      const builder = require(__hooks + "/studio_package_builder.js");
+      const pkg = workflow.catalogItem(tx, "packages", e.record.getString("package"));
+      const configured = pkg && builder.configure(tx, pkg, builder.requestOptions(e.requestInfo().body), clientKind);
+      e.record.set("package_snapshot", pkg ? { ...pricing.snapshotPackage(pkg),
+        ...(configured ? { configuration: configured.configuration } : {}) } : null);
       const [defaultAddOn] = pricing.defaultAddOns(tx, clientKind);
-      const addOns = pricing.priceAddOns(tx, selections, [], clientKind)
-        .filter((item) => item.id !== defaultAddOn?.id);
+      const addOns = builder.combineAddOns(pricing.priceAddOns(tx, selections, [], clientKind)
+        .filter((item) => item.id !== defaultAddOn?.id), configured?.addOns ?? []);
       e.record.set("add_ons", addOns);
       const auto = e.record.getString("package") && defaultAddOn
         && !workflow.purchasedServices(tx, e.record).length ? defaultAddOn : null;
@@ -40,7 +45,8 @@ onRecordCreate((e) => {
   const packageId = e.record.getString("package");
   const pkg = packageId ? e.app.findRecordById("packages", packageId) : null;
   const base = pkg ? pkg.getFloat("amount") : 0;
-  e.record.set("package_snapshot", pkg ? pricing.snapshotPackage(pkg) : null);
+  const saved = require(__hooks + "/studio_workflow.js").json(e.record, "package_snapshot")?.configuration;
+  e.record.set("package_snapshot", pkg ? { ...pricing.snapshotPackage(pkg), ...(saved ? { configuration: saved } : {}) } : null);
   const total = pricing.cents(base) + pricing.addOnCents(pricing.savedAddOns(e.record)) + pricing.cents(e.record.getFloat("other_fees"));
   e.record.set("total_amount", total / 100);
   e.record.set("revenue_terms", require(__hooks + "/studio_revenue.js").terms(e.record, total));
@@ -68,6 +74,12 @@ onRecordUpdateRequest((e) => {
   const clientKind = e.record.getString("client_kind") === "walkin" ? "walkin" : "school";
   const packageId = e.record.getString("package");
   const packageChanged = Boolean(packageId) && packageId !== original.getString("package");
+  const builder = require(__hooks + "/studio_package_builder.js");
+  const input = builder.requestOptions(e.requestInfo().body);
+  if (input && (!isAdmin || (!packageChanged && original.getString("status") !== "pending_payment"))) {
+    throw new ForbiddenError("Only an administrator can configure an unfinished booking.");
+  }
+  const reconfigured = Boolean(input);
   // Add-ons: admin only. Ones already on the order keep their price; new ones come from the catalog.
   const previousAddOns = pricing.savedAddOns(original);
   let addOns = previousAddOns;
@@ -78,28 +90,31 @@ onRecordUpdateRequest((e) => {
     addOns = pricing.priceAddOns(e.app, selections, previousAddOns, clientKind);
   }
   // Changed = a different set of add-ons or prices (resending the same list is not a change).
-  const key = (items) => JSON.stringify(items.map((item) => [item.id ?? item.name, pricing.cents(item.amount)]));
+  const key = (items) => JSON.stringify(items.map((item) => [item.id ?? item.name, pricing.cents(item.amount), !!item.package_option]));
   let addOnsChanged = key(addOns) !== key(previousAddOns);
   if (addOnsChanged && !isAdmin) throw new ForbiddenError("Only administrators can change add-ons.");
 
   // A released order is closed, and a cancelled one owes nothing until it is restored.
   const status = original.getString("status");
-  if ((packageChanged || addOnsChanged || feesChanged) && ["released", "cancelled"].includes(status)) {
+  if ((packageChanged || reconfigured || addOnsChanged || feesChanged) && ["released", "cancelled"].includes(status)) {
     throw new BadRequestError(status === "released"
       ? "This order was already released, so its package, add-ons and fees can't change."
       : "This order is cancelled. Restore it before changing its package, add-ons or fees.");
   }
   // A new package must be on sale and offered to this type of client (the same rule as the kiosk).
-  const pkg = packageChanged ? e.app.findRecordById("packages", packageId) : null;
+  const pkg = packageChanged || reconfigured ? e.app.findRecordById("packages", packageId) : null;
   if (pkg && !pkg.getBool("is_active")) {
     throw new BadRequestError(`"${pkg.getString("name")}" is no longer offered. Choose an active package.`);
   }
   if (pkg && ![clientKind, "both"].includes(pkg.getString("client_kind") || "school")) {
     throw new BadRequestError(`"${pkg.getString("name")}" is not offered to ${clientKind === "walkin" ? "walk-in" : "school"} clients.`);
   }
+  const configured = pkg && builder.configure(e.app, pkg, input, clientKind);
+  addOns = builder.combineAddOns(addOns, pkg ? configured?.addOns ?? [] : previousAddOns.filter((item) => item.package_option));
+  addOnsChanged = key(addOns) !== key(previousAddOns);
 
   // The automatic add-on follows the edited order (see studio_pricing.applyAutoAddOn).
-  if (packageChanged || addOnsChanged) {
+  if (packageChanged || reconfigured || addOnsChanged) {
     e.record.set("add_ons", addOns);
     addOns = pricing.applyAutoAddOn(e.app, e.record, clientKind);
     addOnsChanged = key(addOns) !== key(previousAddOns);
@@ -112,7 +127,8 @@ onRecordUpdateRequest((e) => {
   let total = subtotal;
   if (pkg) {
     const base = pkg.getFloat("amount");
-    e.record.set("package_snapshot", pricing.snapshotPackage(pkg));
+    e.record.set("package_snapshot", { ...pricing.snapshotPackage(pkg),
+      ...(configured ? { configuration: configured.configuration } : {}) });
     total = cents(base) + pricing.addOnCents(addOns) + fees;
   } else {
     e.record.set("package_snapshot", original.get("package_snapshot"));
@@ -122,7 +138,7 @@ onRecordUpdateRequest((e) => {
         + pricing.addOnCents(addOns) + fees;
     }
   }
-  const itemsChanged = packageChanged || addOnsChanged || feesChanged;
+  const itemsChanged = packageChanged || reconfigured || addOnsChanged || feesChanged;
   const body = e.requestInfo().body || {};
   if ("order_discount" in body && !isAdmin) throw new ForbiddenError("Use the cashier discount action.");
   if (itemsChanged || "review_mua_amount" in body || "order_discount" in body) {
@@ -153,6 +169,29 @@ const checkCatalogPrice = (e) => {
   // A package's freebies are saved as a clean list of text items.
   if (table === "packages") {
     const pricing = require(__hooks + "/studio_pricing.js");
+    const builder = require(__hooks + "/studio_package_builder.js");
+    const body = e.requestInfo().body || {};
+    const previous = e.record.original();
+    const configuration = builder.read(e.record, "builder");
+    if ("draft_content" in body || "review_notes" in body) {
+      if (!e.hasSuperuserAuth() && e.auth?.getString("role") !== "admin") throw new ForbiddenError("Only admins can save package drafts.");
+      if ("draft_content" in body) e.record.set("builder_draft", body.draft_content);
+      if ("review_notes" in body) e.record.set("builder_review", body.review_notes);
+    }
+    if (e.record.getBool("is_active") && e.record.getBool("builder_unpublished")) {
+      throw new BadRequestError("Publish this draft before activating it.");
+    }
+    if (configuration && ("builder" in body || e.record.getString("client_kind") !== previous.getString("client_kind"))) {
+      builder.validate(e.app, configuration, e.record.getString("client_kind") || "school");
+    }
+    if (configuration && "builder" in body) {
+      const lists = builder.legacyLists(configuration);
+      e.record.set("inclusions", JSON.stringify(lists.inclusions));
+      e.record.set("freebies", lists.freebies);
+    }
+    const revised = ["builder", "name", "code", "amount", "client_kind", "description", "requires_mua",
+      "revenue_category", "photo_selection_limit"].some((field) => e.record.getString(field) !== previous.getString(field));
+    e.record.set("builder_version", previous.getInt("builder_version") + (configuration && revised ? 1 : 0));
     const freebies = pricing.packageInclusions(e.record, "freebies").map((item) => item.trim()).filter(Boolean);
     if (freebies.some((item) => item.length > 200)) throw new BadRequestError("Keep each freebie under 200 characters.");
     e.record.set("freebies", freebies);
@@ -180,6 +219,13 @@ onRecordCreateRequest((e) => {
 }, "packages", "add_ons");
 onRecordCreateRequest(checkCatalogPrice, "packages", "add_ons");
 onRecordUpdateRequest(checkCatalogPrice, "packages", "add_ons");
+
+onRecordEnrich((e) => {
+  if (e.requestInfo?.auth?.getString("role") === "admin" || e.requestInfo?.auth?.isSuperuser()) {
+    e.record.unhide("builder_draft", "builder_review");
+  }
+  return e.next();
+}, "packages");
 
 onRecordValidate((e) => {
   const item = e.record;

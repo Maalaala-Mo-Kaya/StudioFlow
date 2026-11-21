@@ -16,6 +16,7 @@ import { splitFullName } from '../../utils/formatters';
 import { useStudioSettings } from '../../hooks/useStudioSettings';
 import { useWorkflowData } from '../../hooks/useWorkflowData';
 import { registrationAddOns } from './registrationAddOns';
+import { configurationErrors, configuredAddOns, hasOptions, packageQuote, selectedChoices, type PackageConfiguration } from '../packages/packageBuilder';
 import {
   emailPattern, mobilePattern, packageRequiredMessage, registrationFields, validationProps,
   type RegistrationErrors,
@@ -71,6 +72,7 @@ export function useRegistrationForm() {
   const [email, setEmail] = useState('');
 
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
+  const [packageConfiguration, setPackageConfiguration] = useState<ReturnType<typeof packageQuote>>();
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
   const [makeupLookNote, setMakeupLookNote] = useState('');
   const [paymentType, setPaymentType] = useState<'full' | 'downpayment'>('full');
@@ -220,8 +222,9 @@ export function useRegistrationForm() {
     ? addOnsList.filter((item) => [clientKind, 'both'].includes(item.client_kind || 'both'))
     : [];
   const selectedPackage = kindPackages.find((pkg) => pkg.id === selectedPackageId);
+  const packageAddOns = configuredAddOns(selectedPackage, packageConfiguration, kindAddOns);
   const { manualAddOns, selected, defaultAddOn, requiresMua: asksLook, totalAmount } =
-    registrationAddOns(selectedPackage, kindAddOns, selectedAddOns);
+    registrationAddOns(selectedPackage, kindAddOns, selectedAddOns, packageAddOns);
 
   // Signature Handler
   const handleSignatureChange = (blob: Blob | null, dataUrl?: string | null) => {
@@ -271,6 +274,11 @@ export function useRegistrationForm() {
       fieldErrors.mobile_number = 'Enter a valid Philippine mobile number, such as 0917-000-0000.';
     }
     if (!termsAccepted) fieldErrors.terms_accepted = 'Agree to the Terms & Conditions to proceed.';
+    if (selectedPackage?.builder && hasOptions(selectedPackage) && (!packageConfiguration
+      || selectedPackage.builder_version !== packageConfiguration.version
+      || Object.keys(configurationErrors(selectedPackage.builder, packageConfiguration.answers)).length > 0)) {
+      fieldErrors.package = 'Open the package details and confirm your choices.';
+    }
     if (!selectedPackage || !signatureBlob || Object.keys(fieldErrors).length) {
       if (!selectedPackage) fieldErrors.package = packageRequiredMessage;
       if (!signatureBlob) fieldErrors.signature = 'Provide your digital signature on the signature pad.';
@@ -307,6 +315,7 @@ export function useRegistrationForm() {
       formData.append('mobile_number', cleanMobile);
       formData.append('email', cleanEmail);
       formData.append('package', selectedPackage.id);
+      if (selectedPackage.builder && packageConfiguration) formData.append('package_options', JSON.stringify(packageConfiguration));
       formData.append('add_ons', JSON.stringify(selected.map(({ id }) => ({ id }))));
       formData.append('no_mua_default_quote', defaultAddOn
         ? `${defaultAddOn.id}:${Math.round(defaultAddOn.amount * 100)}`
@@ -378,6 +387,7 @@ export function useRegistrationForm() {
     setMobileNumber('');
     setEmail('');
     setSelectedPackageId(null);
+    setPackageConfiguration(undefined);
     setSelectedAddOns([]);
     setMakeupLookNote('');
     setPaymentType('full');
@@ -392,6 +402,7 @@ export function useRegistrationForm() {
   const changeKind = (kind: ClientKind) => {
     setChosenKind(kind);
     setSelectedPackageId(null);
+    setPackageConfiguration(undefined);
     setSelectedAddOns([]);
     clearErrors('client_kind', 'package');
   };
@@ -422,6 +433,7 @@ export function useRegistrationForm() {
     courses,
     packages: kindPackages,
     addOnsList: manualAddOns,
+    catalogAddOns: kindAddOns,
     defaultAddOn,
     catalogError,
     catalogLoading: !registrationCatalog && !catalogError,
@@ -452,7 +464,17 @@ export function useRegistrationForm() {
     email,
     setEmail: changeField('email', setEmail),
     selectedPackageId: selectedPackage?.id ?? null,
-    setSelectedPackageId: changeField('package', (id: string) => setSelectedPackageId(id)),
+    selectPackage: (id: string, configuration?: PackageConfiguration) => {
+      const pkg = kindPackages.find((item) => item.id === id);
+      if (!pkg || (hasOptions(pkg) && !configuration)) return;
+      setSelectedPackageId(id);
+      setPackageConfiguration(configuration && pkg.builder ? packageQuote(pkg, configuration, kindAddOns) : undefined);
+      clearErrors('package');
+    },
+    packageConfiguration,
+    packageOptionsSummary: selectedPackage ? selectedChoices(selectedPackage, packageConfiguration)
+      .map(({ section, choice }) => `${section.title} · ${choice.name}`) : [],
+    packageAddOnAmount: [...packageAddOns.values()].reduce((total, item) => total + Math.round(item.amount * 100), 0) / 100,
     selectedAddOns: selected.map(({ id }) => id),
     toggleAddOn,
     asksLook,

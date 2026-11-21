@@ -155,7 +155,8 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   const addOnRows = Math.max(1, Math.ceil(extras.length / 2));
   const addOnsH = 0.12 + addOnRows * lineH;
   box(doc, x, cy, w, addOnsH);
-  put(doc, `ADD-ONS${extras.length ? ` (${extras.length})` : ''}`, x + 0.06, cy + 0.09, { size: 5, bold: true, mono: true, color: GREY });
+  const extraHeading = reg.package_snapshot?.configuration?.selections.length ? 'PACKAGE CHOICES AND ADD-ONS' : 'ADD-ONS';
+  put(doc, `${extraHeading}${extras.length ? ` (${extras.length})` : ''}`, x + 0.06, cy + 0.09, { size: 5, bold: true, mono: true, color: GREY });
   if (!extras.length) put(doc, 'None', x + 0.06, cy + 0.2, { size: 8.5, bold: true });
   const columnW = (w - 0.12 - 0.2) / 2;
   extras.forEach(([label, amount], index) => {

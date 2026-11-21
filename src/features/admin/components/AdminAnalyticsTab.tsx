@@ -188,7 +188,10 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
     { id: 'school', header: 'School / Client', sortable: true, accessor: ({ registration }) => clientGroup(registration),
       cell: ({ registration }) => clientGroup(registration) || 'ORG', cellClassName: 'text-neutral-600' },
     { id: 'package', header: 'Package', sortable: true, accessor: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code,
-      cell: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code || 'PKG' },
+      cell: ({ registration }) => <>
+        <strong>{registration.package_snapshot?.code || registration.expand?.package?.code || 'PKG'}</strong>
+        {registration.package_snapshot?.configuration?.summary && <p className="text-[10px]">{registration.package_snapshot.configuration.summary}</p>}
+      </> },
     { id: 'billed', header: 'Original billed', sortable: true, accessor: ({ registration }) => registration.total_amount + discountCents(registration) / 100, align: 'right',
       cell: ({ registration }) => formatCurrency(registration.total_amount + discountCents(registration) / 100), cellClassName: 'font-bold' },
     { id: 'collected', header: 'Collected (payments + credits)', sortable: true, accessor: ({ collected }) => collected, align: 'right',

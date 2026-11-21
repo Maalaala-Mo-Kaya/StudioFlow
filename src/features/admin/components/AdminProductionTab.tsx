@@ -17,6 +17,7 @@ import { useStudioSettings } from '../../../hooks/useStudioSettings';
 import { pb } from '../../../db/pocketbase';
 import { PickupNoticeInfo } from '../../cashier/components/PickupNoticeInfo';
 import { buildPickupMessage, PICKUP_PLACEHOLDERS, studioTime } from '../../../utils/pickupMessage';
+import { SoldPackageChoices } from '../../packages/SoldPackageChoices';
 
 interface AdminProductionTabProps {
   registrations: Registration[];
@@ -122,6 +123,8 @@ function stageOf(reg: Registration): Stage {
 /** Frame items in the package (inclusions and freebies) or add-ons. */
 function frameItems(reg: Registration): string[] {
   const items = [...orderInclusions(reg), ...orderFreebies(reg)].filter((item) => /frame/i.test(item));
+  const frame = reg.package_snapshot?.configuration?.definition.frame;
+  if (frame) items.unshift(frame);
   const packageName = reg.package_snapshot?.name || reg.expand?.package?.name || '';
   if (/frame/i.test(packageName) && !items.length) items.push(packageName);
   for (const addOn of reg.add_ons || []) {
@@ -267,6 +270,7 @@ export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registra
           <div className="text-[11px] text-neutral-500">
             {clientGroup(reg)}{levelName(reg) && levelName(reg) !== 'Walk-in' ? ` · ${levelName(reg)}` : ''} · {clientDetail(reg) || '—'}
           </div>
+          <SoldPackageChoices registration={reg} />
         </>
       ),
     },

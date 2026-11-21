@@ -55,15 +55,6 @@ export function useAdminData() {
   const [newOrgName, setNewOrgName] = useState('');
   const [newOrgCode, setNewOrgCode] = useState('');
 
-  const [newPkgCode, setNewPkgCode] = useState('');
-  const [newPkgName, setNewPkgName] = useState('');
-  const [newPkgAmount, setNewPkgAmount] = useState<number>(1000);
-  const [newPkgPhotoLimit, setNewPkgPhotoLimit] = useState(0);
-  const [newPkgRequiresMua, setNewPkgRequiresMua] = useState(false);
-  const [newPkgKind, setNewPkgKind] = useState<PackageKind>('school');
-  const [newPkgRevenue, setNewPkgRevenue] = useState<RevenueCategory>('studio');
-  const [newPkgInclusions, setNewPkgInclusions] = useState('');
-  const [newPkgFreebies, setNewPkgFreebies] = useState<string[]>([]);
 
   // Roster CSV Upload State
   const [csvText, setCsvText] = useState('');
@@ -168,45 +159,6 @@ export function useAdminData() {
       console.error('Failed to add organization:', err);
       toast.error(err instanceof Error && err.message ? err.message : 'Failed to register the school.');
       return undefined;
-    }
-  };
-
-  // Add Package
-  const handleAddPackage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPkgName.trim() || !newPkgCode.trim()) return;
-    try {
-      const inclusions = newPkgInclusions
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      await pb.collection('packages').create({
-        code: newPkgCode.trim().toUpperCase(),
-        name: newPkgName.trim(),
-        amount: Number(newPkgAmount),
-        photo_selection_limit: newPkgPhotoLimit,
-        requires_mua: newPkgRequiresMua,
-        client_kind: newPkgKind,
-        revenue_category: newPkgRevenue,
-        inclusions: JSON.stringify(inclusions),
-        freebies: newPkgFreebies.map((item) => item.trim()).filter(Boolean),
-        is_active: true,
-      });
-
-      setNewPkgCode('');
-      setNewPkgName('');
-      setNewPkgInclusions('');
-      setNewPkgFreebies([]);
-      setNewPkgPhotoLimit(0);
-      setNewPkgRequiresMua(false);
-      setNewPkgRevenue('studio');
-      toast.success('Package created.');
-      loadAllData();
-    } catch (err) {
-      console.error('Failed to add package:', err);
-      // The server explains refusals, such as a package code that is already used.
-      toast.error(err instanceof Error && err.message ? err.message : 'Failed to create the package.');
     }
   };
 
@@ -437,29 +389,6 @@ export function useAdminData() {
   };
 
   // --- Package & Add-on Mutations (T020) ---
-  const handleUpdatePackage = async (
-    id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; freebies: string[]; photo_selection_limit: number; requires_mua: boolean; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
-  ) => {
-    try {
-      await pb.collection('packages').update(id, {
-        name: data.name.trim(),
-        code: data.code.trim().toUpperCase(),
-        amount: Number(data.amount),
-        inclusions: JSON.stringify(data.inclusions),
-        freebies: data.freebies.map((item) => item.trim()).filter(Boolean),
-        photo_selection_limit: data.photo_selection_limit,
-        requires_mua: data.requires_mua,
-        client_kind: data.client_kind,
-        revenue_category: data.revenue_category,
-      });
-      loadAllData();
-    } catch (err) {
-      console.error('Failed to update package:', err);
-      throw err;
-    }
-  };
-
   const handleTogglePackageActive = async (id: string, current: boolean) => {
     try {
       await pb.collection('packages').update(id, { is_active: !current });
@@ -680,26 +609,7 @@ export function useAdminData() {
     newOrgCode,
     setNewOrgCode,
     handleAddOrg,
-    // Add Pkg Form
-    newPkgCode,
-    setNewPkgCode,
-    newPkgName,
-    setNewPkgName,
-    newPkgAmount,
-    newPkgPhotoLimit,
-    setNewPkgPhotoLimit,
-    newPkgRequiresMua,
-    newPkgKind,
-    newPkgRevenue,
-    setNewPkgRevenue,
-    setNewPkgKind,
-    setNewPkgRequiresMua,
-    setNewPkgAmount,
-    newPkgInclusions,
-    setNewPkgInclusions,
-    newPkgFreebies,
-    setNewPkgFreebies,
-    handleAddPackage,
+    reloadCatalog: loadAllData,
     // Roster Ingestion
     csvText,
     setCsvText,
@@ -729,7 +639,6 @@ export function useAdminData() {
     handleUpdateCourse,
     handleRemoveCourse,
     // Package & Add-on Mutations
-    handleUpdatePackage,
     handleTogglePackageActive,
     handleDeletePackage,
     handleAddAddOn,

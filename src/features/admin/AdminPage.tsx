@@ -81,26 +81,7 @@ export const AdminPage: React.FC = () => {
             <AdminPackagesTab
               packages={admin.packages}
               addOns={admin.addOns}
-              newPkgCode={admin.newPkgCode}
-              onNewPkgCodeChange={admin.setNewPkgCode}
-              newPkgName={admin.newPkgName}
-              onNewPkgNameChange={admin.setNewPkgName}
-              newPkgAmount={admin.newPkgAmount}
-              onNewPkgAmountChange={admin.setNewPkgAmount}
-              newPkgPhotoLimit={admin.newPkgPhotoLimit}
-              onNewPkgPhotoLimitChange={admin.setNewPkgPhotoLimit}
-              newPkgRequiresMua={admin.newPkgRequiresMua}
-              onNewPkgRequiresMuaChange={admin.setNewPkgRequiresMua}
-              newPkgKind={admin.newPkgKind}
-              onNewPkgKindChange={admin.setNewPkgKind}
-              newPkgRevenue={admin.newPkgRevenue}
-              onNewPkgRevenueChange={admin.setNewPkgRevenue}
-              newPkgInclusions={admin.newPkgInclusions}
-              onNewPkgInclusionsChange={admin.setNewPkgInclusions}
-              newPkgFreebies={admin.newPkgFreebies}
-              onNewPkgFreebiesChange={admin.setNewPkgFreebies}
-              onAddPackage={admin.handleAddPackage}
-              onUpdatePackage={admin.handleUpdatePackage}
+              onPackagesSaved={admin.reloadCatalog}
               onTogglePackageActive={admin.handleTogglePackageActive}
               onDeletePackage={admin.handleDeletePackage}
               onAddAddOn={admin.handleAddAddOn}

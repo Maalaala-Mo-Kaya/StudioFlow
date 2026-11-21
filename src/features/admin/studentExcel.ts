@@ -33,6 +33,7 @@ interface StudentExcelRow {
   name: string;
   packageId: string;
   packageCode: string;
+  packageConfiguration?: string;
   packageAmount: number;
   addOns: Record<string, number>;
   /** Other fees on the job order, in centavos (part of TOTAL DUE). */
@@ -70,6 +71,7 @@ const studentColumns = [
   { key: 'name', header: 'NAME', width: 32 },
   { key: 'packageCode', header: 'PACKAGE CODE', width: 15 },
 ];
+const packageConfigurationColumn = { key: 'packageConfiguration', header: 'PACKAGE CHOICES', width: 38, style: { alignment: { wrapText: true } } };
 const financialColumns = [
   { key: 'due', header: 'TOTAL DUE' },
   { key: 'full', header: 'FULL PAYMENT' },
@@ -176,6 +178,7 @@ function writeCancelledSheet(workbook: Workbook, title: string, orders: StudentE
     { key: 'kept', header: 'MONEY KEPT (paid less refunds)', width: 17, style: peso },
     ...financialColumns.filter(({ key }) => key === 'studio' || key === 'mua' || key === 'unallocated')
       .map((column) => ({ ...column, width: 17, style: peso })),
+    ...(orders.some((order) => order.packageConfiguration) ? [packageConfigurationColumn] : []),
   ];
   const header = sheet.getRow(1);
   header.height = 48;
@@ -204,6 +207,7 @@ function writeCancelledSheet(workbook: Workbook, title: string, orders: StudentE
       course: order.course,
       name: order.name,
       packageCode: order.packageCode,
+      packageConfiguration: order.packageConfiguration,
       statusBefore: order.cancellation?.statusBefore ? statusLabel(order.cancellation.statusBefore) : '',
       cancelledOn: pictorialDate(order.cancellation?.at || ''),
       cancelledBy: order.cancellation?.by || '',
@@ -278,6 +282,7 @@ export function buildStudentWorkbook(
     ...studentColumns,
     ...catalogColumns,
     ...financialColumns.map((column) => ({ ...column, width: 17, style: peso })),
+    ...(rows.some((row) => row.packageConfiguration) ? [packageConfigurationColumn] : []),
   ];
   const period = rangeLabel(range);
 
@@ -359,6 +364,7 @@ export function buildStudentWorkbook(
         const row = sheet.addRow({
           date: pictorialDate(student.date), jobOrder: student.jobOrder, course: student.course,
           name: student.name, packageCode: student.packageCode,
+          packageConfiguration: student.packageConfiguration,
           ...Object.fromEntries(Object.entries(amountsInRow).map(([column, cents]) => [column, cents / 100])),
         });
         const totalCell = row.getCell('total');

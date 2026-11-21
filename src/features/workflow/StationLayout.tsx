@@ -9,6 +9,7 @@ export interface StationStudent {
   school: string;
   course: string;
   packageName: string;
+  packageConfiguration?: string;
   photographyComplete: boolean;
   queueNumber: number | null;
 }
@@ -58,6 +59,7 @@ export function StationStudentDetails({ student }: { student: StationStudent }) 
       <h3 className="text-lg font-black uppercase">{student.name}</h3>
       <p className="text-sm">{[student.school, student.course].filter(Boolean).join(' · ')}</p>
       <p className="text-sm font-bold mt-1">{student.packageName}</p>
+      {student.packageConfiguration && <p className="text-sm">{student.packageConfiguration}</p>}
     </div>
   );
 }
