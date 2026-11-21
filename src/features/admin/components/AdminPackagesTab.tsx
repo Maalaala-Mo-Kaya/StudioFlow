@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Plus, Edit3, Trash2, Sparkles } from 'lucide-react';
+import { Plus, Edit3, Trash2, Sparkles, Gift } from 'lucide-react';
 import type { Package, AddOn, RevenueCategory } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
 import { PackageInclusionsEditor } from './PackageInclusionsEditor';
+import { COMMON_FREEBIE_PRESETS } from '../catalogPresets';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
 import type { PackageKind } from '../useAdminData';
@@ -26,10 +27,12 @@ interface AdminPackagesTabProps {
   onNewPkgRevenueChange: (value: RevenueCategory) => void;
   newPkgInclusions: string;
   onNewPkgInclusionsChange: (val: string) => void;
+  newPkgFreebies: string[];
+  onNewPkgFreebiesChange: (val: string[]) => void;
   onAddPackage: (e: React.FormEvent) => void;
   onUpdatePackage: (
     id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; photo_selection_limit: number; requires_mua: boolean; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
+    data: { name: string; code: string; amount: number; inclusions: string[]; freebies: string[]; photo_selection_limit: number; requires_mua: boolean; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
   ) => Promise<void>;
   onTogglePackageActive: (id: string, current: boolean) => Promise<void>;
   onDeletePackage: (id: string) => Promise<void>;
@@ -58,6 +61,8 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   onNewPkgRevenueChange,
   newPkgInclusions,
   onNewPkgInclusionsChange,
+  newPkgFreebies,
+  onNewPkgFreebiesChange,
   onAddPackage,
   onUpdatePackage,
   onTogglePackageActive,
@@ -79,6 +84,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   const [editPkgRevenue, setEditPkgRevenue] = useState<RevenueCategory | ''>('');
   const [editPkgKind, setEditPkgKind] = useState<PackageKind>('school');
   const [editPkgInclusionsArray, setEditPkgInclusionsArray] = useState<string[]>([]);
+  const [editPkgFreebies, setEditPkgFreebies] = useState<string[]>([]);
 
   // Add-on Form State
   const [newAddonName, setNewAddonName] = useState('');
@@ -122,6 +128,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     setEditPkgRevenue(pkg.revenue_category || '');
     setEditPkgKind((pkg.client_kind || 'school') as PackageKind);
     setEditPkgInclusionsArray(parsePackageInclusions(pkg.inclusions));
+    setEditPkgFreebies(parsePackageInclusions(pkg.freebies));
   };
 
   const handleSavePkgEdit = async () => {
@@ -132,6 +139,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
         name: editPkgName,
         amount: editPkgAmount,
         inclusions: editPkgInclusionsArray,
+        freebies: editPkgFreebies,
         photo_selection_limit: editPkgPhotoLimit,
         requires_mua: editPkgRequiresMua,
         client_kind: editPkgKind,
@@ -290,6 +298,14 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
               label="Package Inclusions (Repeatable List)"
             />
 
+            <PackageInclusionsEditor
+              inclusions={newPkgFreebies}
+              onChange={onNewPkgFreebiesChange}
+              label="Freebies"
+              presets={COMMON_FREEBIE_PRESETS}
+              itemName="freebie"
+            />
+
             <button
               type="submit"
               className="btn-tactile w-full min-h-[44px] py-2.5 bg-obsidian text-gold border border-line font-black uppercase tracking-widest cursor-pointer"
@@ -379,6 +395,13 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                         onChange={setEditPkgInclusionsArray}
                         label="Edit Inclusions List"
                       />
+                      <PackageInclusionsEditor
+                        inclusions={editPkgFreebies}
+                        onChange={setEditPkgFreebies}
+                        label="Edit Freebies"
+                        presets={COMMON_FREEBIE_PRESETS}
+                        itemName="freebie"
+                      />
 
                       <div className="flex gap-2 justify-end pt-2 border-t border-neutral-300">
                         <button
@@ -462,6 +485,16 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                           </span>
                         ))}
                       </div>
+                      {parsePackageInclusions(pkg.freebies).length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                          <span className="flex items-center gap-1 text-[10px] font-black uppercase text-gold-soft">
+                            <Gift className="w-3 h-3" /> Freebies:
+                          </span>
+                          {parsePackageInclusions(pkg.freebies).map((item, i) => (
+                            <span key={i} className="px-2 py-0.5 text-[10px] border border-gold text-gold-soft">{item}</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

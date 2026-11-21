@@ -134,6 +134,8 @@ export interface Package {
   amount: number;
   description?: string;
   inclusions?: string[] | string;
+  /** Free items given with the package (free frame, raw copies…), listed apart from inclusions. */
+  freebies?: string[] | string;
   photo_selection_limit?: number;
   requires_mua?: boolean;
   is_active?: boolean;
@@ -202,7 +204,7 @@ export interface Registration {
   /** What the client bought, frozen at sale: price, name and package contents. */
   package_snapshot?: {
     id: string; code: string; name: string; amount?: number; revenue_category?: RevenueCategory | '';
-    inclusions?: string[]; photo_selection_limit?: number;
+    inclusions?: string[]; freebies?: string[]; photo_selection_limit?: number;
   } | null;
   add_ons?: RegistrationAddOn[];
   other_fees?: number;

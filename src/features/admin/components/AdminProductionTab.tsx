@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Frame, Copy, Check, Layers, MessageSquare, Save } from 'lucide-react';
 import type { Registration, ProductionStatus } from '../../../types';
-import { formatClientName, formatCurrency, orderInclusions } from '../../../utils/formatters';
+import { formatClientName, formatCurrency, orderFreebies, orderInclusions } from '../../../utils/formatters';
 import { getPhotoFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
 import { useToast } from '../../../context/ToastContext';
 import { workflowError } from '../../../hooks/useWorkflowData';
@@ -119,9 +119,9 @@ function stageOf(reg: Registration): Stage {
   return status && status !== 'released' ? status : 'none';
 }
 
-/** Frame items in the package or add-ons. */
+/** Frame items in the package (inclusions and freebies) or add-ons. */
 function frameItems(reg: Registration): string[] {
-  const items = orderInclusions(reg).filter((item) => /frame/i.test(item));
+  const items = [...orderInclusions(reg), ...orderFreebies(reg)].filter((item) => /frame/i.test(item));
   const packageName = reg.package_snapshot?.name || reg.expand?.package?.name || '';
   if (/frame/i.test(packageName) && !items.length) items.push(packageName);
   for (const addOn of reg.add_ons || []) {

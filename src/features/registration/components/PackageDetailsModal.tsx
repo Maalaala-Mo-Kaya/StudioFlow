@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { X, Check, Package as PackageIcon } from 'lucide-react';
+import { X, Check, Gift, Package as PackageIcon } from 'lucide-react';
 import type { Package } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
 
@@ -20,6 +20,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   if (!pkg) return null;
 
   const inclusions = parsePackageInclusions(pkg.inclusions);
+  const freebies = parsePackageInclusions(pkg.freebies);
 
   const handleChoose = () => {
     onSelect(pkg.id);
@@ -103,6 +104,26 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
                 </div>
               ))}
             </div>
+          )}
+
+          {freebies.length > 0 && (
+            <>
+              <div className="flex items-center justify-between text-[11px] font-black uppercase text-ink pt-3 mb-1">
+                <span className="flex items-center gap-1.5">
+                  <Gift className="w-3.5 h-3.5 text-gold" />
+                  <span>Freebies</span>
+                </span>
+                <span className="text-gold-soft font-mono">{freebies.length} Items</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {freebies.map((item, idx) => (
+                  <div key={idx} className="flex items-start gap-2.5 p-2 bg-gold-wash border border-gold/40 text-neutral-800">
+                    <Gift className="w-4 h-4 text-gold shrink-0 mt-0.5" />
+                    <span className="text-xs font-semibold leading-relaxed font-sans">{item}</span>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
 

@@ -38,9 +38,12 @@ function snapshotAddOn(item) {
   };
 }
 
-/** A package's inclusions as a list of text items (saved as a JSON array or a JSON-encoded string). */
-function packageInclusions(pkg) {
-  let value = pkg.getString("inclusions");
+/**
+ * A package's inclusions (or freebies) as a list of text items (saved as a JSON array or a
+ * JSON-encoded string).
+ */
+function packageInclusions(pkg, field = "inclusions") {
+  let value = pkg.getString(field);
   for (let i = 0; i < 2 && typeof value === "string"; i++) {
     // Not JSON: an old record holding one plain-text inclusion.
     try { value = JSON.parse(value || "null"); } catch (_) { return value.trim() ? [value] : []; }
@@ -50,13 +53,14 @@ function packageInclusions(pkg) {
 
 /**
  * What the client bought, frozen on the job order: price, name and the package contents
- * (inclusions and photo selection limit), so later catalog edits don't change past orders.
+ * (inclusions, freebies and photo selection limit), so later catalog edits don't change past orders.
  */
 function snapshotPackage(pkg) {
   return {
     id: pkg.id, code: pkg.getString("code"), name: pkg.getString("name"), amount: pkg.getFloat("amount"),
     revenue_category: pkg.getString("revenue_category"),
-    inclusions: packageInclusions(pkg), photo_selection_limit: pkg.getInt("photo_selection_limit"),
+    inclusions: packageInclusions(pkg), freebies: packageInclusions(pkg, "freebies"),
+    photo_selection_limit: pkg.getInt("photo_selection_limit"),
   };
 }
 

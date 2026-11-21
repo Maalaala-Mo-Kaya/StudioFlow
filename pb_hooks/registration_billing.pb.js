@@ -148,6 +148,26 @@ const checkCatalogPrice = (e) => {
   if (!["", "school", "walkin", "both"].includes(e.record.getString("client_kind"))) {
     throw new BadRequestError("Choose who it is offered to: school, walk-in or both.");
   }
+  const table = e.record.collection().name;
+  // A package's freebies are saved as a clean list of text items.
+  if (table === "packages") {
+    const pricing = require(__hooks + "/studio_pricing.js");
+    const freebies = pricing.packageInclusions(e.record, "freebies").map((item) => item.trim()).filter(Boolean);
+    if (freebies.some((item) => item.length > 200)) throw new BadRequestError("Keep each freebie under 200 characters.");
+    e.record.set("freebies", freebies);
+  }
+  // Codes are unique per collection, ignoring case (idx_packages_code / idx_add_ons_code are the
+  // backstop when two saves race). Checked here first for a clear message.
+  const code = e.record.getString("code").trim();
+  e.record.set("code", code);
+  if (code) {
+    const found = new DynamicModel({ n: 0 });
+    e.app.db().newQuery(`SELECT COUNT(*) AS n FROM ${table} WHERE code = {:code} COLLATE NOCASE AND id != {:id}`)
+      .bind({ code, id: e.record.id }).one(found);
+    if (found.n) {
+      throw new BadRequestError(`Code ${code} is already used by another ${table === "packages" ? "package" : "add-on"}.`);
+    }
+  }
   return e.next();
 };
 onRecordCreateRequest((e) => {

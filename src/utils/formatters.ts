@@ -108,6 +108,18 @@ export function orderInclusions(reg: {
 }
 
 /**
+ * The freebies the client was promised, frozen on the job order. Orders sold before packages had
+ * freebies have none; the package's current freebies are used only for an order with no snapshot.
+ */
+export function orderFreebies(reg: {
+  package_snapshot?: { freebies?: string[] } | null;
+  expand?: { package?: { freebies?: string[] | string } };
+}): string[] {
+  if (reg.package_snapshot) return Array.isArray(reg.package_snapshot.freebies) ? reg.package_snapshot.freebies : [];
+  return parsePackageInclusions(reg.expand?.package?.freebies);
+}
+
+/**
  * Splits a full name from a master roster into `{ givenName, familyName }`.
  */
 export function splitFullName(fullName: string): { givenName: string; familyName: string } {
