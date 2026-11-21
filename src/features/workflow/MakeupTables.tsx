@@ -1,5 +1,6 @@
 import { useId, useMemo } from 'react';
 import type { ReactNode } from 'react';
+import { Paintbrush } from 'lucide-react';
 import { DataTable, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
 import { defaultTableExpansion, type TableExpansion, type TablePage, type TableSort } from '../../components/common/dataTableModel';
 import { makeupLookLabel } from '../../constants/makeupLook';
@@ -7,6 +8,8 @@ import { useWorkflowData } from '../../hooks/useWorkflowData';
 import { formatQueueNumber } from '../../utils/formatters';
 import { makeupStateLabels, requiresConfirmation, type MakeupAssignment } from './makeupAssignment';
 import type { MuaTeam } from './muaTeam';
+import { StationClientQueue } from './StationClientQueue';
+import { stationButton } from './StationLayout';
 
 const serviceSources = {
   package: 'Selected package', add_on: 'Selected add-on', admin: 'Admin correction', legacy: 'Existing job order',
@@ -78,7 +81,7 @@ export function MakeupTeamTable({ artists, loading, sort, onSort }: {
   );
 }
 
-interface MakeupClientTableProps {
+interface MakeupClientsViewProps {
   title: string;
   kind: 'waiting' | 'assigned' | 'completed';
   rows: MakeupAssignment[];
@@ -87,12 +90,17 @@ interface MakeupClientTableProps {
   view: MakeupTableView;
   onViewChange: (change: MakeupTableView) => void;
   renderAction?: (row: MakeupAssignment) => ReactNode;
-  renderDetailsActions?: (row: MakeupAssignment) => ReactNode;
+  assignmentSelection: {
+    id: string | undefined;
+    onChange: (id: string | undefined) => void;
+    disabled: boolean;
+    renderActions: (row: MakeupAssignment) => ReactNode;
+  };
 }
 
-export function MakeupClientTable({
-  title, kind, rows, empty, loading, view, onViewChange, renderAction, renderDetailsActions,
-}: MakeupClientTableProps) {
+export function MakeupClientsView({
+  title, kind, rows, empty, loading, view, onViewChange, renderAction, assignmentSelection,
+}: MakeupClientsViewProps) {
   const heading = useId();
   const { query = '', service = '', artist = '', state = '', page = firstPage,
     sort = kind === 'completed' ? completedSort : null } = view;
@@ -113,6 +121,41 @@ export function MakeupClientTable({
         [row.jobOrder, row.name, row.artistName, ...searchableService].join(' ').toLowerCase().includes(term)));
   }), [rows, queryText, service, artist, state]);
   const filtersActive = !!(queryText || service || artist || state);
+  const toolbar = (
+    <div className="flex flex-wrap items-center gap-2 p-2">
+      <input type="search" aria-label={`Search ${title.toLowerCase()}`} placeholder="Search job, client, service…" value={query}
+        onChange={(event) => changeFilter({ query: event.target.value })} className={`${tableFilterControl} w-full sm:w-56`} />
+      <TableFilter name="Service" value={service} onChange={(next) => changeFilter({ service: next })}
+        options={serviceOptions.map((name) => [name, name])} />
+      {kind !== 'waiting' && <>
+        <TableFilter name="Artist" value={artist} onChange={(next) => changeFilter({ artist: next })} options={artistOptions} />
+        <TableFilter name="Status" value={state} onChange={(next) => changeFilter({ state: next })} options={(kind === 'completed'
+          ? ['Completed', 'Confirmed'] : ['Claimed', 'In progress']).map((name) => [name, name])} />
+      </>}
+      {filtersActive && <button type="button" onClick={() => changeFilter({ query: '', service: '', artist: '', state: '' })}
+        className="min-h-10 px-2 text-xs font-bold text-gold-soft underline">Clear filters</button>}
+    </div>
+  );
+
+  if (kind === 'assigned') {
+    if (loading) return <p role="status" className="border-2 border-line bg-panel p-5 text-center text-sm">Loading assigned clients…</p>;
+    const selected = rows.find((row) => row.id === assignmentSelection.id);
+    const unselected = filteredRows.filter((row) => row.id !== selected?.id);
+
+    return <StationClientQueue
+      placeholderIcon={<Paintbrush className="size-7 text-gold" aria-hidden="true" />}
+      totalUnselected={rows.length - (selected ? 1 : 0)}
+      tools={rows.length > 0 && <div className="mb-4 border border-line bg-panel">{toolbar}</div>}
+      empty={rows.length === 0 ? empty : filtersActive ? 'No unselected clients match the filters.' : 'No other assigned clients in the queue.'}
+      selected={selected && <MakeupAssignmentCard key={selected.id} row={selected} selected
+        disabled={assignmentSelection.disabled} onToggle={() => assignmentSelection.onChange(undefined)}>
+        {assignmentSelection.renderActions(selected)}
+      </MakeupAssignmentCard>}
+      unselected={unselected.map((row) => <MakeupAssignmentCard key={row.id} row={row}
+        disabled={assignmentSelection.disabled} onToggle={() => assignmentSelection.onChange(row.id)} />)}
+    />;
+  }
+
   const columns: DataTableColumn<MakeupAssignment>[] = [
     { id: 'job', header: 'Job Order №', accessor: (row) => row.jobOrder, sortable: true, cellClassName: 'whitespace-nowrap font-mono font-bold' },
     { id: 'client', header: 'Client name', accessor: (row) => row.name, sortable: true, minWidth: 130,
@@ -122,7 +165,7 @@ export function MakeupClientTable({
     { id: 'service', header: 'MUA service', accessor: serviceNames, sortable: true, minWidth: 120,
       cell: (row) => <>{serviceNames(row)}{row.state !== 'completed' && requiresConfirmation(row)
         && <span className="block text-[11px] font-bold text-gold-soft">Confirmation required</span>}</> },
-    { id: 'artist', header: kind === 'completed' ? 'Completed by' : 'Assigned MUA', accessor: (row) => row.artistName,
+    { id: 'artist', header: 'Completed by', accessor: (row) => row.artistName,
       sortable: true, visible: kind !== 'waiting' },
     { id: 'time', header: 'Completion time', accessor: (row) => instant(row.completedAt), sortable: true,
       visible: kind === 'completed', cell: (row) => dateTime(row.completedAt), cellClassName: 'whitespace-nowrap' },
@@ -131,7 +174,7 @@ export function MakeupClientTable({
         row.state === 'completed' ? 'border-emerald-600/40 text-emerald-700'
           : row.state === 'in_progress' ? 'border-gold bg-gold-wash text-gold-soft' : 'border-line text-ink'
       }`}>{status(row)}</span> },
-    { id: 'actions', header: kind === 'waiting' ? 'Assign to' : 'Actions', visible: kind !== 'completed',
+    { id: 'actions', header: 'Assign to', visible: kind !== 'completed',
       cell: renderAction ?? (() => null), minWidth: 140 },
   ];
 
@@ -143,28 +186,50 @@ export function MakeupClientTable({
         sorting={{ value: sort, onChange: (next) => onViewChange({ sort: next }) }}
         expansion={{ value: view.expansion ?? defaultTableExpansion, onChange: (next) => onViewChange({ expansion: next }) }}
         loading={loading} emptyMessage={empty} filtered={filtersActive}
-        detailsColumnId={kind === 'assigned' ? 'actions' : undefined}
         headerClassName="uppercase tracking-wide" tableClassName="min-w-[650px]"
-        toolbar={
-          <div className="flex flex-wrap items-center gap-2 p-2">
-            <input type="search" aria-label={`Search ${title.toLowerCase()}`} placeholder="Search job, client, service…" value={query}
-              onChange={(event) => changeFilter({ query: event.target.value })} className={`${tableFilterControl} w-full sm:w-56`} />
-            <TableFilter name="Service" value={service} onChange={(next) => changeFilter({ service: next })}
-              options={serviceOptions.map((name) => [name, name])} />
-            {kind !== 'waiting' && <>
-              <TableFilter name="Artist" value={artist} onChange={(next) => changeFilter({ artist: next })} options={artistOptions} />
-              <TableFilter name="Status" value={state} onChange={(next) => changeFilter({ state: next })} options={(kind === 'completed'
-                ? ['Completed', 'Confirmed'] : ['Claimed', 'In progress']).map((name) => [name, name])} />
-            </>}
-            {filtersActive && <button type="button" onClick={() => changeFilter({ query: '', service: '', artist: '', state: '' })}
-              className="min-h-10 px-2 text-xs font-bold text-gold-soft underline">Clear filters</button>}
-          </div>
-        }
-        renderExpanded={(row) => <MakeupClientDetails row={row}>
-          {renderDetailsActions?.(row) ?? renderAction?.(row)}
-        </MakeupClientDetails>}
+        toolbar={toolbar}
+        renderExpanded={(row) => <MakeupClientDetails row={row}>{renderAction?.(row)}</MakeupClientDetails>}
       />
     </section>
+  );
+}
+
+function MakeupAssignmentCard({ row, selected = false, disabled, onToggle, children }: {
+  row: MakeupAssignment; selected?: boolean; disabled: boolean; onToggle: () => void; children?: ReactNode;
+}) {
+  const look = makeupLookLabel(row.look) || row.look;
+  return (
+    <article className={`flex min-w-0 flex-col gap-4 border-2 bg-panel p-4 text-ink sm:p-5 ${
+      selected ? 'border-gold shadow-lux-gold' : 'border-line shadow-lux'
+    }`}>
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
+        <span className="font-mono text-xs font-black text-gold-soft">{row.jobOrder || row.id}</span>
+        <span className={`border px-2 py-0.5 font-mono text-[10px] font-black uppercase tracking-wider ${
+          row.state === 'in_progress' ? 'border-gold bg-gold text-on-gold' : 'border-line text-ink'
+        }`}>{status(row)}</span>
+      </header>
+      <div className="min-w-0 space-y-1 wrap-break-word">
+        <h3 className="text-lg font-black uppercase">{row.name}</h3>
+        <p className="text-sm font-bold">{serviceNames(row)}</p>
+        <p className="text-xs text-neutral-500">{row.artistName || 'Unassigned'}</p>
+        {requiresConfirmation(row) && <p className="text-xs font-bold text-gold-soft">Confirmation required</p>}
+        {(look || row.lookNote) && <div className="border border-gold bg-gold-wash px-3 py-2 text-xs text-gold-soft">
+          {look && <p className="font-bold">{look}</p>}
+          {row.lookNote && <p className="whitespace-pre-wrap">{selected ? row.lookNote : 'Client note'}</p>}
+        </div>}
+      </div>
+      {selected && <details className="border border-line bg-canvas px-3 py-2">
+        <summary className="cursor-pointer text-xs font-bold text-gold-soft">Client details</summary>
+        <div className="mt-3"><MakeupClientDetails row={row} /></div>
+      </details>}
+      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line pt-3">
+        {children}
+        <button type="button" disabled={disabled} onClick={onToggle} className={selected
+          ? 'min-h-10 px-3 text-xs font-bold text-gold-soft underline disabled:opacity-40' : `${stationButton} w-full`}>
+          {selected ? 'Deselect' : 'Select'}
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -181,7 +246,7 @@ function TableFilter({ name, value, onChange, options }: {
   );
 }
 
-function MakeupClientDetails({ row, children }: { row: MakeupAssignment; children: ReactNode }) {
+function MakeupClientDetails({ row, children }: { row: MakeupAssignment; children?: ReactNode }) {
   const { data, error } = useWorkflowData<MakeupDetails>(`/makeup/${encodeURIComponent(row.id)}/details`);
   const details = data?.details;
   const look = row.look || details?.look;

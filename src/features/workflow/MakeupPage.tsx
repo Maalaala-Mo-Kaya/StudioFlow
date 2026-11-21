@@ -8,7 +8,7 @@ import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { studioDate } from '../../utils/studioDay';
 import type { MuaTeam } from './muaTeam';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
-import { MakeupClientTable, type MakeupTableView } from './MakeupTables';
+import { MakeupClientsView, type MakeupTableView } from './MakeupTables';
 import { MuaTeamOverview } from './MuaTeamOverview';
 import { requiresConfirmation, type MakeupAssignment } from './makeupAssignment';
 import { stationButton, stationCard, StationLayout } from './StationLayout';
@@ -28,6 +28,7 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
   const { user } = useAuth();
   const { toast } = useToast();
   const [selection, setSelection] = useState<MakeupTab>();
+  const [selectedClientId, setSelectedClientId] = useState<string>();
   const [views, setViews] = useState<Partial<Record<MakeupTab, MakeupTableView>>>({});
   const [date, setDate] = useState(() => studioDate());
   const teamPath = `/makeup-team?date=${encodeURIComponent(date)}${selection === 'team' ? '&overview=1' : ''}`;
@@ -82,6 +83,9 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
           ...(admin && (action === 'start' || action === 'complete') ? { onBehalf: true, artistId: row.artistId } : {}),
         },
       });
+      if (action === 'complete' || action === 'release') {
+        setSelectedClientId((current) => current === row.id ? undefined : current);
+      }
       if (action === 'complete') toast.success(requiresConfirmation(row)
         ? 'Service confirmed. The client is in the photography queue.'
         : 'Makeup or grooming completed. The client is in the photography queue.');
@@ -172,7 +176,7 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
             )}
           </>
         ) : (
-          <MakeupClientTable key={activeTab} kind={activeTab} view={view} onViewChange={updateView}
+          <MakeupClientsView key={activeTab} kind={activeTab} view={view} onViewChange={updateView}
             title={activeTab === 'completed' ? 'Completed services' : activeTab === 'waiting'
               ? 'Unassigned clients' : manage ? 'Assigned clients' : 'Your assignments'}
             rows={activeTab === 'completed' ? completed ?? noRows : queueRows}
@@ -180,7 +184,7 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
             empty={activeTab === 'completed' ? 'No completed services for this date.' : activeTab === 'waiting'
               ? 'No unassigned clients waiting for MUA.' : 'No active assigned clients.'}
             renderAction={activeTab === 'waiting' ? waitingActions : undefined}
-            renderDetailsActions={activeTab === 'assigned' ? assignedActions : undefined} />
+            assignmentSelection={{ id: selectedClientId, onChange: setSelectedClientId, disabled: working, renderActions: assignedActions }} />
         )}
       </StationTabs>
       {conflict && (

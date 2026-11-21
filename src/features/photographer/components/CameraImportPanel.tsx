@@ -7,7 +7,7 @@ import type { useCameraLink } from '../useCameraLink';
 
 type CameraLink = ReturnType<typeof useCameraLink>;
 
-export const CameraImportPanel: React.FC<{ link: CameraLink }> = ({ link }) => {
+export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }> = ({ link, disabled }) => {
   const { stations, selectedId, select, camera, error } = link;
   const client = camera?.client;
   const [showSettings, setShowSettings] = useState(false);
@@ -31,6 +31,7 @@ export const CameraImportPanel: React.FC<{ link: CameraLink }> = ({ link }) => {
           <label className="flex items-center gap-2 min-w-0 w-full sm:w-auto text-[11px] font-black uppercase tracking-wider text-ink">
             <span className="shrink-0">This device:</span>
             <select
+              disabled={disabled}
               value={selectedId}
               onChange={(event) => select(event.target.value)}
               className="min-w-0 flex-1 sm:flex-none sm:max-w-[260px] min-h-[40px] px-3 py-1.5 border border-neutral-400 bg-panel text-xs font-bold uppercase"
@@ -97,15 +98,16 @@ export const CameraImportPanel: React.FC<{ link: CameraLink }> = ({ link }) => {
               </div>
               <button
                 type="button"
+                disabled={disabled}
                 onClick={() => void link.unlinkClient(client.id)}
-                className="btn-tactile shrink-0 min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-obsidian-2 text-gold border border-gold text-[11px] font-black uppercase tracking-wider cursor-pointer"
+                className="btn-tactile shrink-0 min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-obsidian-2 text-gold border border-gold text-[11px] font-black uppercase tracking-wider cursor-pointer disabled:opacity-50"
               >
                 <Unlink className="w-3.5 h-3.5" /> Stop Sending
               </button>
             </div>
           ) : camera.enabled && (
             <p className="text-xs text-neutral-600">
-              No client linked. Press <strong className="text-ink">Call Client</strong> (or <strong className="text-ink">Link Camera</strong>) on a card to start sending this camera's photos to that client.
+              No client linked. Press <strong className="text-ink">Call Client</strong> or <strong className="text-ink">Select</strong> on a card to send photos to that client.
             </p>
           )}
 
@@ -118,8 +120,9 @@ export const CameraImportPanel: React.FC<{ link: CameraLink }> = ({ link }) => {
               {client && (
                 <button
                   type="button"
+                  disabled={disabled}
                   onClick={() => void link.claimWaiting()}
-                  className="btn-tactile mt-2 sm:mt-0 sm:ml-3 shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-gold text-on-gold text-[10px] font-black uppercase tracking-wider cursor-pointer"
+                  className="btn-tactile mt-2 sm:mt-0 sm:ml-3 shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-gold text-on-gold text-[10px] font-black uppercase tracking-wider cursor-pointer disabled:opacity-50"
                 >
                   <Send className="w-3 h-3" /> Send them to {client.name.split(' ')[0]}
                 </button>

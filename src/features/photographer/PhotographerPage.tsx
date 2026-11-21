@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { Camera, Volume2 } from 'lucide-react';
 import { usePhotographerQueue } from './usePhotographerQueue';
 import { PhotographerQueueCard } from './components/PhotographerQueueCard';
@@ -8,6 +8,7 @@ import { useCameraLink } from './useCameraLink';
 import type { Registration } from '../../types';
 import { playStudioChime } from '../../utils/audio';
 import { StationLayout } from '../workflow/StationLayout';
+import { StationClientQueue } from '../workflow/StationClientQueue';
 import { StationTabs } from '../workflow/StationTabs';
 
 export const PhotographerPage: React.FC = () => {
@@ -18,23 +19,48 @@ export const PhotographerPage: React.FC = () => {
     loadError,
     activeTab,
     setActiveTab,
-    currentlyShootingId,
     fetchLiveQueue,
     handleCallStudent,
     handleMarkDone,
   } = usePhotographerQueue();
   const camera = useCameraLink();
-  const linkedId = camera.camera?.client?.id ?? '';
+  const [selectedWithoutCamera, setSelectedWithoutCamera] = useState('');
+  const [queueBusy, setQueueBusy] = useState(false);
+  const queueActionPending = useRef(false);
+  const station = camera.camera;
+  const linkedId = station?.client?.id;
+  const selectedId = station?.enabled ? linkedId : selectedWithoutCamera;
+  const selected = queue.find((reg) => reg.id === selectedId);
+  const unselected = queue.filter((reg) => reg.id !== selectedId);
+  const busy = queueBusy || camera.busy;
 
-  // Calling a client points this device's camera at them; finishing the shoot
-  // sends the last shots and releases the camera for the next client.
-  const callStudent = async (reg: Registration) => {
-    if (await handleCallStudent(reg) && camera.camera?.enabled) await camera.linkClient(reg.id);
+  const runQueueAction = async (action: () => Promise<void>) => {
+    if (queueActionPending.current || camera.busy) return;
+    queueActionPending.current = true;
+    setQueueBusy(true);
+    try {
+      await action();
+    } finally {
+      queueActionPending.current = false;
+      setQueueBusy(false);
+    }
   };
-  const markDone = async (reg: Registration) => {
-    if (linkedId === reg.id) await camera.unlinkClient(reg.id);
-    await handleMarkDone(reg);
-  };
+
+  const selectClient = (reg: Registration) => runQueueAction(async () => {
+    if (reg.status !== 'shooting' && !await handleCallStudent(reg)) return;
+    if (station?.enabled) {
+      await camera.linkClient(reg.id);
+    } else {
+      setSelectedWithoutCamera(reg.id);
+    }
+  });
+
+  const markDone = (reg: Registration) => runQueueAction(async () => {
+    if (linkedId === reg.id && !await camera.unlinkClient(reg.id)) return;
+    if (await handleMarkDone(reg)) {
+      setSelectedWithoutCamera((id) => id === reg.id ? '' : id);
+    }
+  });
 
   return (
     <StationLayout title={<>Photographer <span className="text-gold">Session Queue</span></>}
@@ -48,44 +74,35 @@ export const PhotographerPage: React.FC = () => {
         { id: 'history', label: 'Completed Today', count: recentlyDone.length },
       ]}>
         {loadError && <p role="alert" className="text-sm font-bold text-red-700">{loadError}</p>}
-        {activeTab === 'queue' && <CameraImportPanel link={camera} />}
+        {activeTab === 'queue' && <CameraImportPanel link={camera} disabled={busy} />}
 
-        {/* QUEUE CARDS GRID */}
         {activeTab === 'queue' && (
           <div className="animate-enter-delay-1">
             {loading ? (
               <div className="bg-panel border-2 border-line p-16 text-center font-mono text-neutral-500 text-xs uppercase tracking-widest">
                 Syncing live studio queue...
               </div>
-            ) : queue.length === 0 ? !loadError && (
-              <div className="bg-panel border-2 border-line p-12 sm:p-20 text-center shadow-lux">
-                <div className="w-12 h-12 bg-obsidian text-gold flex items-center justify-center mx-auto mb-4">
-                  <Camera className="w-6 h-6" />
-                </div>
-                <h3 className="text-lg font-black text-ink uppercase tracking-wider">
-                  Studio Floor Queue is Clear
-                </h3>
-                <p className="text-xs sm:text-sm text-neutral-500 max-w-sm mx-auto mt-1">
-                  New paid clients will appear here with an audio chime as soon as the cashier
-                  confirms their payment.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {queue.map((reg, idx) => (
-                  <PhotographerQueueCard
-                    key={reg.id}
-                    registration={reg}
-                    index={idx}
-                    isShooting={reg.id === currentlyShootingId || reg.status === 'shooting'}
-                    onCallStudent={callStudent}
-                    onMarkDone={markDone}
-                    cameraName={camera.camera?.enabled ? camera.camera.name : ''}
-                    cameraLinked={linkedId === reg.id}
-                    onLinkCamera={camera.linkClient}
-                  />
-                ))}
-              </div>
+            ) : (!loadError || queue.length > 0) && (
+              <StationClientQueue
+                placeholderIcon={<Camera className="size-7 text-gold" aria-hidden="true" />}
+                empty={selected ? 'No other clients in the queue.' : 'The studio floor queue is clear.'}
+                selected={selected && <PhotographerQueueCard
+                  key={selected.id}
+                  registration={selected}
+                  selected
+                  busy={busy}
+                  onMarkDone={markDone}
+                  cameraName={station?.enabled ? station.name : ''}
+                />}
+                unselected={unselected.map((reg, index) => <PhotographerQueueCard
+                  key={reg.id}
+                  registration={reg}
+                  nextUp={index === 0}
+                  busy={busy}
+                  onSelect={selectClient}
+                  onMarkDone={markDone}
+                />)}
+              />
             )}
           </div>
         )}

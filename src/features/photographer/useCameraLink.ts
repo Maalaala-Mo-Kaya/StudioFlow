@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWorkflowData, workflowError } from '../../hooks/useWorkflowData';
 import { useToast } from '../../context/ToastContext';
 import { cameraAction, type CameraStatus } from '../camera/cameraApi';
@@ -21,11 +21,15 @@ export function useCameraLink() {
   const [selectedId, setSelectedId] = useState(savedStation);
   const [live, setLive] = useState<CameraStatus | null>(null);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const actionPending = useRef(false);
+  const actionVersion = useRef(0);
 
   const listed = stations?.find((station) => station.id === selectedId) ?? null;
   const camera = live?.id === selectedId ? live : listed;
 
   const select = useCallback((id: string) => {
+    if (actionPending.current) return;
     setSelectedId(id);
     setLive(null);
     setError('');
@@ -39,12 +43,18 @@ export function useCameraLink() {
   useEffect(() => {
     if (!selectedId || !enabled) return;
     let active = true;
+    let scanning = false;
     const tick = async () => {
+      if (actionPending.current || scanning) return;
+      scanning = true;
+      const version = actionVersion.current;
       try {
         const status = await cameraAction(selectedId, 'scan');
-        if (active) { setLive(status); setError(''); }
+        if (active && version === actionVersion.current) { setLive(status); setError(''); }
       } catch (err) {
-        if (active) setError(workflowError(err));
+        if (active && version === actionVersion.current) setError(workflowError(err));
+      } finally {
+        scanning = false;
       }
     };
     void tick();
@@ -53,14 +63,21 @@ export function useCameraLink() {
   }, [selectedId, enabled]);
 
   const run = useCallback(async (action: 'start' | 'end' | 'claim-waiting', registration?: string) => {
-    if (!selectedId) return false;
+    if (!selectedId || actionPending.current) return false;
+    actionPending.current = true;
+    actionVersion.current++;
+    setBusy(true);
     try {
       setLive(await cameraAction(selectedId, action, registration));
+      setError('');
       refresh();
       return true;
     } catch (err) {
       toast.error('Camera import: ' + workflowError(err));
       return false;
+    } finally {
+      actionPending.current = false;
+      setBusy(false);
     }
   }, [selectedId, refresh, toast]);
 
@@ -70,6 +87,7 @@ export function useCameraLink() {
     select,
     camera: listed ? camera : null,
     error,
+    busy,
     linkClient: (registrationId: string) => run('start', registrationId),
     unlinkClient: (registrationId?: string) => run('end', registrationId),
     claimWaiting: () => run('claim-waiting'),
