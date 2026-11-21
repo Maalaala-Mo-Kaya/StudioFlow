@@ -155,7 +155,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const studentId = 'WF-' + ++sequence;
     const form = new FormData();
     for (const [key, value] of Object.entries({
-      family_name: 'Dela Cruz', given_name: 'Juan Carlos', middle_name: 'D',
+      family_name: 'Dela Cruz', given_name: 'Juan Carlos', middle_name: 'D', gender: 'male', mobile_number: '09170000000',
       organization: school.id, level: level.id, course: course.id, package: pkg.id, student_id: studentId,
       terms_accepted: 'true', email: 'person@example.test', add_ons: JSON.stringify(addOns),
       status: 'shooting', paid_amount: '1000', makeup_look: 'full', ...fields,
@@ -809,7 +809,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   async function walkIn(fields, status = 200) {
     const form = new FormData();
     for (const [key, value] of Object.entries({
-      client_kind: 'walkin', family_name: 'Reyes', given_name: 'Family', email: 'family@example.test', mobile_number: '09170000000',
+      client_kind: 'walkin', family_name: 'Reyes', given_name: 'Family', gender: 'female', email: 'family@example.test', mobile_number: '09170000000',
       terms_accepted: 'true', add_ons: '[]', package: walkinPackage.id, session_type: family.id, ...fields,
     })) form.set(key, value);
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');

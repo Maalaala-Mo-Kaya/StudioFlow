@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Organization, Level, Course } from '../../../types';
-import { validationProps, type RegistrationErrors } from '../registrationValidation';
+import { genderOptions, validationProps, type RegistrationErrors } from '../registrationValidation';
 import { RegistrationFieldError } from './RegistrationFieldError';
 import { SearchableSelect } from '../../../components/common/SearchableSelect';
 
@@ -13,6 +13,8 @@ interface ClientInfoSectionProps {
   onGivenNameChange: (value: string) => void;
   middleName: string;
   onMiddleNameChange: (value: string) => void;
+  gender: string;
+  onGenderChange: (value: string) => void;
   studentId: string;
   onStudentIdChange: (value: string) => void;
   organizations: Organization[];
@@ -40,6 +42,8 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
   onGivenNameChange,
   middleName,
   onMiddleNameChange,
+  gender,
+  onGenderChange,
   studentId,
   onStudentIdChange,
   organizations,
@@ -115,6 +119,23 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
             className="w-full min-h-[48px] text-sm px-3.5 py-2.5 border border-neutral-400 focus:border-line bg-canvas focus:bg-panel uppercase font-bold transition"
           />
         </div>
+      </div>
+
+      <div className="mt-4 max-w-sm">
+        <label htmlFor="registration-gender" className="block text-[11px] font-black text-ink uppercase tracking-wider mb-1.5">
+          Gender <span className="text-red-600">*</span>
+        </label>
+        <select
+          {...validationProps('gender', errors.gender)}
+          required
+          value={gender}
+          onChange={(event) => onGenderChange(event.target.value)}
+          className={`w-full min-h-[48px] text-sm px-3.5 py-2.5 border border-neutral-400 focus:border-line bg-panel font-bold ${invalidBorder}`}
+        >
+          <option value="">Select gender</option>
+          {genderOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+        <RegistrationFieldError field="gender" errors={errors} />
       </div>
 
       {showSchool && (<>
