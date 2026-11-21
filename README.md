@@ -63,7 +63,7 @@ flowchart LR
 ### Prerequisites
 
 - **Operating System**: Windows 10 or 11
-- **Runtime**: [Node.js](https://nodejs.org/) v18+ (for initial build or dev server)
+- **Runtime**: [Node.js](https://nodejs.org/) 22.13+ on the Node 22 release line, or Node 24+ (for building and development)
 - **Database Engine**: `pocketbase.exe` (included in the repository root)
 
 ### 1-Click Launch (Recommended for Studio Staff)
@@ -214,11 +214,29 @@ All studio constants (studio name, tagline, hours, contact numbers, starting rec
 
 ## Available Scripts
 
+### Build from the Windows CLI
+
+From the StudioFlow project directory in PowerShell or Command Prompt, install the locked dependencies and run the build script:
+
+```text
+npm.cmd ci
+.\scripts\build.bat
+```
+
+Run `npm.cmd ci` on a fresh checkout or after the dependency lockfile changes. The build script runs type checking and writes the production build to `dist\`. It returns a nonzero exit code on failure.
+
+To build, deploy to PocketBase, and start the server on port 8090, run:
+
+```text
+.\run.bat --build
+```
+
 | Command | Description |
 | :--- | :--- |
 | `run.bat` | 1-Click launcher with auto-detected studio LAN IP |
 | `run.bat --build` | Builds frontend and serves unified app on port 8090 |
 | `npm run dev` | Starts local development server with hot-reload |
+| `scripts\build.bat` | Type-checks and builds the frontend into `dist\` |
 | `npm run build` | Bundles production-optimized static assets to `/dist` |
 | `npm run lint` | Runs ESLint type and code quality checks |
 | `npm run test:workflow` | Runs the isolated PocketBase integration suite with Node.js 22.13+ |

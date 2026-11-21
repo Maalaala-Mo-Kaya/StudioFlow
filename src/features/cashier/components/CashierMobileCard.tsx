@@ -4,17 +4,14 @@ import { PickupNoticeInfo } from './PickupNoticeInfo';
 import type { Registration } from '../../../types';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
 import { isReadyForRelease } from '../../../utils/releaseReadiness';
-import {
-  formatClientName,
-  formatCurrency,
-  formatJobOrderNo,
-  formatQueueNumber,
-} from '../../../utils/formatters';
+import { formatClientName, formatCurrency } from '../../../utils/formatters';
 import { clientDetail, clientGroup } from '../../../utils/clientInfo';
+import { DeleteRegistrationButton } from './DeleteRegistrationModal';
 
 interface CashierMobileCardProps {
   registration: Registration;
   onOpenPayment: (reg: Registration) => void;
+  onOpenDelete?: (reg: Registration) => void;
   onOpenPrint: (reg: Registration) => void;
   onOpenRelease: (reg: Registration) => void;
   /** Ready for Pickup tab: show the pickup notice and a Notify button. */
@@ -24,6 +21,7 @@ interface CashierMobileCardProps {
 export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
   registration: reg,
   onOpenPayment,
+  onOpenDelete,
   onOpenPrint,
   onOpenRelease,
   onOpenNotify,
@@ -31,14 +29,9 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
   return (
     <div className="bg-panel border-2 border-line p-4 shadow-lux space-y-3">
       <div className="flex items-center justify-between border-b border-neutral-200 pb-2.5">
-        <div className="flex items-center gap-2">
-          <span className="font-mono font-black text-xs bg-obsidian text-gold px-2 py-0.5">
-            {formatQueueNumber(reg.queue_number)}
-          </span>
-          <span className="font-mono font-black text-sm text-red-600">
-            {formatJobOrderNo(reg.job_order_no)}
-          </span>
-        </div>
+        <span className="font-mono font-black text-sm text-red-600">
+          {reg.job_order_no?.trim() || '—'}
+        </span>
         <RegistrationStatusBadge status={reg.status} />
       </div>
 
@@ -133,6 +126,7 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
           <Printer className="w-4 h-4" /> Stub
         </button>}
 
+        {onOpenDelete && <DeleteRegistrationButton onClick={() => onOpenDelete(reg)} />}
         {reg.balance === 0 && reg.revenue_discount && !['cancelled', 'released'].includes(reg.status) &&
           <button type="button" className="border border-line px-3 py-2 font-bold" onClick={() => onOpenPayment(reg)}>Edit discount</button>}
         {reg.status !== 'pending_payment' && reg.status !== 'released' && reg.status !== 'cancelled' && (

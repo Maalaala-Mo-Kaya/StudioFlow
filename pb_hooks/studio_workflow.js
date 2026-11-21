@@ -81,7 +81,9 @@ function withRegistration(app, id, work) {
   app.runInTransaction((tx) => {
     const match = tx.db().newQuery("UPDATE registrations SET id = id WHERE id = {:id}").bind({ id }).execute();
     if (match.rowsAffected() !== 1) throw new NotFoundError("Registration not found.");
-    result = work(tx, tx.findRecordById("registrations", id));
+    const registration = tx.findRecordById("registrations", id);
+    if (registration.getString("deleted_by_id")) throw new ApiError(409, "This registration has already been deleted.");
+    result = work(tx, registration);
   });
   return result;
 }

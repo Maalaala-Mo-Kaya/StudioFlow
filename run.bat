@@ -1,7 +1,12 @@
 @echo off
 title Highlight Server
 
+if "%~1"=="--dev" goto :dev
 if "%~1"=="--build" goto :build
+goto :server
+
+:dev
+call "%~dp0scripts\dev.bat"
 goto :server
 
 :build

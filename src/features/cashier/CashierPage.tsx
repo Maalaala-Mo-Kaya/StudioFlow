@@ -7,10 +7,12 @@ import { PaymentModal } from './components/PaymentModal';
 import { PrintReceiptModal } from './components/PrintReceiptModal';
 import { ReleaseDeliverableModal } from './components/ReleaseDeliverableModal';
 import { NotifyPickupModal } from './components/NotifyPickupModal';
+import { DeleteRegistrationModal } from './components/DeleteRegistrationModal';
 import { useStudioSettings } from '../../hooks/useStudioSettings';
 
 export const CashierPage: React.FC = () => {
   const cashier = useCashierState();
+  const { deleteReg } = cashier;
   const { pickupMessage } = useStudioSettings();
 
   return (
@@ -53,11 +55,21 @@ export const CashierPage: React.FC = () => {
         loading={cashier.loading}
         filtered={Boolean(cashier.searchQuery.trim()) || cashier.registrations.length > 0}
         onOpenPayment={cashier.openPaymentModal}
+        onOpenDelete={cashier.activeTab === 'pending' ? cashier.openDeleteModal : undefined}
+        deletableIds={cashier.deletableIds}
         onOpenPrint={(reg) => cashier.openPrintModal(reg)}
         onOpenRelease={cashier.openReleaseModal}
         pickupMode={cashier.activeTab === 'ready'}
         onOpenNotify={cashier.openNotifyModal}
       />
+
+      {deleteReg && (
+        <DeleteRegistrationModal
+          registration={deleteReg}
+          onClose={cashier.closeDeleteModal}
+          onDelete={(reason) => cashier.deleteRegistration(deleteReg, reason)}
+        />
+      )}
 
       {/* PAYMENT COLLECTION MODAL */}
       {cashier.selectedReg && (

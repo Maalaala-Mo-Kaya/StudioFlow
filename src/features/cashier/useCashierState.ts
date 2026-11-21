@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -45,6 +46,9 @@ export function useCashierState() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [deletableIds, setDeletableIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [deleteReg, setDeleteReg] = useState<Registration | null>(null);
+  const fetchGeneration = useRef(0);
   const [collectedTodayCentavos, setCollectedTodayCentavos] = useState(0);
   const [paymentsToday, setPaymentsToday] = useState(0);
   const [refundsToday, setRefundsToday] = useState(0);
@@ -92,10 +96,11 @@ export function useCashierState() {
   // Release Modal State
   const [releaseReg, setReleaseReg] = useState<Registration | null>(null);
 
-  const fetchRegistrations = useCallback(async () => {
+  const fetchRegistrations = useCallback(async (background = false) => {
+    const generation = ++fetchGeneration.current;
     try {
-      setLoading(true);
-      const [records, todaysPayments, todaysRefunds, lastPayment] = await Promise.all([
+      if (!background) setLoading(true);
+      const [records, todaysPayments, todaysRefunds, lastPayment, eligibleIds] = await Promise.all([
         pb.collection('registrations').getFullList<Registration>({
           sort: '-created',
           expand: 'organization,level,course,package,session_type',
@@ -120,8 +125,11 @@ export function useCashierState() {
           fields: 'created',
           requestKey: null,
         }),
+        pb.send<string[]>('/api/studioflow/deletable-registrations', { requestKey: null, cache: 'no-store' }).catch(() => []),
       ]);
+      if (generation !== fetchGeneration.current) return;
       setRegistrations(records);
+      setDeletableIds(new Set(Array.isArray(eligibleIds) ? eligibleIds : []));
       const refundedToday = todaysRefunds.reduce((sum, refund) => sum + toCentavos(refund.amount), 0);
       setCollectedTodayCentavos(todaysPayments.reduce((sum, payment) => sum + toCentavos(payment.amount), 0) - refundedToday);
       setRefundedTodayCentavos(refundedToday);
@@ -132,7 +140,7 @@ export function useCashierState() {
       if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
       console.error('Failed to fetch registrations:', err);
     } finally {
-      setLoading(false);
+      if (generation === fetchGeneration.current) setLoading(false);
     }
   }, []);
 
@@ -142,11 +150,37 @@ export function useCashierState() {
     pb.collection('registrations').subscribe('*', () => {
       fetchRegistrations();
     });
+    const refreshDeleted = () => void fetchRegistrations(true);
+    void pb.realtime.subscribe('studioflow-registration-deleted', refreshDeleted).catch(console.error);
 
     return () => {
       pb.collection('registrations').unsubscribe('*');
+      void pb.realtime.unsubscribeByTopicAndListener('studioflow-registration-deleted', refreshDeleted).catch(console.error);
     };
   }, [fetchRegistrations]);
+
+  const deleteRegistration = async (reg: Registration, reason: string) => {
+    try {
+      await pb.send(`/api/studioflow/registrations/${reg.id}/delete`, { method: 'POST', body: { reason }, requestKey: null });
+      setRegistrations((current) => current.filter((item) => item.id !== reg.id));
+      setDeleteReg(null);
+      toast.success('Registration deleted.');
+    } catch (error) {
+      if (error instanceof ClientResponseError) {
+        if (error.status === 409 || error.status === 404) {
+          setDeleteReg(null);
+          toast.error(error.response.message || 'This registration is no longer available.');
+          return;
+        }
+        if (error.status === 401 || error.status === 403) return 'Your account does not have permission to delete this registration.';
+        if (error.status === 400) return error.response.message || 'Check the deletion reason and try again.';
+        if (error.status >= 500) return 'The server could not delete the registration. Try again.';
+      }
+      return 'Deletion could not be confirmed. Check your connection and try again.';
+    } finally {
+      void fetchRegistrations(true);
+    }
+  };
 
   // At Manila midnight "Collected Today" starts over on its own, even if the screen was left open.
   // A sleeping PC can miss the timer, so the day is also checked when the window gets focus.
@@ -402,6 +436,11 @@ export function useCashierState() {
 
   return {
     registrations,
+    deletableIds,
+    deleteReg,
+    openDeleteModal: setDeleteReg,
+    closeDeleteModal: () => setDeleteReg(null),
+    deleteRegistration,
     filteredRegistrations,
     loading,
     activeTab,

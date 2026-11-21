@@ -1,14 +1,29 @@
 @echo off
+setlocal
 
-cd /d "%~dp0\.."
-
-echo Building...
-
-npm run build
-
-if %errorlevel% neq 0 (
-    echo Build failed.
-    pause
+where npm.cmd >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] npm is missing. Install a supported Node.js version and reopen your terminal.
     exit /b 1
 )
-echo Build complete.
+
+pushd "%~dp0.." || exit /b 1
+
+if not exist "node_modules\.bin\vite.cmd" (
+    echo [ERROR] Build dependencies are missing. Run npm ci in the StudioFlow project directory.
+    popd
+    exit /b 1
+)
+
+echo Building StudioFlow...
+call npm.cmd run build
+set "BUILD_RESULT=%ERRORLEVEL%"
+popd
+
+if not "%BUILD_RESULT%"=="0" (
+    echo [ERROR] Build failed with exit code %BUILD_RESULT%.
+    exit /b %BUILD_RESULT%
+)
+
+echo [OK] Build output: "%~dp0..\dist"
+exit /b 0

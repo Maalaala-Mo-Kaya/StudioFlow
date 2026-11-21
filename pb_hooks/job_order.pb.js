@@ -32,6 +32,7 @@ onRecordCreate((e) => {
       if (!regId) throw new BadRequestError("A job order is required.");
       tx.db().newQuery("UPDATE registrations SET id = id WHERE id = {:id}").bind({ id: regId }).execute();
       reg = tx.findRecordById("registrations", regId);
+      if (reg.getString("deleted_by_id")) throw new ApiError(409, "This registration was deleted and cannot accept payment.");
       if (reg.getString("status") === "cancelled") {
         throw new BadRequestError("This job order is cancelled. Restore it before collecting payment.");
       }

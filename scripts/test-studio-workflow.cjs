@@ -715,6 +715,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.equal(historical.rows[0].name, performer.username);
   assert.deepEqual(historical.columns.find((column) => column.id === bundleKey), { id: bundleKey, name: 'Premium Portrait' });
   assert.equal(historical.rows[0].details.find((detail) => detail.serviceId === bundleKey).sources[0].name, 'Premium Portrait');
+  const historicQueue = (await send(api + '/makeup-completed?date=2026-10-02', { token: admin })).payload;
+  assert.deepEqual(historicQueue.map((row) => [row.id, row.artistName, row.completedAt]),
+    [[multi.id, performer.username, '2026-10-01 16:00:00.000Z']]);
   assert.equal((await report()).rows.find((row) => row.id === performer.id).totalClients, 1);
   const afterDeactivation = await register(makeupPackage);
   assert.equal(afterDeactivation.makeup_service, '');
@@ -836,7 +839,10 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   execFileSync(executable, ['migrate', 'up', ...flags], options);
   assert.equal((await registrations(refundedAll)).payload.status, 'pending_payment', 'the repair sends it back to Pending Payment');
   const mistake = await register(standard);
-  await send(records('registrations', mistake.id), { token: admin, method: 'DELETE', status: 204 });
+  await send(records('registrations', mistake.id), { token: admin, method: 'DELETE', status: 409 });
+  await send(`${api}/registrations/${mistake.id}/delete`, {
+    token: admin, method: 'POST', body: { reason: 'Incorrect Form' }, status: 204,
+  });
 
   // Walk-in clients (family portraits, events outside the studio) next to school registrations.
   assert.equal((await registrations({ id: legacyId })).payload.client_kind, 'school', 'Existing job orders become school clients.');
@@ -1239,6 +1245,15 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await contest(included, defaultArtist, 'complete');
     const includedCompleted = (await registrations(included, cashier)).payload;
     assert.ok(includedCompleted.queue_number > 0, 'Default MUA confirmation hands off to photography.');
+    const completionDate = studioDate(includedCompleted.makeup_completed_at);
+    const completedPath = api + '/makeup-completed?date=' + completionDate;
+    const completedDefault = (await send(completedPath, { token: defaultArtist.token })).payload.find((row) => row.id === included.id);
+    assert.deepEqual([completedDefault.jobOrder, completedDefault.artistName, completedDefault.services[0].defaultService],
+      [includedCompleted.job_order_no, defaultArtist.username, true]);
+    assert.equal((await send(api + '/makeup?completed=0', { token: admin })).payload.some((row) => row.id === included.id), false);
+    assert.equal((await send(completedPath, { token: artists[1].token })).payload.some((row) => row.id === included.id), false);
+    await send(api + '/makeup-completed?date=2026-02-30', { token: admin, status: 400 });
+    await send(completedPath, { token: cashier, status: 403 });
     assert.deepEqual(orderExtras(includedPaid), [['Wardrobe (MUA)', 50]]);
     assert.equal(wardrobePayment.balance_before, 1550);
     assert.deepEqual((await auditFor(included)).totals.revenue, { studio: 1500, mua: 50, unallocated: 0 });
@@ -1413,6 +1428,10 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal((await getTeam(child)).manage, false);
     assert.ok((await queue(parent)).some((row) => row.id === mixed.id && row.state === 'waiting'));
     assert.ok(!(await queue(child)).some((row) => row.id === mixed.id));
+    const detailPath = `${api}/makeup/${mixed.id}/details`;
+    const waitingDetail = (await send(detailPath, { token: parent.token })).payload;
+    assert.deepEqual([waitingDetail.details.school, waitingDetail.details.level, waitingDetail.details.paymentConfirmed], ['Workflow Academy', 'College', true]);
+    await send(detailPath, { token: child.token, status: 404 });
     await contest(mixed, child, 'claim', 403);
     await contest(mixed, child, 'assign', 403, { artistId: replacement.id });
     await contest(mixed, parent, 'assign', 403, { artistId: parent.id });
@@ -1446,6 +1465,16 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal(history[2].previous_artist_id, firstArtist.id);
     assert.equal(history[2].actor_id, parent.id);
     assert.equal(history[4].artist_id, nextArtist.id);
+    const assignedHistory = (await send(detailPath, { token: parent.token })).payload.history;
+    assert.deepEqual(assignedHistory.map((event) => event.action), ['complete', 'start', 'reassign', 'start', 'assign']);
+    const personalHistory = (await send(detailPath, { token: nextArtist.token })).payload.history;
+    assert.deepEqual(personalHistory.map((event) => event.action), ['complete', 'start', 'reassign']);
+    await send(detailPath, { token: firstArtist.token, status: 404 });
+    const mixedCompletionDate = studioDate((await registrations(mixed)).payload.makeup_completed_at);
+    const mixedCompletions = (await send(api + '/makeup-completed?date=' + mixedCompletionDate, { token: nextArtist.token }))
+      .payload.filter((row) => row.id === mixed.id);
+    assert.equal(mixedCompletions.length, 1, 'A completion with multiple service lines occupies one row');
+    assert.deepEqual(mixedCompletions[0].services.map((service) => service.name).sort(), ['Grooming session', 'Makeup session']);
     await setTeam(admin, parent.id, true);
     await contest(muaOnly, parent, 'assign', 200, { artistId: parent.id });
     await setTeam(admin, parent.id, false);
@@ -1535,6 +1564,10 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
 
     // A second round mid-shoot credits only the new service.
     const secondRound = await edit(midShoot, { add_ons: [{ id: lateMakeup.id }, { id: lateGrooming.id }] });
+    const priorCompletion = (await send(api + '/makeup-completed?date=' + studioDate(Date.now()), { token: admin })).payload
+      .find((row) => row.id === midShoot.id);
+    assert.deepEqual(priorCompletion.services.map((service) => service.name), ['Late makeup'],
+      'Earlier work stays in completed services when the client returns for another service');
     assert.deepEqual([secondRound.status, secondRound.makeup_state, secondRound.makeup_service],
       ['paid', '', 'Late makeup + Late grooming']);
     await doMakeup(midShoot);
@@ -1628,4 +1661,136 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.ok(Number(finalJob) > Math.max(...numbers.map(Number)));
   const finalLeaf = finalJob + '_Dela_Cruz_Juan_Carlos';
   assert.deepEqual((await readdir(join(photos, 'WORKFLOW', 'MEDIA', finalLeaf))).sort(), [finalLeaf, 'Unselected'].sort());
+
+  await t.test('only eligible unpaid forms can be archived, with an audit trail', async () => {
+    const eligible = async () => (await send(api + '/deletable-registrations', { token: cashier })).payload;
+    const remove = (job, status, token = cashier, reason = 'Duplicate Registration') =>
+      send(`${api}/registrations/${job.id}/delete`, { method: 'POST', token, body: { reason }, status });
+    const filters = new URLSearchParams({ filter: "family_name = 'Deletion Test'" });
+    const list = async (token) => (await send(records('registrations') + '?' + filters, { token })).payload;
+    const name = { family_name: 'Deletion Test' };
+    const wrong = await register(prepared, [], 200, name);
+    const correct = await register(standard, [], 200, name);
+    const original = (await registrations(correct)).payload;
+    assert.deepEqual([wrong.job_order_no, wrong.queue_number], [null, null]);
+    const before = await eligible();
+    assert.ok(before.includes(wrong.id) && before.includes(correct.id));
+    assert.equal((await list(cashier)).totalItems, 2);
+    await remove(wrong, 400, cashier, ' ');
+    for (const token of [photographer, artists[0].token, chooser.token]) await remove(wrong, 403, token);
+    await remove(wrong, 401, '');
+    await registrations(wrong, admin, { deleted_by_id: 'forged' });
+    assert.ok((await eligible()).includes(wrong.id), 'Direct PATCH cannot set the hidden archive marker');
+
+    const notifications = new AbortController();
+    t.after(() => notifications.abort());
+    const readDeletion = readRealtime(await fetch(host + '/api/realtime', {
+      signal: AbortSignal.any([notifications.signal, AbortSignal.timeout(8000)]),
+    }));
+    const connection = await readDeletion('PB_CONNECT');
+    const topic = 'studioflow-registration-deleted';
+    await send('/api/realtime', { method: 'POST', token: admin, status: 204,
+      body: { clientId: connection.clientId, subscriptions: [topic] } });
+    const duplicate = await Promise.all([remove(wrong, null), remove(wrong, null, admin)]);
+    assert.deepEqual(duplicate.map(({ status }) => status).sort(), [204, 409]);
+    assert.deepEqual(await readDeletion(topic), {});
+    notifications.abort();
+    await remove(wrong, 409);
+    await registrations(wrong, admin, undefined, 404);
+    await registrations(wrong, admin, { family_name: 'Still deleted' }, 404);
+    await send(`${api}/registrations/${wrong.id}/restore`, { token: admin, method: 'POST', status: 409 });
+    assert.match((await pay(wrong, 1000, 'full', 409)).message, /deleted/);
+    for (const token of [admin, cashier]) {
+      const active = await list(token);
+      assert.equal(active.totalItems, 1);
+      assert.equal(active.items[0].id, correct.id);
+    }
+    assert.deepEqual((await registrations(correct)).payload, original);
+    const historyPath = api + '/registration-deletions';
+    await send(historyPath, { token: cashier, status: 403 });
+    const { items } = (await send(historyPath, { token: admin })).payload;
+    const entry = items.find((item) => item.id === wrong.id);
+    assert.equal(items.filter((item) => item.id === wrong.id).length, 1);
+    assert.deepEqual([entry.name, entry.reason, entry.previousStatus], [
+      'Juan Carlos D Deletion Test', 'Duplicate Registration', 'pending_payment',
+    ]);
+    const winnerToken = duplicate[0].status === 204 ? cashier : admin;
+    const winner = (await send('/api/collections/users/auth-refresh', { token: winnerToken, method: 'POST' })).payload.record;
+    assert.deepEqual([entry.deletedById, entry.deletedBy], [winner.id, winner.name || winner.username]);
+    assert.ok(Number.isFinite(Date.parse(entry.deletedAt.replace(' ', 'T'))));
+    const archiveDb = new DatabaseSync(migrationDb);
+    try {
+      const archived = archiveDb.prepare('SELECT status, package, signature FROM registrations WHERE id = ?').get(wrong.id);
+      assert.deepEqual([archived.status, archived.package], ['cancelled', prepared.id]);
+      assert.ok(archived.signature);
+    } finally { archiveDb.close(); }
+    const { rows } = (await send(api + '/student-excel', { token: admin })).payload;
+    assert.deepEqual(rows.filter((row) => row.name.startsWith('Deletion Test,')).map((row) => row.packageId), [standard.id]);
+    assert.ok(!(await eligible()).includes(wrong.id));
+    await pay(correct, original.balance);
+    const paid = (await registrations(correct)).payload;
+    assert.ok(paid.job_order_no);
+    assert.ok(paid.queue_number);
+    await remove(correct, 409);
+
+    const partial = await register(standard);
+    await pay(partial, 500, 'initial');
+    await remove(partial, 409);
+    const classified = await create('packages', {
+      code: 'DELETE-CREDIT', name: 'Deletion Credit Test', amount: 1000, is_active: true, revenue_category: 'studio',
+    });
+    const complimentary = await register(classified);
+    await send(`${api}/registrations/${complimentary.id}/discount`, {
+      method: 'POST', token: cashier, body: { percentage: 100, reason: 'Complimentary settlement' },
+    });
+    await remove(complimentary, 409);
+    const discounted = await register(classified);
+    for (const percentage of [20, 0]) {
+      await send(`${api}/registrations/${discounted.id}/discount`, {
+        method: 'POST', token: cashier, body: { percentage, reason: 'Discount correction' },
+      });
+    }
+    assert.equal((await registrations(discounted)).payload.job_order_no, null);
+    assert.ok(!(await eligible()).includes(discounted.id));
+    await remove(discounted, 409);
+
+    // Model inconsistent imports where station or ledger history survived without identifiers.
+    const [jobOnly, queueOnly, assigned, photographed, creditOnly, voided] =
+      await Promise.all(Array.from({ length: 6 }, () => register(standard)));
+    const voidedReceipt = await pay(voided, 1000);
+    await send(`${api}/payments/${voidedReceipt.id}/void`, {
+      token: admin, method: 'POST', body: { reason: 'Receipt recorded by mistake' },
+    });
+    const inconsistent = new DatabaseSync(migrationDb);
+    try {
+      inconsistent.prepare("UPDATE registrations SET job_order_no = '99998' WHERE id = ?").run(jobOnly.id);
+      inconsistent.prepare('UPDATE registrations SET queue_number = 777 WHERE id = ?').run(queueOnly.id);
+      inconsistent.prepare("UPDATE registrations SET makeup_state = 'claimed', makeup_artist = ? WHERE id = ?").run(artists[0].id, assigned.id);
+      inconsistent.prepare("UPDATE registrations SET photo_status = 'shot_raw' WHERE id = ?").run(photographed.id);
+      inconsistent.prepare("UPDATE registrations SET revenue_discount = '{\"studio\":100}' WHERE id = ?").run(creditOnly.id);
+      inconsistent.prepare(`UPDATE registrations SET job_order_no = '', queue_number = 0, queue_issued_at = '',
+        status = 'pending_payment', photo_folder = '', photo_folder_key = '', prepared_by = '' WHERE id = ?`).run(voided.id);
+    } finally { inconsistent.close(); }
+    const currentlyEligible = await eligible();
+    for (const protectedJob of [jobOnly, queueOnly, assigned, photographed, creditOnly, voided]) {
+      assert.ok(!currentlyEligible.includes(protectedJob.id));
+      await remove(protectedJob, 409);
+    }
+    assert.equal((await send(records('payments', voidedReceipt.id), { token: admin })).payload.status, 'voided');
+
+    const race = await register(standard);
+    assert.ok((await eligible()).includes(race.id));
+    const [deletion, payment] = await Promise.all([
+      remove(race, null),
+      send(records('payments'), { method: 'POST', token: cashier, status: null, body: {
+        registration: race.id, amount: race.balance, payment_type: 'full',
+        payment_method: 'cash', cash_tendered: race.balance,
+      } }),
+    ]);
+    assert.ok((deletion.status === 204 && payment.status === 409) || (deletion.status === 409 && payment.status === 200));
+    const ledgerFilter = new URLSearchParams({ filter: `registration = '${race.id}'` });
+    const ledger = (await send(records('payments') + '?' + ledgerFilter, { token: cashier })).payload;
+    assert.equal(ledger.totalItems, payment.status === 200 ? 1 : 0);
+    await registrations(race, admin, undefined, deletion.status === 204 ? 404 : 200);
+  });
 });

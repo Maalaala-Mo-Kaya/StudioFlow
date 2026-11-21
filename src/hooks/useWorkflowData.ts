@@ -7,7 +7,7 @@ export function workflowError(error: unknown) {
   return error instanceof Error ? error.message : 'The station could not complete the request.';
 }
 
-export function useWorkflowData<T>(path: string, interval = 8_000) {
+export function useWorkflowData<T>(path: string, interval = 8_000, keepPreviousData = false) {
   const [result, setResult] = useState<{ path: string; data?: T; error?: string }>();
   const refreshRef = useRef<() => void>(() => {});
   const refresh = useCallback(() => refreshRef.current(), []);
@@ -24,7 +24,9 @@ export function useWorkflowData<T>(path: string, interval = 8_000) {
         if (live && request === generation) setResult({ path, data });
       } catch (error) {
         if (live && request === generation) {
-          setResult((current) => ({ path, data: current?.path === path ? current.data : undefined, error: workflowError(error) }));
+          setResult((current) => ({
+            path, data: current?.path === path || keepPreviousData ? current?.data : undefined, error: workflowError(error),
+          }));
         }
       }
     };
@@ -46,7 +48,11 @@ export function useWorkflowData<T>(path: string, interval = 8_000) {
       window.removeEventListener('focus', refresh);
       void stop?.().catch(console.error);
     };
-  }, [path, interval, refresh]);
+  }, [path, interval, keepPreviousData, refresh]);
 
-  return { data: result?.path === path ? result.data : undefined, error: result?.path === path ? result.error : undefined, refresh };
+  return {
+    data: result?.path === path || keepPreviousData ? result?.data : undefined,
+    error: result?.path === path ? result.error : undefined,
+    refresh,
+  };
 }

@@ -45,6 +45,8 @@ type DataTableProps<Row, Id extends string> = {
   footer?: (visibleColumns: readonly DataTableColumn<Row, Id>[]) => ReactNode;
   onRowClick?: (row: Row) => void;
   renderExpanded?: (row: Row) => ReactNode;
+  /** Place the detail toggle in a specific visible column and display a text label. */
+  detailsColumnId?: Id;
   renderCompactRow?: (row: Row) => ReactNode;
   rowClassName?: (row: Row) => string;
   className?: string;
@@ -72,7 +74,7 @@ export function DataTable<Row, Id extends string = string>({
   label, rows, columns, getRowId, visibleColumnIds, defaultSort = null, sorting, pagination,
   mode = 'client', totalItems, loading = false, loadingMessage = 'Loading records…',
   emptyMessage = 'No records available.', filteredEmptyMessage = 'No records match the selected filters.',
-  filtered = false, toolbar, footer, onRowClick, renderExpanded, renderCompactRow,
+  filtered = false, toolbar, footer, onRowClick, renderExpanded, detailsColumnId, renderCompactRow,
   rowClassName, className = '', viewportClassName = '', tableClassName = '', headerClassName = '',
 }: DataTableProps<Row, Id>) {
   const id = useId();
@@ -91,6 +93,7 @@ export function DataTable<Row, Id extends string = string>({
   const activeColumn = columns.find((column) => column.id === sort?.column && column.sortable);
   const visible = columns.filter((column) => column.visible !== false
     && (!visibleColumnIds || visibleColumnIds.includes(column.id)));
+  const detailsColumn = visible.find((column) => column.id === detailsColumnId) ?? visible[0];
   const ordered = useMemo(() => mode === 'server' ? rows : sortTableRows(rows, activeColumn, sort),
     [rows, activeColumn, sort, mode]);
   const paged = useMemo(() => mode === 'server' || pagination === false
@@ -174,17 +177,21 @@ export function DataTable<Row, Id extends string = string>({
                 <Fragment key={key}>
                   <tr className={`${interactive ? 'cursor-pointer' : ''} ${rowClassName?.(row) ?? 'hover:bg-canvas'}`}
                     onClick={interactive ? (event) => { if (!clickedControl(event)) activateRow(row, key); } : undefined}>
-                    {visible.map((column, index) => (
+                    {visible.map((column) => (
                       <td key={column.id} className={`border-b border-neutral-200 px-3 py-2 ${alignment[column.align ?? 'left']} ${column.cellClassName ?? ''}`}>
-                        {index === 0 && interactive && (
-                          <button type="button" aria-label={renderExpanded ? (isOpen ? 'Collapse row' : 'Expand row') : 'Open row'}
+                        {column === detailsColumn && interactive && (
+                          <button type="button" aria-label={detailsColumnId ? (isOpen ? 'Hide details' : 'View details')
+                            : renderExpanded ? (isOpen ? 'Collapse row' : 'Expand row') : 'Open row'}
                             aria-expanded={renderExpanded ? isOpen : undefined}
                             aria-controls={isOpen ? detailId : undefined}
                             onClick={(event) => {
                               event.stopPropagation();
                               activateRow(row, key);
-                            }} className="mr-1 inline-flex align-middle focus-visible:outline-2">
+                            }} className={detailsColumnId
+                              ? 'inline-flex min-h-9 items-center gap-1 whitespace-nowrap font-bold text-gold-soft focus-visible:outline-2'
+                              : 'mr-1 inline-flex align-middle focus-visible:outline-2'}>
                             <Chevron className="size-3" aria-hidden="true" />
+                            {detailsColumnId && (isOpen ? 'Hide details' : 'View details')}
                           </button>
                         )}
                         {column.cell ? column.cell(row) : displayValue(column.accessor?.(row))}
@@ -193,7 +200,7 @@ export function DataTable<Row, Id extends string = string>({
                   </tr>
                   {isOpen && renderExpanded && (
                     <tr id={detailId}><td colSpan={visible.length} className="border-y-2 border-gold bg-canvas p-3">
-                      <div className="max-w-[calc(100cqw-1.5rem)]">{renderExpanded(row)}</div>
+                      <div className={`max-w-[calc(100cqw-1.5rem)] ${detailsColumnId ? 'sticky left-3' : ''}`}>{renderExpanded(row)}</div>
                     </td></tr>
                   )}
                 </Fragment>

@@ -43,7 +43,7 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
     const sessions = new Map(tx.findAllRecords("session_types").map((record) =>
       [record.id, record.getString("code") || record.getString("name")]));
 
-    registrations = tx.findRecordsByFilter("registrations", "", "job_order_no,id", 0, 0).map((record) => {
+    registrations = tx.findRecordsByFilter("registrations", "deleted_by_id = ''", "job_order_no,id", 0, 0).map((record) => {
       // Walk-ins get their own sheet; their "course" column shows the session type.
       const walkin = record.getString("client_kind") === "walkin";
       // A student whose level is missing still appears (under OTHER), so totals are never short.

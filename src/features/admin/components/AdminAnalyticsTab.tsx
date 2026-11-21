@@ -24,6 +24,7 @@ import { MuaPerformancePanel } from './MuaPerformancePanel';
 import { clientGroup, clientSummary } from '../../../utils/clientInfo';
 import { overviewMetrics, type OverviewMetrics } from '../overviewMetrics';
 import { buildAudit, isCountedPayment, type AuditGroup } from '../auditData';
+import { RegistrationDeletionHistory } from './RegistrationDeletionHistory';
 import { allocateRevenue, discountCents, revenuePesos, revenueTerms } from '../../../utils/revenue';
 import { studioDayStartUtc, studioMonthStartUtc } from '../../../utils/studioDay';
 
@@ -466,6 +467,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           <span>{exportingAudit ? 'Preparing…' : `Audit Export (${PERIOD_LABELS[period]})`}</span>
         </button>
       </div>
+
+      <RegistrationDeletionHistory />
 
       {/* Split Grid: School Performance & Package Performance */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
