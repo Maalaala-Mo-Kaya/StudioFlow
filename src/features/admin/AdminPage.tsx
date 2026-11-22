@@ -49,6 +49,8 @@ export const AdminPage: React.FC = () => {
               organizations={admin.organizations}
               registrations={admin.registrations}
               packages={admin.packages}
+              addOns={admin.addOns}
+              onOpenCatalog={() => admin.setActiveTab('packages')}
               payments={admin.payments}
               refunds={admin.refunds}
               onVoidPayment={admin.handleVoidPayment}

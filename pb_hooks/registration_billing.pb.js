@@ -202,6 +202,13 @@ const checkCatalogPrice = (e) => {
       throw new BadRequestError(`Code ${code} is already used by another ${table === "packages" ? "package" : "add-on"}.`);
     }
   }
+  // Where its money goes. Without it, a sale's cash can't be counted as Studio or MUA revenue
+  // (it stays unallocated even when the order is fully paid). Older records saved before the field
+  // existed must be given one on their next save.
+  // (A single item's linked add-on is always Studio; studio_catalog.pb.js refuses saving it directly with its own message.)
+  if (!e.record.getString("catalog_item") && !["studio", "mua"].includes(e.record.getString("revenue_category"))) {
+    throw new BadRequestError(`Choose where this ${table === "packages" ? "package" : "add-on"}'s money goes: Studio revenue or Other Payment — MUA.`);
+  }
   return e.next();
 };
 onRecordCreateRequest((e) => {

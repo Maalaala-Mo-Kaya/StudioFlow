@@ -10,8 +10,8 @@ import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { Modal } from '../../../components/common/Modal';
 import { useToast } from '../../../context/ToastContext';
 import type { PackageBuilderData, PackageKind } from '../useAdminData';
-import { PACKAGE_KIND_LABELS, addOnKind, revenueLabels } from '../packageLabels';
-import { DefaultAddOnInput, MuaRequirementBadge, MuaRequirementInput, PackageKindInput, RevenueInput } from './PackageFormInputs';
+import { PACKAGE_KIND_LABELS, addOnKind } from '../packageLabels';
+import { DefaultAddOnInput, MuaRequirementBadge, MuaRequirementInput, PackageKindInput, RevenueBadge, RevenueInput } from './PackageFormInputs';
 import { PackageBuilder } from './PackageBuilder';
 import { ItemPackagesPanel } from './ItemPackagesPanel';
 import { CatalogItemsPanel } from './CatalogItemsPanel';
@@ -270,7 +270,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     <div className="flex flex-wrap gap-1">
                       <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[(pkg.client_kind || 'school') as PackageKind]}</span>
                       <MuaRequirementBadge required={pkg.requires_mua} revenue={pkg.revenue_category} />
-                      <span className="text-[10px] font-bold uppercase">{revenueLabels[pkg.revenue_category || '']}</span>
+                      <RevenueBadge value={pkg.revenue_category} />
                       {!pkg.structure && <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-amber-500 text-amber-800">Not built yet: open to build</span>}
                     </div>
                     <InclusionTreeView inclusions={parseInclusionTree(pkg.inclusions)} variant="compact" />
@@ -410,7 +410,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     <div className="mt-1 flex flex-wrap gap-1">
                       <MuaRequirementBadge required={add.requires_mua} revenue={add.revenue_category} />
                       {add.default_when_no_mua && <span className="border border-gold bg-gold-wash px-2 py-0.5 text-[10px] font-bold uppercase text-gold-soft">Default service — confirmation required</span>}
-                      <span className="text-[10px] font-bold uppercase">{revenueLabels[add.revenue_category || '']}</span>
+                      <RevenueBadge value={add.revenue_category} />
                       <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[addOnKind(add)]}</span>
                     </div>
                   </div>

@@ -354,7 +354,7 @@ test('save: imported packages and add-ons reach the database and the kiosk', asy
         { title: 'Colored toga w/out cap', items: ['1 pc - 8R', '2 pcs - wallet size'] },
         { title: '', items: [] }] },
     ];
-    const pkg = await pb.collection('packages').create({ code: 'PKG-TREE', name: 'Tree Package', amount: 2595, is_active: true,
+    const pkg = await pb.collection('packages').create({ code: 'PKG-TREE', name: 'Tree Package', amount: 2595, is_active: true, revenue_category: 'studio',
       photo_selection_limit: 2, inclusions: tree });
     // Converted: the frame, the print set (its 3 prints counted), unlimited shots, then the other item.
     const cleaned = [{ title: 'Frame and Prints', items: ['With 10x12 free frame', '3 pcs hard printout copy',
@@ -367,7 +367,7 @@ test('save: imported packages and add-ons reach the database and the kiosk', asy
     const untitled = await fail(pb.collection('packages').update(pkg.id, { inclusions: [{ title: ' ', items: ['x'] }] }));
     assert.match(untitled.message, /title/);
     // The admin screen's older format (a JSON-encoded list of text) still saves as a list.
-    const old = await pb.collection('packages').create({ code: 'PKG-OLDLIST', name: 'Old list', amount: 100, is_active: true,
+    const old = await pb.collection('packages').create({ code: 'PKG-OLDLIST', name: 'Old list', amount: 100, is_active: true, revenue_category: 'studio',
       inclusions: JSON.stringify(['8x10 frame', 'Soft copies']) });
     assert.deepEqual(old.inclusions, [{ title: 'Frame and Prints', items: ['With 8x10 frame'] }, 'Soft copies']);
 
@@ -395,7 +395,7 @@ test('save: imported packages and add-ons reach the database and the kiosk', asy
 
   await t.test('exchange options: keep the included one or swap it; what each choice comes with', async () => {
     const fail = (promise) => promise.then(() => assert.fail('expected the server to refuse'), (err) => err.response);
-    const pkg = await pb.collection('packages').create({ code: 'PKG-SWAP', name: 'Swap Package', amount: 2995, is_active: true,
+    const pkg = await pb.collection('packages').create({ code: 'PKG-SWAP', name: 'Swap Package', amount: 2995, is_active: true, revenue_category: 'studio',
       inclusions: ['Toga w/out cap', { title: 'Colored toga w/out cap', items: ['1 pc - 8R', '2 pcs - wallet size'] }],
       option_groups: [{ name: 'Attire', pick: 1, replaces: ' Colored toga w/out cap ', choices: [
         { id: 'keep', label: 'Filipiniana', for: 'female', items: '1 pc - 3R; 2 pcs - wallet size' },
@@ -779,13 +779,13 @@ test('save: imported packages and add-ons reach the database and the kiosk', asy
       { label: 'Coat and tie or Barong', for: 'male' }, { label: '   ' },
     ] };
     const backdrop = { name: 'Backdrop', pick: 2, choices: [{ label: 'Gold' }, { label: 'Pink', for: 'female' }] };
-    const pkg = await pb.collection('packages').create({ code: 'PKG-OPTIONS', name: 'Options Package', amount: 2995, is_active: true,
+    const pkg = await pb.collection('packages').create({ code: 'PKG-OPTIONS', name: 'Options Package', amount: 2995, is_active: true, revenue_category: 'studio',
       option_groups: [attire, backdrop] });
     assert.deepEqual(pkg.option_groups.map((g) => [g.name, g.pick, g.choices.map((c) => [c.label, c.for, !!c.id])]), [
       ['Attire', 1, [['Toga w/ cap', 'all', true], ['Filipiniana', 'female', true], ['Glamour shots', 'female', true], ['Coat and tie or Barong', 'male', true]]],
       ['Backdrop', 2, [['Gold', 'all', true], ['Pink', 'female', true]]],
     ]);
-    const tooMany = await fail(pb.collection('packages').create({ code: 'PKG-BAD-OPT', name: 'Bad', amount: 1, is_active: true,
+    const tooMany = await fail(pb.collection('packages').create({ code: 'PKG-BAD-OPT', name: 'Bad', amount: 1, is_active: true, revenue_category: 'studio',
       option_groups: [{ name: 'Attire', pick: 3, choices: [{ label: 'A' }, { label: 'B' }] }] }));
     assert.match(tooMany.message, /choose from 1 to 2/);
 
@@ -824,7 +824,7 @@ test('save: imported packages and add-ons reach the database and the kiosk', asy
 
     // A new package needs its options picked with it; a package without options clears them.
     const basic = await pb.collection('packages').getFirstListItem('code = "PKG-BASIC"');
-    const plain = await pb.collection('packages').create({ code: 'PKG-PLAIN', name: 'Plain', amount: 500, is_active: true });
+    const plain = await pb.collection('packages').create({ code: 'PKG-PLAIN', name: 'Plain', amount: 500, is_active: true, revenue_category: 'studio' });
     const switched = await pb.collection('registrations').update(man.id, { package: plain.id });
     assert.deepEqual(switched.package_options, []);
     const needsPicks = await fail(pb.collection('registrations').update(man.id, { package: pkg.id }));
@@ -905,7 +905,7 @@ test('backup: an exported price list (Excel, CSV or Word) restores the catalog i
   };
   await source.collection('packages').create({ code: 'STD-B', name: 'Standard Package B', amount: 2595, is_active: true, client_kind: 'school',
     revenue_category: 'studio', photo_selection_limit: 2, tagline: 'with 10x12 CLASSIC frame', structure });
-  await source.collection('packages').create({ code: 'OLD-TEXT', name: 'Old text package', amount: 999, is_active: false,
+  await source.collection('packages').create({ code: 'OLD-TEXT', name: 'Old text package', amount: 999, is_active: false, revenue_category: 'studio',
     inclusions: ['Soft copies', 'Toga'], freebies: ['Free raw copies'] });
   await source.collection('add_ons').create({ code: 'MUA', name: 'Hair and makeup', amount: 500, revenue_category: 'mua', requires_mua: true, is_active: true });
 

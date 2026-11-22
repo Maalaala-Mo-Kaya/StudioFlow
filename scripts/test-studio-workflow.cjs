@@ -165,7 +165,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const course = { id: assignment.payload.course_id };
   const standard = await create('packages', {
     code: 'STD', name: 'Package E', inclusions: JSON.stringify(['Makeup and grooming']),
-    amount: 1000, is_active: true, requires_mua: false,
+    amount: 1000, is_active: true, revenue_category: 'studio', requires_mua: false,
   });
   const prepared = await create('packages', {
     code: 'PKG-D', name: 'Package D', amount: 1000, is_active: true, photo_selection_limit: 2, requires_mua: true, revenue_category: 'mua',
@@ -250,16 +250,19 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.match(duplicate.payload.message, /Code leg is already used by another package/);
   const renamed = await send(records('packages', 'legacypkg00002'), { token: admin, method: 'PATCH', status: 400, body: { code: 'Leg-3' } });
   assert.match(renamed.payload.message, /already used/);
-  const trimmed = await create('add_ons', { code: '  UNIQUE-TRIM  ', name: 'Trimmed', amount: 10, is_active: true });
+  const untyped = await send(records('add_ons'), { token: admin, method: 'POST', status: 400, body: { code: 'NO-TYPE', name: 'No type', amount: 10, is_active: true } });
+  assert.match(untyped.payload.message, /money goes: Studio revenue or Other Payment — MUA/);
+  await send(records('packages'), { token: admin, method: 'POST', status: 400, body: { code: 'NO-TYPE', name: 'No type', amount: 10, is_active: true, revenue_category: 'other' } });
+  const trimmed = await create('add_ons', { code: '  UNIQUE-TRIM  ', name: 'Trimmed', amount: 10, is_active: true, revenue_category: 'studio' });
   assert.equal(trimmed.code, 'UNIQUE-TRIM');
   await send(records('add_ons'), { token: admin, method: 'POST', status: 400, body: { code: 'unique-trim', name: 'Dup', amount: 10 } });
-  const noCode = await create('add_ons', { code: '', name: 'Another without a code', amount: 10, is_active: true });
+  const noCode = await create('add_ons', { code: '', name: 'Another without a code', amount: 10, is_active: true, revenue_category: 'studio' });
   for (const id of ['legacyadd00001', 'legacyadd00002', 'legacyadd00003', trimmed.id, noCode.id]) {
     await send(records('add_ons', id), { token: admin, method: 'DELETE', status: 204 });
   }
   // Two saves racing with one new code: exactly one wins (the unique index backs up the hook).
   const codeRace = await Promise.all([1, 2].map((n) => send(records('packages'), { token: admin, method: 'POST', status: 0,
-    body: { code: 'RACE-CODE', name: 'Race ' + n, amount: 100, is_active: true } })));
+    body: { code: 'RACE-CODE', name: 'Race ' + n, amount: 100, is_active: true, revenue_category: 'studio' } })));
   assert.deepEqual(codeRace.map((r) => r.status).sort(), [200, 400]);
   for (const id of ['legacypkg00002', 'legacypkg00003']) await send(records('packages', id), { token: admin, method: 'DELETE', status: 204 });
   await send(records('packages', codeRace.find((r) => r.status === 200).payload.id), { token: admin, method: 'DELETE', status: 204 });
@@ -312,9 +315,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await patchCatalog('packages', prepared, { inclusions: JSON.stringify([]), photo_selection_limit: 2 });
   // A package or add-on that orders use can't be deleted (deactivate it instead); unused ones can.
   await send(records('packages', prepared.id), { token: admin, method: 'DELETE', status: 409 });
-  const unusedPackage = await create('packages', { code: 'TMP', name: 'Unused', amount: 0, is_active: true });
+  const unusedPackage = await create('packages', { code: 'TMP', name: 'Unused', amount: 0, is_active: true, revenue_category: 'studio' });
   await send(records('packages', unusedPackage.id), { token: admin, method: 'DELETE', status: 204 });
-  const unusedAddOn = await create('add_ons', { code: 'TMP-ADD', name: 'Unused add-on', amount: 0, is_active: true });
+  const unusedAddOn = await create('add_ons', { code: 'TMP-ADD', name: 'Unused add-on', amount: 0, is_active: true, revenue_category: 'studio' });
   await send(records('add_ons', unusedAddOn.id), { token: admin, method: 'DELETE', status: 204 });
   assert.deepEqual([plain.job_order_no, plain.queue_number, unpaid.job_order_no, unpaid.queue_number], [null, null, null, null]);
   assert.deepEqual([(await registrations(plain, cashier)).payload.job_order_no, (await registrations(plain, cashier)).payload.queue_number], [null, null]);
@@ -896,7 +899,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const family = sessionList.find((type) => type.code === 'FAM');
   const wedding = sessionList.find((type) => type.code === 'WED');
   assert.ok(family && !family.on_location && wedding?.on_location);
-  const walkinPackage = await create('packages', { code: 'FAM-1', name: 'Family Session', amount: 2500, is_active: true, client_kind: 'walkin' });
+  const walkinPackage = await create('packages', { code: 'FAM-1', name: 'Family Session', amount: 2500, is_active: true, revenue_category: 'studio', client_kind: 'walkin' });
   async function walkIn(fields, status = 200) {
     const form = new FormData();
     for (const [key, value] of Object.entries({
@@ -925,8 +928,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   // Add-ons are offered to school clients, walk-ins or both, like packages. Existing ones became "both".
   const legacyAddOn = (await send(records('add_ons') + "?filter=code='ADD-HAIRMAKEUP'", { token: admin })).payload.items[0];
   assert.equal(legacyAddOn.client_kind, 'both', 'add-ons from before the setting are offered to everyone');
-  const toga = await create('add_ons', { code: 'TOGA', name: 'Toga rental', amount: 200, is_active: true, client_kind: 'school' });
-  const familyAlbum = await create('add_ons', { code: 'ALBUM', name: 'Family album', amount: 900, is_active: true, client_kind: 'walkin' });
+  const toga = await create('add_ons', { code: 'TOGA', name: 'Toga rental', amount: 200, is_active: true, revenue_category: 'studio', client_kind: 'school' });
+  const familyAlbum = await create('add_ons', { code: 'ALBUM', name: 'Family album', amount: 900, is_active: true, revenue_category: 'studio', client_kind: 'walkin' });
   await send(records('add_ons'), { token: admin, method: 'POST', body: { code: 'BAD', name: 'Bad kind', amount: 1, is_active: true, client_kind: 'everyone' }, status: 400 });
   refused = await walkIn({ add_ons: JSON.stringify([{ id: toga.id }]) }, 400);
   assert.match(refused.message, /not offered to walk-in clients/);
@@ -944,7 +947,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await send(records('studio_settings', settings.id), { token: admin, method: 'PATCH', body: { school_enabled: false } });
   await register(standard, [], 400);
   await send(records('studio_settings', settings.id), { token: admin, method: 'PATCH', body: { school_enabled: true, walkin_enabled: false } });
-  const bothPackage = await create('packages', { code: 'ANY', name: 'Any client', amount: 900, is_active: true, client_kind: 'both' });
+  const bothPackage = await create('packages', { code: 'ANY', name: 'Any client', amount: 900, is_active: true, revenue_category: 'studio', client_kind: 'both' });
   await register(bothPackage);
   // A session type in use can only be switched off; an unused one can be removed.
   await send(records('session_types', wedding.id), { token: admin, method: 'DELETE', status: 409 });
@@ -992,7 +995,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.deepEqual([feeRow.due, feeRow.otherFees, feeRow.packageAmount], [115000, 15000, 100000], 'the export splits the total into package and other fees');
 
   // Add-ons after registration: admin only, catalog-priced, and the total follows.
-  const frame = await create('add_ons', { code: 'FRAME', name: 'Frame upgrade', amount: 400, is_active: true });
+  const frame = await create('add_ons', { code: 'FRAME', name: 'Frame upgrade', amount: 400, is_active: true, revenue_category: 'studio' });
   const addOnClient = await register(standard);
   await pay(addOnClient, 500, 'initial');
   await registrations(addOnClient, cashier, { add_ons: [{ id: frame.id }] }, 403);
@@ -2034,7 +2037,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
 
     // A fixed peso discount: comes off the Studio charges, so it works even while another charge has
     // no revenue type (where a percentage is refused); it can't exceed the Studio charges.
-    const unclassifiedAddOn = await create('add_ons', { code: 'POS-UNCL', name: 'POS Unclassified Test', amount: 400, is_active: true });
+    const unclassifiedAddOn = await create('add_ons', { code: 'POS-UNCL', name: 'POS Unclassified Test', amount: 400, is_active: true, revenue_category: 'studio' });
+    const blankDb = new DatabaseSync(join(data, 'data.db'));
+    try { blankDb.prepare("UPDATE add_ons SET revenue_category = '' WHERE id = ?").run(unclassifiedAddOn.id); } finally { blankDb.close(); }
+    // Saving it again needs a type.
+    await send(records('add_ons', unclassifiedAddOn.id), { token: admin, method: 'PATCH', status: 400, body: { amount: 400 } });
     const partly = await load(await register(studio, [{ id: unclassifiedAddOn.id }]));
     assert.deepEqual(partly.revenue_terms, { studio: 75000, mua: 0, unallocated: 40000 });
     await confirm(partly, request(partly, 'pos-uncl-pct', 1035, 10, 1035), 400);

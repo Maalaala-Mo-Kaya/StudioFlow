@@ -159,7 +159,11 @@ export interface RestoreResult {
   updated: number;
   kept: number;
   failed: { what: string; name: string; message: string }[];
+  /** Records whose backup had no revenue type, given one by guess: check them. */
+  guessedRevenue: string[];
 }
+
+const MAKEUP_WORDS = /\b(make[\s-]?up|grooming|hmua|mua|hair\s*(?:and|&)\s*make)/i;
 
 const key = (value: string) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const message = (err: unknown) => {
@@ -184,7 +188,14 @@ function remap(value: unknown, ids: Map<string, string>): unknown {
  */
 export async function restoreCatalog(pb: PocketBase, backup: CatalogBackup, update: boolean,
   onProgress?: (label: string, fraction: number) => void): Promise<RestoreResult> {
-  const result: RestoreResult = { created: 0, updated: 0, kept: 0, failed: [] };
+  const result: RestoreResult = { created: 0, updated: 0, kept: 0, failed: [], guessedRevenue: [] };
+  // Studio, or MUA for makeup (as Import from File guesses); listed so the admin can check.
+  const revenueOf = (b: { name: string; revenue_category: string; requires_mua: boolean }, label: string) => {
+    if (b.revenue_category === 'studio' || b.revenue_category === 'mua') return b.revenue_category;
+    const guess = b.requires_mua || MAKEUP_WORDS.test(b.name) ? 'mua' : 'studio';
+    result.guessedRevenue.push(`${label} → ${guess === 'mua' ? 'MUA' : 'Studio'}`);
+    return guess;
+  };
   const total = backup.items.length + backup.poses.length + backup.packages.length + backup.add_ons.length || 1;
   let done = 0;
   const step = (label: string) => onProgress?.(label, ++done / total);
@@ -238,7 +249,7 @@ export async function restoreCatalog(pb: PocketBase, backup: CatalogBackup, upda
       : { inclusions: b.inclusions, freebies: b.freebies, option_groups: b.option_groups };
     await put('packages', 'Package', `${b.name} (${b.code})`, found, b.id, {
       code: b.code, name: b.name, amount: b.amount, description: b.description, tagline: b.tagline,
-      client_kind: b.client_kind, revenue_category: b.revenue_category, requires_mua: b.requires_mua,
+      client_kind: b.client_kind, revenue_category: revenueOf(b, `${b.name} (package)`), requires_mua: b.requires_mua,
       photo_selection_limit: b.photo_selection_limit, is_active: b.is_active, ...contents,
     });
   }
@@ -248,7 +259,7 @@ export async function restoreCatalog(pb: PocketBase, backup: CatalogBackup, upda
     const found = addOns.find((r) => r.id === b.id)
       ?? addOns.find((r) => !r.catalog_item && (b.code ? key(r.code || '') === key(b.code) : key(r.name) === key(b.name)));
     await put('add_ons', 'Add-on', b.name, found, b.id, {
-      code: b.code, name: b.name, amount: b.amount, client_kind: b.client_kind, revenue_category: b.revenue_category,
+      code: b.code, name: b.name, amount: b.amount, client_kind: b.client_kind, revenue_category: revenueOf(b, `${b.name} (add-on)`),
       requires_mua: b.requires_mua, default_when_no_mua: b.default_when_no_mua, is_active: b.is_active,
     });
   }

@@ -15,8 +15,9 @@ import {
   BookOpenCheck,
   ArrowRight,
   X,
+  TriangleAlert,
 } from 'lucide-react';
-import type { Organization, Registration, Package, PaymentRecord, RefundRecord } from '../../../types';
+import type { AddOn, Organization, Registration, Package, PaymentRecord, RefundRecord } from '../../../types';
 import type { RefundRequest } from '../useAdminData';
 import { RefundModal, VoidPaymentModal } from './LedgerActionModals';
 import { PrintRefundSlipModal } from './PrintRefundSlipModal';
@@ -53,6 +54,10 @@ interface AdminAnalyticsTabProps {
   organizations: Organization[];
   registrations: Registration[];
   packages: Package[];
+  /** For the "revenue type missing" warning. */
+  addOns?: AddOn[];
+  /** Opens Packages & Add-ons, where a missing revenue type is chosen. */
+  onOpenCatalog?: () => void;
   payments: PaymentRecord[];
   refunds: RefundRecord[];
   onVoidPayment: (paymentId: string, reason: string) => Promise<void>;
@@ -66,6 +71,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   organizations,
   registrations,
   packages,
+  addOns = [],
+  onOpenCatalog,
   payments,
   refunds,
   onVoidPayment,
@@ -151,7 +158,16 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   );
   const isReconciled = audit.ordersBalanced && audit.paymentsBalanced;
   // School and package groups report Studio activity only.
-  const hasActivity = (group: AuditGroup) => Boolean(group.count || group.billed || group.collected || group.balance);
+  const hasActivity = (group: AuditGroup) => Boolean(group.count || group.billed || group.collected || group.balance || group.held);
+  // Revenue types that were never chosen: their sales can't be counted as Studio or MUA.
+  const untypedCatalog = [
+    ...packages.filter((pkg) => !pkg.revenue_category).map((pkg) => `${pkg.name} (package)`),
+    ...addOns.filter((add) => !add.revenue_category && !add.catalog_item).map((add) => `${add.name} (add-on)`),
+  ];
+  const untypedOrders = registrations
+    .filter((reg) => reg.status !== 'cancelled' && revenueTerms(reg).unallocated > 0)
+    .map((reg) => reg.job_order_no || reg.id);
+  const list = (names: string[], max: number) => names.slice(0, max).join(', ') + (names.length > max ? ` and ${names.length - max} more` : '');
   const activeSchools = audit.bySchool.filter(hasActivity);
   const hiddenSchools = audit.bySchool.length - activeSchools.length;
   const activePackages = audit.byPackage.filter(hasActivity);
@@ -456,6 +472,25 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         </div>
       </div>
 
+      {(untypedCatalog.length > 0 || untypedOrders.length > 0) && (
+        <div role="alert" className="p-4 border-2 border-amber-500 bg-amber-50 text-amber-900 text-xs space-y-1.5">
+          <p className="flex items-center gap-2 font-black uppercase tracking-wider"><TriangleAlert className="w-4 h-4 shrink-0" /> Revenue type missing</p>
+          {untypedCatalog.length > 0 && (
+            <p>
+              <b>{untypedCatalog.length} catalog item{untypedCatalog.length === 1 ? '' : 's'}</b> {untypedCatalog.length === 1 ? 'has' : 'have'} no Studio / MUA type: {list(untypedCatalog, 5)}.
+              New sales of {untypedCatalog.length === 1 ? 'it' : 'them'} can&apos;t be counted as Studio or MUA revenue.{' '}
+              {onOpenCatalog && <button type="button" onClick={onOpenCatalog} className="font-black underline underline-offset-2 cursor-pointer">Choose in Packages &amp; Add-ons</button>}
+            </p>
+          )}
+          {untypedOrders.length > 0 && (
+            <p>
+              <b>{untypedOrders.length} job order{untypedOrders.length === 1 ? '' : 's'}</b> ({list(untypedOrders, 8)}) {untypedOrders.length === 1 ? 'has' : 'have'} charges with no revenue type, so part of {untypedOrders.length === 1 ? 'its' : 'their'} payments stays unallocated even when fully paid.
+              Set the MUA amount in the order&apos;s revenue review (Students → Edit).
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Accounting Reconciliation Banner */}
       <div className="grid gap-3 sm:grid-cols-3">
         {([
@@ -520,27 +555,17 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                   <span className="font-black text-ink">{s.code}</span>
                   <span className="text-neutral-500 text-[11px] block truncate max-w-[200px]">{s.name}</span>
                 </div>
-                <div className="text-right">
-                  <div className="font-black text-ink">{formatCurrency(s.collected, { exact: true })}</div>
-                  {s.balance > 0 ? (
-                    <span className="text-[10px] text-red-600 font-bold block">
-                      Studio charges not allocated: {formatCurrency(s.balance)}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-emerald-600 font-bold block">{s.count ? 'No balance' : 'Payments only'}</span>
-                  )}
-                </div>
+                <GroupFigures group={s} fallback={s.count ? 'No balance' : 'Payments only'} />
               </div>
             ))}
             {activeSchools.length > 0 && (
               <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
                 <span>TOTAL</span>
-                <div className="text-right">
-                  <div className="text-ink">{formatCurrency(activeSchools.reduce((total, school) => total + school.collected, 0), { exact: true })}</div>
-                </div>
+                <GroupFigures group={sumGroups(activeSchools)} total />
               </div>
             )}
           </div>
+          <GroupFootnote groups={activeSchools} />
           {hiddenSchools > 0 && (
             <p className="mt-2 text-[10px] text-neutral-500">{hiddenSchools} school{hiddenSchools === 1 ? '' : 's'} with nothing {periodWords} not shown.</p>
           )}
@@ -563,22 +588,17 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                   <span className="font-black text-ink">{pkg.code}</span>
                   <span className="text-neutral-500 text-[11px] block truncate max-w-[200px]">{pkg.name}</span>
                 </div>
-                <div className="text-right">
-                  <div className="font-black text-ink">{formatCurrency(pkg.collected, { exact: true })}</div>
-                  <span className="text-[10px] text-neutral-500 block">{pkg.count} order{pkg.count === 1 ? '' : 's'}</span>
-                </div>
+                <GroupFigures group={pkg} fallback={`${pkg.count} order${pkg.count === 1 ? '' : 's'}`} />
               </div>
             ))}
             {activePackages.length > 0 && (
               <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
                 <span>TOTAL</span>
-                <div className="text-right">
-                  <div className="text-ink">{formatCurrency(activePackages.reduce((total, pkg) => total + pkg.collected, 0), { exact: true })}</div>
-                  <span className="text-[10px] text-neutral-500 block">{audit.totals.activeOrders} orders</span>
-                </div>
+                <GroupFigures group={sumGroups(activePackages)} total fallback={`${audit.totals.activeOrders} orders`} />
               </div>
             )}
           </div>
+          <GroupFootnote groups={activePackages} />
         </div>
       </div>
 
@@ -735,5 +755,42 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         />
       )}
     </div>
+  );
+};
+
+const sumGroups = (groups: AuditGroup[]): AuditGroup => groups.reduce((sum, group) => ({
+  ...sum, count: sum.count + group.count, billed: sum.billed + group.billed, collected: sum.collected + group.collected,
+  balance: sum.balance + group.balance, held: sum.held + group.held,
+}), { key: 'total', code: 'TOTAL', name: '', count: 0, billed: 0, collected: 0, balance: 0, held: 0 });
+
+/**
+ * A school / package row's figures: Studio revenue counted, cash held until a mixed order is fully
+ * paid (or that has no revenue type), and Studio charges no cash has been counted toward yet.
+ */
+const GroupFigures: React.FC<{ group: AuditGroup; total?: boolean; fallback?: string }> = ({ group, total, fallback }) => (
+  <div className="text-right">
+    <div className={`${total ? '' : 'font-black '}text-ink`}>{formatCurrency(group.collected, { exact: true })}</div>
+    {group.held > 0 && (
+      <span className="text-[10px] text-amber-700 font-bold block">Held, not yet split: {formatCurrency(group.held, { exact: true })}</span>
+    )}
+    {group.balance > 0 && (
+      <span className="text-[10px] text-neutral-600 font-bold block">Studio still to settle: {formatCurrency(group.balance, { exact: true })}</span>
+    )}
+    {!group.held && !group.balance && fallback && (
+      <span className={`text-[10px] font-bold block ${total ? 'text-neutral-500' : 'text-emerald-600'}`}>{fallback}</span>
+    )}
+  </div>
+);
+
+/** Explains "held" and "still to settle" under a card, only when one shows. */
+const GroupFootnote: React.FC<{ groups: AuditGroup[] }> = ({ groups }) => {
+  const held = groups.some((group) => group.held > 0);
+  const toSettle = groups.some((group) => group.balance > 0);
+  if (!held && !toSettle) return null;
+  return (
+    <p className="mt-3 pt-2 border-t border-line text-[10px] text-neutral-500 font-sans leading-relaxed">
+      {held && <><b className="text-amber-700">Held, not yet split:</b> payments on orders that mix Studio and MUA charges, counted into each once the order is fully paid (or charges with no revenue type). </>}
+      {toSettle && <><b className="text-neutral-600">Studio still to settle:</b> Studio charges no payment has been counted toward yet.</>}
+    </p>
   );
 };

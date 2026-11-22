@@ -7,14 +7,25 @@ import type { PackageKind } from '../useAdminData';
 
 export function RevenueInput({ value, onChange }: { value: RevenueCategory | ''; onChange: (value: RevenueCategory | '') => void }) {
   return <label className="block text-xs font-bold">
-    Revenue classification
-    <select className="mt-1 block min-h-10 w-full border border-line bg-panel px-2"
+    Revenue classification <span className="text-red-600">*</span>
+    <select required className={`mt-1 block min-h-10 w-full border bg-panel px-2 ${value ? 'border-line' : 'border-red-500'}`}
       value={value} onChange={(event) => onChange(event.target.value as RevenueCategory | '')}>
-      {!value && <option value="" disabled>{revenueLabels['']}</option>}
+      {!value && <option value="" disabled>Choose Studio or MUA…</option>}
       <option value="studio">{revenueLabels.studio}</option>
       <option value="mua">{revenueLabels.mua}</option>
     </select>
   </label>;
+}
+
+/** A catalog record's revenue type; a missing one is a red warning (its sales stay unallocated). */
+export function RevenueBadge({ value }: { value?: RevenueCategory | '' }) {
+  if (value) return <span className="text-[10px] font-bold uppercase">{revenueLabels[value]}</span>;
+  return (
+    <span title="Its sales can't be counted as Studio or MUA revenue. Edit it and choose one."
+      className="px-2 py-0.5 text-[10px] font-black uppercase border border-red-500 bg-red-50 text-red-700">
+      {revenueLabels['']}: edit to choose
+    </span>
+  );
 }
 
 export function MuaRequirementInput({ checked, onChange, revenue, amount }: {

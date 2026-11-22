@@ -67,8 +67,13 @@ export interface AuditGroup {
   billed: number;
   /** Payments received minus refunds given in the period, for this group's job orders. */
   collected: number;
-  /** Still unpaid on this group's job orders made in the period. */
+  /** Studio charges on this group's job orders (made in the period) that no cash has been counted toward yet. */
   balance: number;
+  /**
+   * Cash received in the period not yet counted as Studio or MUA: downpayments on orders that mix
+   * Studio and MUA charges (split when the order is fully paid), or charges with no revenue type.
+   */
+  held: number;
 }
 
 /** A discount credit counted in the period (granted then, on an active order), for the Discounts sheet. */
@@ -216,11 +221,11 @@ export function buildAudit(
   const packageOf = (reg?: Registration) => reg?.package_snapshot?.id || reg?.package || UNKNOWN_PACKAGE;
   const schools = new Map<string, AuditGroup>();
   for (const org of catalog.organizations ?? []) {
-    schools.set(org.id, { key: org.id, code: org.code || 'ORG', name: org.name, count: 0, billed: 0, collected: 0, balance: 0 });
+    schools.set(org.id, { key: org.id, code: org.code || 'ORG', name: org.name, count: 0, billed: 0, collected: 0, balance: 0, held: 0 });
   }
   const packagesByKey = new Map<string, AuditGroup>();
   for (const pkg of catalog.packages ?? []) {
-    packagesByKey.set(pkg.id, { key: pkg.id, code: pkg.code || 'PKG', name: pkg.name, count: 0, billed: 0, collected: 0, balance: 0 });
+    packagesByKey.set(pkg.id, { key: pkg.id, code: pkg.code || 'PKG', name: pkg.name, count: 0, billed: 0, collected: 0, balance: 0, held: 0 });
   }
   const schoolGroup = (reg?: Registration) => {
     const key = groupOf(reg);
@@ -228,8 +233,8 @@ export function buildAudit(
     if (!group) {
       const org = reg?.expand?.organization;
       group = key === WALKIN_KEY
-        ? { key, code: 'WALK-IN', name: 'Walk-in clients', count: 0, billed: 0, collected: 0, balance: 0 }
-        : { key, code: org?.code || 'ORG', name: org?.name || 'Removed school', count: 0, billed: 0, collected: 0, balance: 0 };
+        ? { key, code: 'WALK-IN', name: 'Walk-in clients', count: 0, billed: 0, collected: 0, balance: 0, held: 0 }
+        : { key, code: org?.code || 'ORG', name: org?.name || 'Removed school', count: 0, billed: 0, collected: 0, balance: 0, held: 0 };
       schools.set(key, group);
     }
     return group;
@@ -239,7 +244,7 @@ export function buildAudit(
     let group = packagesByKey.get(key);
     if (!group) {
       const pkg = reg?.package_snapshot || reg?.expand?.package;
-      group = { key, code: pkg?.code || '—', name: pkg?.name || 'No package / removed package', count: 0, billed: 0, collected: 0, balance: 0 };
+      group = { key, code: pkg?.code || '—', name: pkg?.name || 'No package / removed package', count: 0, billed: 0, collected: 0, balance: 0, held: 0 };
       packagesByKey.set(key, group);
     }
     return group;
@@ -275,12 +280,14 @@ export function buildAudit(
     packageGroup(reg).collected += studioCredit;
   }
   for (const row of [...countedPayments, ...refundRows]) {
-    schoolGroup(row.registration).collected += row.revenue.studio;
-    packageGroup(row.registration).collected += row.revenue.studio;
+    for (const group of [schoolGroup(row.registration), packageGroup(row.registration)]) {
+      group.collected += row.revenue.studio;
+      group.held += row.revenue.unallocated;
+    }
     for (const key of revenueKeys) revenue[key] += row.revenue[key];
   }
   const toPesos = (group: AuditGroup): AuditGroup => ({
-    ...group, billed: pesos(group.billed), collected: pesos(group.collected), balance: pesos(group.balance),
+    ...group, billed: pesos(group.billed), collected: pesos(group.collected), balance: pesos(group.balance), held: pesos(group.held),
   });
   // Walk-ins last; groups with nothing in the period after the active ones.
   const ordered = (groups: Iterable<AuditGroup>) => [...groups]

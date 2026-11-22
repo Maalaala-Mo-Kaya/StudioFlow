@@ -2,7 +2,7 @@
 import type { AddOn } from '../../types';
 import type { PackageKind } from './useAdminData';
 
-export const revenueLabels = { studio: 'Studio revenue', mua: 'Other Payment — MUA', '': 'Revenue review needed' };
+export const revenueLabels = { studio: 'Studio revenue', mua: 'Other Payment — MUA', '': 'Revenue type missing' };
 
 export const PACKAGE_KIND_LABELS: Record<PackageKind, string> = { school: 'For school', walkin: 'For walk-in', both: 'School & walk-in' };
 

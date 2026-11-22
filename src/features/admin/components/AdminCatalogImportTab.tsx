@@ -308,6 +308,9 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
             <div role="status" className={`p-2 border font-sans text-xs space-y-1 ${restored.failed.length ? 'border-amber-500 bg-amber-50 text-amber-900' : 'border-emerald-500 bg-emerald-50 text-emerald-800'}`}>
               <p className="font-bold">Added {restored.created} · updated {restored.updated} · already there {restored.kept}{restored.failed.length ? ` · ${restored.failed.length} not restored` : ''}</p>
               {restored.failed.map((f, i) => <p key={i}>{f.what} "{f.name}": {f.message}</p>)}
+              {restored.guessedRevenue.length > 0 && (
+                <p>No revenue type in the backup, so one was chosen (makeup items MUA, the rest Studio). Check them in Packages &amp; Add-ons: {restored.guessedRevenue.join(' · ')}</p>
+              )}
             </div>
           )}
           <div className="flex flex-wrap justify-end gap-2">
