@@ -31,7 +31,6 @@ export const TermsAndSignatureSection: React.FC<TermsAndSignatureSectionProps> =
             id="sec-terms"
             className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-ink m-0"
           >
-            <span className="font-mono text-gold-soft mr-2">04 //</span>
             Studio Terms &amp; Conditions
           </h2>
           <span className="font-mono text-[10px] text-neutral-500 uppercase">
@@ -72,7 +71,6 @@ export const TermsAndSignatureSection: React.FC<TermsAndSignatureSectionProps> =
             id="sec-signature"
             className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-ink m-0"
           >
-            <span className="font-mono text-gold-soft mr-2">05 //</span>
             Customer&apos;s Digital Signature
           </h2>
           <span className="font-mono text-[10px] text-neutral-500 uppercase">Touch / Stylus</span>

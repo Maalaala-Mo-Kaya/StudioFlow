@@ -1432,15 +1432,20 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const artistName = periodReport.lines.find((line) => line.artistId === rateArtist.id).artistName;
     const summaryRow = (book) => {
       let found;
-      book.getWorksheet('MUA PAYOUTS').eachRow((row) => { if (row.getCell(1).value === artistName) found = row; });
+      book.getWorksheet('MUA SUMMARY').eachRow((row) => { if (row.getCell(1).value === artistName) found = row; });
       return [3, 4, 5, 6].map((column) => { const value = found.getCell(column).value; return value && typeof value === 'object' ? value.result : value; });
     };
     assert.deepEqual(summaryRow(payoutBook), [3, 300, 300, 0], 'services, earned, paid out, unpaid');
-    assert.ok(payoutBook.getWorksheet('MUA SHARED') && payoutBook.getWorksheet('MUA PAYOUT LOG'));
+    assert.ok(payoutBook.getWorksheet('MUA WARDROBE & SHARED') && payoutBook.getWorksheet('MUA PAYOUT LOG'));
     assert.ok(payoutBook.getWorksheet(('MUA - ' + artistName).slice(0, 28)));
     const overallBook = buildStudentWorkbook((await send(api + '/student-excel', { token: admin })).payload, { kind: 'master' });
     assert.deepEqual(summaryRow(overallBook), [3, 300, 300, 0], 'the master Excel has the same MUA pages');
-    assert.ok(overallBook.getWorksheet('MUA SHARED') && !overallBook.getWorksheet('MUA PAYOUT LOG'));
+    assert.ok(overallBook.getWorksheet('MUA WARDROBE & SHARED') && !overallBook.getWorksheet('MUA PAYOUT LOG'));
+    // The daily MUA Performance Excel (earnings) starts with the same summary and Wardrobe page.
+    const { buildMuaWorkbook: buildDailyMuaWorkbook } = await vite.ssrLoadModule('/src/features/admin/muaPerformanceExport.ts');
+    const dailyBook = await buildDailyMuaWorkbook(await report(today), 'earnings', periodReport);
+    assert.deepEqual(dailyBook.worksheets.slice(0, 1).map((sheet) => sheet.name), ['MUA SUMMARY']);
+    assert.ok(dailyBook.getWorksheet('MUA WARDROBE & SHARED') && dailyBook.getWorksheet('MUA Earnings') && dailyBook.getWorksheet('Earnings Audit'));
     const priceReport = await report();
     const { muaReportCsv, buildMuaWorkbook } = await import('../src/features/admin/muaPerformanceExport.ts');
     const { muaEarningsTable } = await import('../src/features/admin/muaPerformance.ts');
@@ -2139,6 +2144,18 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.deepEqual([fixedPayment.discount_snapshot.studio, fixedPayment.discount_snapshot.fixed], [20000, true]);
     const { orderExtras: extrasOf } = await vite.ssrLoadModule('/src/features/receipts/receiptData.ts');
     assert.deepEqual(extrasOf(fixedPaid.registration).at(-1), ['Discount credit (Fixed amount) · Loyal client', -200]);
+
+    // A percentage that lands on centavos (50% of ₱3,845 = ₱1,922.50) is rounded to the nearest whole peso,
+    // so the balance stays payable: payments are whole pesos.
+    const oddPackage = await create('packages', { code: 'ODD-3845', name: 'Odd price', amount: 3845, is_active: true, revenue_category: 'studio' });
+    const odd = await load(await register(oddPackage));
+    const oddPaid = await confirm(odd, request(odd, 'pos-odd-50', 1922, 50, 1922));
+    assert.deepEqual([oddPaid.registration.revenue_discount.studio, oddPaid.registration.total_amount, oddPaid.registration.balance],
+      [192300, 1922, 0]);
+    // A payment with centavos is refused with a clear reason (the payments table only takes whole pesos).
+    const cents = await load(await register(oddPackage));
+    const refusedCents = await confirm(cents, { ...request(cents, 'pos-cents', 3845, null, 100), payment: { amount: 100.5, type: 'full', method: 'cash', cash: 101, cashierName: 'Test Cashier' } }, 400);
+    assert.doesNotMatch(refusedCents.message, /Something went wrong/);
   });
 
 });

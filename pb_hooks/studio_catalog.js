@@ -11,7 +11,15 @@
 //     (an option is the exchanged pose in another attire: it always gets that pose's prints and
 //      background, so only its attire (or a typed title) is chosen)
 //     freebie_choices: [{ id, item: <a freebie's item id>, choices: [{ id, label }] }],
+//     picks: [{ id, name, pick, choices: [{ id, title, attire?, background?, items: [{ item, qty }], for } |
+//                                         { id, item, qty, for } | { id, label, for }] }],
 //     choice_groups: [<older option groups, kept as they were>] }
+//
+// A pick ("Backdrop — choose 2": Blue / Gray / Black, or "Choose 1 print": 1 pc - 8R / 2 pcs - 5R) is
+// part of what the package includes: the client chooses `pick` of its choices at the kiosk, nothing is
+// exchanged and the price doesn't change. A choice is normally an attire with its own background and
+// prints, like a pose ("Glamour shots": 1 pc - 3R, 2 pcs - wallet); a single item or typed text also works.
+// It renders as an option group without `replaces`; the job order keeps the picks.
 //
 // A freebie with choices ("Free 7x9 classic frame: Family / Barkada / Couple") renders as a
 // pick-one option group marked `freebie`, so the kiosk asks for it and the job order keeps the pick.
@@ -174,6 +182,21 @@ function render(app, structure, photoLimit) {
     if (!item || choices.length < 2) continue;
     groups.push({ id: fc.id, name: item.name.slice(0, 60), pick: 1, freebie: true, choices });
   }
+  for (const pk of Array.isArray(s.picks) ? s.picks : []) {
+    const choices = (pk.choices || []).flatMap((c) => {
+      if (c.attire || c.title) {
+        // An attire (on a background) with the prints that come with it.
+        const label = poseTitle(c, catalog);
+        const lines = rowLines(c.items, catalog);
+        return label ? [{ id: c.id, label, for: c.for || "all", ...(lines.length ? { items: lines } : {}) }] : [];
+      }
+      const item = c.item ? catalog.items.get(c.item) : null;
+      const label = item ? itemLine(item, c.qty) : text(c.label);
+      return label ? [{ id: c.id, label, for: c.for || "all" }] : [];
+    });
+    if (!choices.length) continue;
+    groups.push({ id: pk.id, name: pk.name || "Choose", pick: Math.min(Math.max(1, pk.pick || 1), choices.length), choices });
+  }
   for (const g of Array.isArray(s.choice_groups) ? s.choice_groups : []) groups.push(g);
   return { inclusions, freebies, option_groups: groups };
 }
@@ -223,7 +246,7 @@ function validate(app, raw) {
   const s = readJson(raw);
   if (!s || typeof s !== "object" || Array.isArray(s)) return { problem: "The package contents could not be read. Reload and try again." };
   const catalog = loadCatalog(app);
-  const out = { frame_item: "", unlimited_shots: s.unlimited_shots !== false, inclusions: [], freebies: [], exchanges: [], freebie_choices: [], choice_groups: [] };
+  const out = { frame_item: "", unlimited_shots: s.unlimited_shots !== false, inclusions: [], freebies: [], exchanges: [], freebie_choices: [], picks: [], choice_groups: [] };
   if (s.frame_item) {
     if (!catalog.items.has(s.frame_item)) return { problem: "The frame item no longer exists. Choose another frame." };
     out.frame_item = s.frame_item;
@@ -308,6 +331,50 @@ function validate(app, raw) {
     if (choices.length > 30) return { problem: `"${item.name}" can have up to 30 choices.` };
     out.freebie_choices.push({ id: text(fc.id) || newId(), item: item.id, choices });
   }
+  // Picks: the client chooses some of a list (part of the package; nothing exchanged, no price change).
+  for (const pk of Array.isArray(s.picks) ? s.picks : []) {
+    if (!pk || typeof pk !== "object") continue;
+    const name = text(pk.name);
+    if (!name) return { problem: "Give each option a name, such as Backdrop or Choose your prints." };
+    if (name.length > 60) return { problem: "Keep option names under 60 characters." };
+    const choices = [];
+    for (const c of Array.isArray(pk.choices) ? pk.choices : []) {
+      if (!c || typeof c !== "object") continue;
+      const forWhom = FOR.includes(c.for) ? c.for : "all";
+      let id = text(c.id);
+      if (!id || id === "keep" || choices.some((x) => x.id === id)) id = newId();
+      if (c.attire || c.title || Array.isArray(c.items)) {
+        // An attire choice: its attire (and background) or a typed title, with the prints it comes with.
+        const checked = checkPose(c, catalog, `choice in "${name}"`);
+        if (checked.problem) return checked;
+        if (choices.some((x) => x.title && key(x.title) === key(checked.pose.title))) {
+          return { problem: `"${checked.pose.title}" is in "${name}" twice.` };
+        }
+        choices.push({ id, ...checked.pose, for: forWhom });
+      } else if (c.item) {
+        const item = catalog.items.get(c.item);
+        if (!item) return { problem: `An item in "${name}" no longer exists. Remove it and save again.` };
+        const qty = c.qty === undefined || c.qty === null || c.qty === "" ? 1 : Math.floor(Number(c.qty));
+        if (!(qty >= 1 && qty <= 999)) return { problem: `Enter a quantity from 1 to 999 for "${item.name}" in "${name}".` };
+        if (choices.some((x) => x.item === item.id && x.qty === qty)) continue;
+        choices.push({ id, item: item.id, qty, for: forWhom });
+      } else {
+        const label = text(c.label);
+        if (!label) continue;
+        if (label.length > 120) return { problem: `Keep each choice in "${name}" under 120 characters.` };
+        if (choices.some((x) => !x.item && key(x.label) === key(label))) continue;
+        choices.push({ id, label, for: forWhom });
+      }
+    }
+    if (choices.length < 2) return { problem: `Give "${name}" at least two choices for the client to pick from.` };
+    if (choices.length > 30) return { problem: `"${name}" can have up to 30 choices.` };
+    const pick = Math.floor(Number(pk.pick) || 1);
+    if (!(pick >= 1 && pick < choices.length)) {
+      return { problem: `"${name}": the client picks from 1 to ${choices.length - 1} of its ${choices.length} choices (fewer than all, or it is not a choice).` };
+    }
+    out.picks.push({ id: text(pk.id) || newId(), name, pick, choices });
+  }
+  if (out.picks.length > 20) return { problem: "A package can have up to 20 options." };
   if (Array.isArray(s.choice_groups)) out.choice_groups = s.choice_groups;
   return { structure: out };
 }

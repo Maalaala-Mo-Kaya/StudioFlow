@@ -736,6 +736,79 @@ test('save: imported packages and add-ons reach the database and the kiosk', asy
     assert.deepEqual(moved.freebies, ['F Free family picture', 'F Free 7x9 classic frame']);
   });
 
+  await t.test('options: the client picks some of a list (part of the package, nothing exchanged)', async () => {
+    const fail = (promise) => promise.then(() => assert.fail('expected the server to refuse'), (err) => err.response);
+    const p8r = await pb.collection('catalog_items').create({ name: 'Opt 8R', category: 'print' });
+    const p5r = await pb.collection('catalog_items').create({ name: 'Opt 5R', category: 'print' });
+    const structure = {
+      frame_item: '', unlimited_shots: true, inclusions: [], exchanges: [], freebies: [],
+      picks: [
+        { id: 'backdrop', name: ' Backdrop ', pick: 2, choices: [{ label: 'Blue' }, { label: 'Gray' }, { label: 'Black', for: 'male' }, { label: 'blue' }] },
+        { id: 'print', name: 'Choose your print', pick: 1, choices: [{ item: p8r.id, qty: 1 }, { item: p5r.id, qty: 2, for: 'female' }] },
+      ],
+    };
+    const pkg = await pb.collection('packages').create({ code: 'P-PICKS', name: 'Picks Package', amount: 1800, is_active: true,
+      client_kind: 'school', revenue_category: 'studio', structure });
+    // Rendered as option groups with no "instead of": labels from the items (or the typed text), repeats dropped.
+    assert.deepEqual(pkg.option_groups.map((g) => [g.id, g.name, g.pick, g.replaces, g.choices.map((c) => [c.label, c.for])]), [
+      ['backdrop', 'Backdrop', 2, undefined, [['Blue', 'all'], ['Gray', 'all'], ['Black', 'male']]],
+      ['print', 'Choose your print', 1, undefined, [['1 pc - Opt 8R', 'all'], ['2 pcs - Opt 5R', 'female']]],
+    ]);
+    assert.deepEqual(pkg.inclusions, ['Unlimited shots'], 'options are not added to the inclusions or the print count');
+    // The kiosk sends the picks; the job order keeps them; the price never changes.
+    const [backdrop, print] = pkg.option_groups;
+    const id = (group, label) => group.choices.find((c) => c.label === label).id;
+    const order = await register(pkg.id, [], { gender: 'female', package_options: JSON.stringify([
+      { group: 'backdrop', choices: [id(backdrop, 'Blue'), id(backdrop, 'Gray')] },
+      { group: 'print', choices: [id(print, '2 pcs - Opt 5R')] },
+    ]) });
+    assert.deepEqual(order.package_options.map((g) => [g.group, g.choices.map((c) => c.label)]),
+      [['Backdrop', ['Blue', 'Gray']], ['Choose your print', ['2 pcs - Opt 5R']]]);
+    assert.equal(order.total_amount, 1800);
+    const tooFew = await fail(register(pkg.id, [], { gender: 'female', package_options: JSON.stringify([
+      { group: 'backdrop', choices: [id(backdrop, 'Blue')] }, { group: 'print', choices: [id(print, '1 pc - Opt 8R')] }]) }));
+    assert.match(tooFew.data.package_options.message, /Backdrop/);
+    // Nothing picked (an empty list, or the field left out): refused, the kiosk can't skip an option.
+    assert.match((await fail(register(pkg.id, [], { gender: 'female', package_options: '[]' }))).data.package_options.message, /Backdrop: choose 2|"Backdrop": choose 2/);
+    assert.match((await fail(register(pkg.id, [], { gender: 'male' }))).data.package_options.message, /choose 2/);
+    // Refused: no name, fewer than two choices, picking all of them, a missing item.
+    const bad = (pick) => fail(pb.collection('packages').update(pkg.id, { structure: { ...structure, picks: [pick] } }));
+    assert.match((await bad({ name: '', pick: 1, choices: [{ label: 'A' }, { label: 'B' }] })).message, /Give each option a name/);
+    assert.match((await bad({ name: 'One', pick: 1, choices: [{ label: 'A' }] })).message, /at least two choices/);
+    assert.match((await bad({ name: 'All', pick: 2, choices: [{ label: 'A' }, { label: 'B' }] })).message, /from 1 to 1 of its 2/);
+    assert.match((await bad({ name: 'Gone', pick: 1, choices: [{ item: 'nosuchitem00000' }, { label: 'B' }] })).message, /no longer exists/);
+    // Attire choices: an attire (on a background) with its own prints; the client gets the prints of the attires picked.
+    const glam = await pb.collection('catalog_items').create({ name: 'Opt Glamour', category: 'attire' });
+    const filipiniana = await pb.collection('catalog_items').create({ name: 'Opt Filipiniana', category: 'attire' });
+    const coat = await pb.collection('catalog_items').create({ name: 'Opt Coat and tie', category: 'attire' });
+    const colored = await pb.collection('catalog_items').create({ name: 'Opt Colored', category: 'background' });
+    const attires = await pb.collection('packages').update(pkg.id, { structure: { ...structure, picks: [{ id: 'attires', name: 'Choose 2 attires', pick: 2, choices: [
+      { attire: glam.id, background: colored.id, items: [{ item: p5r.id, qty: 1 }], for: 'female' },
+      { attire: filipiniana.id, items: [{ item: p8r.id, qty: 1 }, { item: p5r.id, qty: 2 }], for: 'female' },
+      { attire: coat.id, items: [{ item: p8r.id, qty: 1 }], for: 'male' },
+      { title: 'Opt Barong', items: [], for: 'male' },
+    ] }] } });
+    assert.deepEqual(attires.option_groups[0].choices.map((c) => [c.label, c.for, c.items]), [
+      ['Opt Glamour · Opt Colored', 'female', ['1 pc - Opt 5R']],
+      ['Opt Filipiniana', 'female', ['1 pc - Opt 8R', '2 pcs - Opt 5R']],
+      ['Opt Coat and tie', 'male', ['1 pc - Opt 8R']],
+      ['Opt Barong', 'male', undefined],
+    ]);
+    assert.deepEqual(attires.structure.picks[0].choices[0].title, 'Opt Glamour · Opt Colored');
+    const [attireGroup] = attires.option_groups;
+    const picked = await register(pkg.id, [], { gender: 'female', package_options: JSON.stringify([
+      { group: 'attires', choices: attireGroup.choices.filter((c) => c.for === 'female').map((c) => c.id) }]) });
+    assert.deepEqual(picked.package_options[0].choices.map((c) => [c.label, c.items]),
+      [['Opt Glamour · Opt Colored', ['1 pc - Opt 5R']], ['Opt Filipiniana', ['1 pc - Opt 8R', '2 pcs - Opt 5R']]]);
+    assert.match((await bad({ name: 'Twice', pick: 1, choices: [{ attire: glam.id, items: [] }, { attire: glam.id, items: [] }] })).message, /twice/);
+    assert.match((await bad({ name: 'No attire', pick: 1, choices: [{ attire: '', title: '', items: [] }, { attire: glam.id, items: [] }] })).message, /Choose an attire/);
+    await pb.collection('packages').update(pkg.id, { structure });
+    // Renaming the item re-renders the package's choices.
+    await pb.collection('catalog_items').update(p8r.id, { name: 'Opt 8R glossy' });
+    const renamed = await pb.collection('packages').getOne(pkg.id);
+    assert.deepEqual(renamed.option_groups[1].choices.map((c) => c.label), ['1 pc - Opt 8R glossy', '2 pcs - Opt 5R']);
+  });
+
   await t.test('package photos: uploaded by the admin, ordered, public to the kiosk', async () => {
     const fail = (promise) => promise.then(() => assert.fail('expected the server to refuse'), (err) => err.response);
     const pkg = await pb.collection('packages').create({ code: 'PHOTO-PKG', name: 'Photo Package', amount: 1000, is_active: true,

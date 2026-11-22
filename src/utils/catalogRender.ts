@@ -2,13 +2,13 @@
 // render), so the admin sees exactly what clients will see. Keep the two in step.
 import type {
   CatalogItem, ExchangeOption, FreebieChoice, InclusionSection, ItemPackage, PackageExchange, PackageInclusion, PackageInclusionRef, PackageOptionGroup, PackagePose,
-  PackageStructure, PoseRow,
+  PackagePick, PackageStructure, PickChoice, PoseRow,
 } from '../types';
 
 export const newId = () => Math.random().toString(36).slice(2, 12);
 
 export const emptyStructure = (): PackageStructure => ({
-  frame_item: '', unlimited_shots: true, inclusions: [], freebies: [], exchanges: [], freebie_choices: [], choice_groups: [],
+  frame_item: '', unlimited_shots: true, inclusions: [], freebies: [], exchanges: [], freebie_choices: [], picks: [], choice_groups: [],
 });
 
 export interface Catalog {
@@ -64,6 +64,19 @@ export function readStructure(raw: unknown, catalog?: Catalog): PackageStructure
       id: String(fc.id || newId()), item: fc.item,
       choices: (Array.isArray(fc.choices) ? fc.choices as Loose[] : []).map((c) => ({ id: String(c.id || newId()), label: String(c.label || '') })),
     }] : []));
+  const forOf = (value: unknown): PickChoice['for'] => (value === 'female' || value === 'male' ? value : 'all');
+  const picks: PackagePick[] = (Array.isArray(s.picks) ? s.picks as Loose[] : []).map((pk) => ({
+    id: String(pk.id || newId()), name: String(pk.name || ''), pick: Math.max(1, Math.floor(Number(pk.pick) || 1)),
+    choices: (Array.isArray(pk.choices) ? pk.choices as Loose[] : []).map((c): PickChoice => {
+      const id = String(c.id || newId());
+      if (c.attire || c.title || Array.isArray(c.items)) {
+        return { id, title: String(c.title || ''), ...looks(c), items: rowsOf(c.items), for: forOf(c.for) };
+      }
+      return typeof c.item === 'string' && c.item
+        ? { id, item: c.item, qty: Math.max(1, Math.floor(Number(c.qty) || 1)), for: forOf(c.for) }
+        : { id, label: String(c.label || ''), for: forOf(c.for) };
+    }),
+  }));
   return {
     frame_item: typeof s.frame_item === 'string' ? s.frame_item : '',
     unlimited_shots: s.unlimited_shots !== false,
@@ -71,6 +84,7 @@ export function readStructure(raw: unknown, catalog?: Catalog): PackageStructure
     freebies: Array.isArray(s.freebies) ? s.freebies as string[] : [],
     exchanges,
     freebie_choices: freebieChoices,
+    picks,
     choice_groups: Array.isArray(s.choice_groups) ? s.choice_groups as PackageOptionGroup[] : [],
   };
 }
@@ -93,6 +107,7 @@ export function copyStructure(structure: PackageStructure): PackageStructure {
       options: ex.options.map((o) => ({ ...o, id: newId(), items: o.items.map((r) => ({ ...r })) })),
     })),
     freebie_choices: structure.freebie_choices.map((fc) => ({ ...fc, id: newId(), choices: fc.choices.map((c) => ({ ...c, id: newId() })) })),
+    picks: structure.picks.map((pk) => ({ ...pk, id: newId(), choices: pk.choices.map((c) => ({ ...c, id: newId(), ...(c.items ? { items: c.items.map((r) => ({ ...r })) } : {}) })) })),
     choice_groups: [...structure.choice_groups],
   };
 }
@@ -230,6 +245,21 @@ export function renderPackage(structure: PackageStructure, catalog: Catalog, pho
     const choices = fc.choices.filter((c) => c.label.trim()).map((c) => ({ id: c.id, label: c.label.trim(), for: 'all' as const }));
     if (!item || choices.length < 2) continue;
     optionGroups.push({ id: fc.id, name: item.name.slice(0, 60), pick: 1, freebie: true, choices });
+  }
+  // Options (picks): the client chooses `pick` of the choices; rendered like the server (studio_catalog.js).
+  for (const pk of structure.picks) {
+    const choices = pk.choices.flatMap((c) => {
+      if (c.attire || c.title !== undefined) {
+        const label = poseTitle({ title: c.title ?? '', attire: c.attire, background: c.background }, catalog).trim();
+        const lines = rowLines(c.items ?? [], catalog);
+        return label ? [{ id: c.id, label, for: c.for || 'all', ...(lines.length ? { items: lines } : {}) }] : [];
+      }
+      const item = c.item ? catalog.items.get(c.item) : undefined;
+      const label = item ? itemLine(item, c.qty ?? 1) : (c.label ?? '').trim();
+      return label ? [{ id: c.id, label, for: c.for || 'all' }] : [];
+    });
+    if (!choices.length) continue;
+    optionGroups.push({ id: pk.id, name: pk.name.trim() || 'Choose', pick: Math.min(Math.max(1, pk.pick), choices.length), choices });
   }
   optionGroups.push(...structure.choice_groups);
   return { inclusions, freebies, optionGroups };

@@ -45,3 +45,11 @@ export function clearStudioAuth() {
   stopRealtime();
   pb.authStore.clear();
 }
+
+/**
+ * The public kiosk's own client: its auth store lives in memory and is never signed in, so a
+ * registration from the kiosk page is always sent as a client (a guest), even when a staff member
+ * is signed in on the same browser.
+ */
+export const kioskPb = new PocketBase(getBaseUrl(), new BaseAuthStore());
+kioskPb.autoCancellation(false);

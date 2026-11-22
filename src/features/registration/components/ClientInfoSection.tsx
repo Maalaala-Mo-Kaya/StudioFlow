@@ -33,6 +33,10 @@ interface ClientInfoSectionProps {
   errors: RegistrationErrors;
   /** False for walk-in clients: only the name fields are shown. */
   showSchool?: boolean;
+  /** Kiosk steps: "person" = names (and gender), "school" = student ID, school, level, course, section. */
+  part?: 'person' | 'school' | 'all';
+  /** False when the gender is asked with the package options (an earlier kiosk step). */
+  showGender?: boolean;
 }
 
 export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
@@ -61,6 +65,8 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
   onSectionChange,
   errors,
   showSchool = true,
+  part = 'all',
+  showGender = true,
 }) => {
   return (
     <section aria-labelledby="sec-client-info">
@@ -69,14 +75,14 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
           id="sec-client-info"
           className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-ink m-0"
         >
-          <span className="font-mono text-gold-soft mr-2">01 //</span>
-          Client Information
+          {part === 'school' ? 'School details' : part === 'person' ? 'About you' : 'Client Information'}
         </h2>
         <span id="registration-name-limit" className="font-mono text-[10px] text-neutral-500">
           Up to {registrationNameLimit} characters per name field
         </span>
       </div>
 
+      {part !== 'school' && (<>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label htmlFor="registration-family_name" className="block text-[11px] font-black text-ink uppercase tracking-wider mb-1.5">
@@ -127,7 +133,7 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
         </div>
       </div>
 
-      <div className="mt-4 max-w-sm">
+      {showGender && <div className="mt-4 max-w-sm">
         <label htmlFor="registration-gender" className="block text-[11px] font-black text-ink uppercase tracking-wider mb-1.5">
           Gender <span className="text-red-600">*</span>
         </label>
@@ -142,10 +148,11 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
           {genderOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
         <RegistrationFieldError field="gender" errors={errors} />
-      </div>
+      </div>}
+      </>)}
 
-      {showSchool && (<>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+      {part !== 'person' && showSchool && (<>
+      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${part === 'school' ? '' : 'mt-4'}`}>
         <label className="block text-[11px] font-black text-ink uppercase tracking-wider">
           Student ID <span className="font-normal normal-case">(optional)</span>
           <input value={studentId} onChange={(event) => onStudentIdChange(event.target.value)} maxLength={80}

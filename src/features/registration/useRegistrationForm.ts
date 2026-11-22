@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ClientResponseError } from 'pocketbase';
-import { pb } from '../../db/pocketbase';
+// The kiosk talks to the server as a guest, whoever is signed in on this browser.
+import { kioskPb as pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import type {
   Organization,
@@ -193,7 +194,8 @@ export function useRegistrationForm() {
     if (fName) setFamilyName(fName);
     setGivenName(gName);
     if (item.email) setEmail(item.email);
-    if (item.mobile_number) setMobileNumber(item.mobile_number);
+    // Same rule as typing: digits only, 11 at most (+63 9… becomes 09…).
+    if (item.mobile_number) setMobileNumber(item.mobile_number.replace(/\D/g, '').replace(/^63(?=9)/, '0').slice(0, 11));
     if (item.section) setSection(item.section);
     if (item.organization && organizations.some((school) => school.id === item.organization)) {
       if (item.organization !== selectedOrgId) setSchoolCatalog(null);
@@ -247,11 +249,11 @@ export function useRegistrationForm() {
     });
   };
 
-  // Form Submission
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (submitting.current) return;
-
+  /**
+   * Every problem in the form, by field (the kiosk steps check their own fields with it before Next,
+   * and Submit checks all of them).
+   */
+  const collectErrors = (): RegistrationErrors => {
     const cleanEmail = email.trim();
     const cleanMobile = mobileNumber.trim();
     const fieldErrors: RegistrationErrors = {};
@@ -283,16 +285,27 @@ export function useRegistrationForm() {
     }
     if (cleanEmail && !emailPattern.test(cleanEmail)) fieldErrors.email = 'Enter a valid email address.';
     if (!cleanMobile) fieldErrors.mobile_number = 'Mobile number is required.';
-    else if (!mobilePattern.test(cleanMobile.replace(/[ -]/g, ''))) {
-      fieldErrors.mobile_number = 'Enter a valid Philippine mobile number, such as 0917-000-0000.';
+    else if (!/^09\d{9}$/.test(cleanMobile) || !mobilePattern.test(cleanMobile)) {
+      fieldErrors.mobile_number = 'Enter the 11-digit mobile number starting with 09, such as 09170000000.';
     }
     // Options are checked once the gender is known (some choices are for one gender only).
     const optionsMissing = selectedPackage && clientGender ? missingPicks(packageOptionGroups, clientGender, validPicks) : null;
     if (optionsMissing) fieldErrors.package_options = optionsMissing;
     if (!termsAccepted) fieldErrors.terms_accepted = 'Agree to the Terms & Conditions to proceed.';
+    if (!selectedPackage) fieldErrors.package = packageRequiredMessage;
+    if (!signatureBlob) fieldErrors.signature = 'Provide your digital signature on the signature pad.';
+    return fieldErrors;
+  };
+
+  // Form Submission
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting.current) return;
+
+    const cleanEmail = email.trim();
+    const cleanMobile = mobileNumber.trim();
+    const fieldErrors = collectErrors();
     if (!selectedPackage || !signatureBlob || Object.keys(fieldErrors).length) {
-      if (!selectedPackage) fieldErrors.package = packageRequiredMessage;
-      if (!signatureBlob) fieldErrors.signature = 'Provide your digital signature on the signature pad.';
       showErrors(fieldErrors);
       return;
     }
@@ -504,6 +517,9 @@ export function useRegistrationForm() {
     isSubmitting,
     submittedRecord,
     handleSubmit,
+    // Kiosk steps: check a step's fields before Next, and show only those errors.
+    collectErrors,
+    showErrors,
     resetForm,
   };
 }

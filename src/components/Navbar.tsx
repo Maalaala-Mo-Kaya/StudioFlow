@@ -73,6 +73,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
           {/* Right Side: Minimal Staff Session or Single Login Trigger */}
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <ThemeToggle />
+            {user && currentTab === 'register' && (
+              // The kiosk is the public client form: it never sends the staff sign-in kept on this browser.
+              <span title={`Registrations on this page are sent as a client, not as ${user.name}.`}
+                className="hidden sm:inline-flex shrink-0 items-center border border-gold/60 px-2 py-1 text-[9px] font-mono font-bold uppercase tracking-widest text-gold">
+                Kiosk · public form
+              </span>
+            )}
             {user && (
               <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 {stations.length > 0 && (
