@@ -605,10 +605,11 @@ export function useAdminData() {
   };
 
   /** Restores the catalog copy inside an exported price list (catalogBackup.ts). */
-  const handleRestoreCatalog = async (backup: CatalogBackup, update: boolean, onProgress?: (label: string, fraction: number) => void) => {
+  const handleRestoreCatalog = async (backup: CatalogBackup, update: boolean, onProgress: (label: string, fraction: number) => void,
+    replacements: ReadonlyMap<string, string>) => {
     try {
       const { restoreCatalog } = await import('./catalogBackup');
-      return await restoreCatalog(pb, backup, update, onProgress);
+      return await restoreCatalog(pb, backup, update, onProgress, replacements);
     } finally {
       await loadAllData();
     }

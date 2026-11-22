@@ -108,6 +108,8 @@ export const AdminPage: React.FC = () => {
             <AdminCatalogImportTab
               packages={admin.packages}
               addOns={admin.addOns}
+              items={admin.catalogItems}
+              staffAccounts={admin.staffAccounts}
               onSave={admin.handleImportCatalog}
               onRestore={admin.handleRestoreCatalog}
               onOpenCatalog={() => admin.setActiveTab('packages')}
