@@ -27,6 +27,8 @@ interface PackageSelectionSectionProps {
   /** The client's gender and option picks, so the package popup can take the picks too. */
   gender?: Gender | '';
   optionPicks?: OptionPicks;
+  /** Kiosk steps: "cards" = the packages, "extras" = add-ons, payment mode and total. */
+  part?: 'cards' | 'extras' | 'all';
   onOptionPicksChange?: (picks: OptionPicks) => void;
 }
 
@@ -45,6 +47,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   emptyMessage,
   gender,
   optionPicks,
+  part = 'all',
   onOptionPicksChange,
 }) => {
   const [detailsId, setDetailsId] = useState<string | null>(null);
@@ -81,13 +84,13 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       tabIndex={-1}
       className="scroll-mt-(--registration-scroll-offset) aria-invalid:outline-2 aria-invalid:outline-offset-8 aria-invalid:outline-red-600"
     >
+      {part !== 'extras' && (<>
       <div className="flex items-center justify-between gap-2 pb-2.5 border-b-2 border-line mb-5">
         <h2
           id="sec-packages"
           className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-ink m-0"
         >
-          <span className="font-mono text-gold-soft mr-2">03 //</span>
-          Job Order Package &amp; Add-Ons
+          {part === 'cards' ? 'Choose your package' : <>Job Order Package &amp; Add-Ons</>}
         </h2>
         {packages.length > 0 && (
           <div className="shrink-0 flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2 font-mono">
@@ -277,12 +280,15 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
         </p>
       )}
 
+      </>)}
+
+      {part !== 'cards' && (<>
       {/* Optional add-ons, then single items sold on their own (switched on by the admin) */}
       {([
         ['ADDONS (Optional)', addOnsList.filter((addon) => !addon.catalog_item)],
         ['EXTRA PRINTS & ITEMS (Optional, price each)', addOnsList.filter((addon) => addon.catalog_item)],
       ] as const).map(([title, list]) => list.length > 0 && (
-        <div key={title} className="mt-6 pt-5 border-t border-neutral-200">
+        <div key={title} className={part === 'extras' ? 'mb-6' : 'mt-6 pt-5 border-t border-neutral-200'}>
           <h4 className="font-mono text-[11px] font-black text-ink uppercase tracking-widest mb-3">
             {title}
           </h4>
@@ -376,6 +382,8 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
           </span>
         </div>
       </div>
+
+      </>)}
 
       {/* Package Inclusions Details Modal */}
       <PackageDetailsModal

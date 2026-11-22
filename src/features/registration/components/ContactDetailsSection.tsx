@@ -24,7 +24,6 @@ export const ContactDetailsSection: React.FC<ContactDetailsSectionProps> = ({
           id="sec-contact"
           className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-ink m-0"
         >
-          <span className="font-mono text-gold-soft mr-2">02 //</span>
           Contact Details
         </h2>
         <span className="font-mono text-[10px] text-neutral-500 uppercase">SMS &amp; Drive Link</span>
@@ -38,12 +37,17 @@ export const ContactDetailsSection: React.FC<ContactDetailsSectionProps> = ({
           <input
             {...validationProps('mobile_number', errors.mobile_number)}
             type="tel"
+            inputMode="numeric"
+            autoComplete="tel-national"
+            maxLength={11}
             required
-            placeholder="0917-000-0000"
+            placeholder="09170000000"
             value={mobileNumber}
-            onChange={(e) => onMobileNumberChange(e.target.value)}
+            // Digits only, 11 at most: anything else typed or pasted (dashes, spaces, letters) is dropped.
+            onChange={(e) => onMobileNumberChange(e.target.value.replace(/\D/g, '').slice(0, 11))}
             className="w-full min-h-[48px] text-sm px-3.5 py-2.5 border border-neutral-400 focus:border-line aria-invalid:border-red-600 aria-invalid:focus:border-red-600 bg-canvas focus:bg-panel font-mono font-bold"
           />
+          <p className="mt-1 text-[10px] font-mono text-neutral-500">11 digits, starting with 09 ({mobileNumber.length}/11)</p>
           <RegistrationFieldError field="mobile_number" errors={errors} />
         </div>
         <div>

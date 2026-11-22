@@ -19,7 +19,6 @@ export const ClientKindPicker: React.FC<{
   <section aria-labelledby="sec-client-kind">
     <div className="flex items-center justify-between pb-2.5 border-b-2 border-line mb-4">
       <h2 id="sec-client-kind" className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-ink m-0">
-        <span className="font-mono text-gold-soft mr-2">00 //</span>
         Type of Client
       </h2>
       <span className="font-mono text-[10px] text-neutral-500 uppercase">Required *</span>

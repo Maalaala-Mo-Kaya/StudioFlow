@@ -20,7 +20,7 @@ export const PackageOptionsSection: React.FC<PackageOptionsSectionProps> = ({ pa
     <section aria-labelledby="sec-package-options">
       <div className="flex items-center justify-between pb-2.5 border-b-2 border-line mb-5">
         <h2 id="sec-package-options" className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-ink m-0">
-          <span className="font-mono text-gold-soft mr-2">03A //</span>
+
           Package Options
         </h2>
         <span className="font-mono text-[10px] text-neutral-500 uppercase">Included in {packageName}</span>
@@ -31,7 +31,7 @@ export const PackageOptionsSection: React.FC<PackageOptionsSectionProps> = ({ pa
           <PackageOptionsPicker groups={groups} gender={gender} picks={picks} onChange={onChange} error={errors.package_options} />
         ) : (
           <p className="p-3 border border-dashed border-neutral-400 text-xs text-neutral-600 font-sans">
-            Select the client's gender above to see the options for this package.
+            Choose Female or Male above to see the options for this package.
           </p>
         )}
       </div>
