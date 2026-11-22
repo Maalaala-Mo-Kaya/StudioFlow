@@ -65,8 +65,10 @@ export interface AuditGroup {
   /** Active job orders made in the period. */
   count: number;
   billed: number;
-  /** Payments received minus refunds given in the period, for this group's job orders. */
+  /** Studio revenue: Studio cash received minus refunds in the period (as in the Studio revenue figure). */
   collected: number;
+  /** Studio discount credits granted in the period. Billed − discount − collected − balance = 0 for each group. */
+  discount: number;
   /** Studio charges on this group's job orders (made in the period) that no cash has been counted toward yet. */
   balance: number;
   /**
@@ -221,11 +223,11 @@ export function buildAudit(
   const packageOf = (reg?: Registration) => reg?.package_snapshot?.id || reg?.package || UNKNOWN_PACKAGE;
   const schools = new Map<string, AuditGroup>();
   for (const org of catalog.organizations ?? []) {
-    schools.set(org.id, { key: org.id, code: org.code || 'ORG', name: org.name, count: 0, billed: 0, collected: 0, balance: 0, held: 0 });
+    schools.set(org.id, { key: org.id, code: org.code || 'ORG', name: org.name, count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
   }
   const packagesByKey = new Map<string, AuditGroup>();
   for (const pkg of catalog.packages ?? []) {
-    packagesByKey.set(pkg.id, { key: pkg.id, code: pkg.code || 'PKG', name: pkg.name, count: 0, billed: 0, collected: 0, balance: 0, held: 0 });
+    packagesByKey.set(pkg.id, { key: pkg.id, code: pkg.code || 'PKG', name: pkg.name, count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
   }
   const schoolGroup = (reg?: Registration) => {
     const key = groupOf(reg);
@@ -233,8 +235,8 @@ export function buildAudit(
     if (!group) {
       const org = reg?.expand?.organization;
       group = key === WALKIN_KEY
-        ? { key, code: 'WALK-IN', name: 'Walk-in clients', count: 0, billed: 0, collected: 0, balance: 0, held: 0 }
-        : { key, code: org?.code || 'ORG', name: org?.name || 'Removed school', count: 0, billed: 0, collected: 0, balance: 0, held: 0 };
+        ? { key, code: 'WALK-IN', name: 'Walk-in clients', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 }
+        : { key, code: org?.code || 'ORG', name: org?.name || 'Removed school', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 };
       schools.set(key, group);
     }
     return group;
@@ -244,7 +246,7 @@ export function buildAudit(
     let group = packagesByKey.get(key);
     if (!group) {
       const pkg = reg?.package_snapshot || reg?.expand?.package;
-      group = { key, code: pkg?.code || '—', name: pkg?.name || 'No package / removed package', count: 0, billed: 0, collected: 0, balance: 0, held: 0 };
+      group = { key, code: pkg?.code || '—', name: pkg?.name || 'No package / removed package', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 };
       packagesByKey.set(key, group);
     }
     return group;
@@ -276,8 +278,8 @@ export function buildAudit(
       fixed: Boolean(discount.fixed), reason: discount.reason || '', by: discount.by || '', at: discount.at || '',
       earlierOrder: Boolean(since) && !periodOrderIds.has(reg.id),
     });
-    schoolGroup(reg).collected += studioCredit;
-    packageGroup(reg).collected += studioCredit;
+    schoolGroup(reg).discount += studioCredit;
+    packageGroup(reg).discount += studioCredit;
   }
   for (const row of [...countedPayments, ...refundRows]) {
     for (const group of [schoolGroup(row.registration), packageGroup(row.registration)]) {
@@ -287,12 +289,12 @@ export function buildAudit(
     for (const key of revenueKeys) revenue[key] += row.revenue[key];
   }
   const toPesos = (group: AuditGroup): AuditGroup => ({
-    ...group, billed: pesos(group.billed), collected: pesos(group.collected), balance: pesos(group.balance), held: pesos(group.held),
+    ...group, billed: pesos(group.billed), collected: pesos(group.collected), discount: pesos(group.discount), balance: pesos(group.balance), held: pesos(group.held),
   });
   // Walk-ins last; groups with nothing in the period after the active ones.
   const ordered = (groups: Iterable<AuditGroup>) => [...groups]
     .sort((a, b) => Number(a.key === WALKIN_KEY) - Number(b.key === WALKIN_KEY)
-      || Number(!a.count && !a.collected) - Number(!b.count && !b.collected) || a.code.localeCompare(b.code))
+      || Number(!a.count && !a.collected && !a.discount) - Number(!b.count && !b.collected && !b.discount) || a.code.localeCompare(b.code))
     .map(toPesos);
 
   const netOnOrders = paidOnOrders - refundedOnOrders;

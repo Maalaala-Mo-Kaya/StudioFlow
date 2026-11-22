@@ -366,31 +366,33 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
     summary.getCell(`A${rowNumber}`).value = title;
     summary.getCell(`A${rowNumber}`).font = { bold: true, size: 12 };
     rowNumber += 1;
-    // Separate small table: Name | Orders | Billed | Collected | Still to settle | Held across columns A-F.
-    summary.getRow(rowNumber).values = ['Name', 'Orders', 'Studio billed', 'Studio revenue', 'Studio still to settle', 'Held, not yet split'];
-    summary.getCell(`F${rowNumber}`).note = 'Cash received but not yet counted as Studio or MUA: downpayments on orders that mix Studio and MUA charges (split when fully paid), or charges with no revenue type. The total equals Unallocated cash above.';
+    // Separate small table: Name | Orders | Billed | Discount | Revenue (cash) | Still to settle | Held, columns A-G.
+    // Studio billed − Discount − Studio revenue − Still to settle = 0 on every row; the revenue total equals Studio revenue above.
+    summary.getRow(rowNumber).values = ['Name', 'Orders', 'Studio billed', 'Discount', 'Studio revenue (cash)', 'Studio still to settle', 'Held, not yet split'];
+    summary.getCell(`G${rowNumber}`).note = 'Cash received but not yet counted as Studio or MUA: downpayments on orders that mix Studio and MUA charges (split when fully paid), or charges with no revenue type. The total equals Unallocated cash above.';
     headerRowStyle(summary, rowNumber);
     const first = rowNumber + 1;
-    for (const group of groups.filter((item) => item.count || item.billed || item.collected || item.balance || item.held)) {
+    for (const group of groups.filter((item) => item.count || item.billed || item.collected || item.discount || item.balance || item.held)) {
       rowNumber += 1;
       const row = summary.getRow(rowNumber);
-      row.values = [`${group.code} · ${group.name}`, group.count, group.billed, group.collected, group.balance, group.held];
-      [3, 4, 5, 6].forEach((column) => { row.getCell(column).numFmt = PESO; });
+      row.values = [`${group.code} · ${group.name}`, group.count, group.billed, group.discount, group.collected, group.balance, group.held];
+      [3, 4, 5, 6, 7].forEach((column) => { row.getCell(column).numFmt = PESO; });
       row.eachCell((cell) => { cell.border = box; });
     }
     const last = rowNumber;
     rowNumber += 1;
     const total = summary.getRow(rowNumber);
-    const listed = groups.filter((item) => item.count || item.billed || item.collected || item.balance || item.held);
+    const listed = groups.filter((item) => item.count || item.billed || item.collected || item.discount || item.balance || item.held);
     const sumOf = (column: string, result: number) => (last >= first ? { formula: `SUM(${column}${first}:${column}${last})`, result } : 0);
     const add = (value: (group: AuditGroup) => number) => Math.round(listed.reduce((sum, group) => sum + value(group), 0) * 100) / 100;
-    total.values = ['TOTAL', sumOf('B', add((g) => g.count)), sumOf('C', add((g) => g.billed)), sumOf('D', add((g) => g.collected)), sumOf('E', add((g) => g.balance)), sumOf('F', add((g) => g.held))];
-    [3, 4, 5, 6].forEach((column) => { total.getCell(column).numFmt = PESO; });
+    total.values = ['TOTAL', sumOf('B', add((g) => g.count)), sumOf('C', add((g) => g.billed)), sumOf('D', add((g) => g.discount)), sumOf('E', add((g) => g.collected)), sumOf('F', add((g) => g.balance)), sumOf('G', add((g) => g.held))];
+    [3, 4, 5, 6, 7].forEach((column) => { total.getCell(column).numFmt = PESO; });
     totalRowStyle(summary, rowNumber);
   };
   summary.getColumn(4).width = 16;
   summary.getColumn(5).width = 20;
-  summary.getColumn(6).width = 18;
+  summary.getColumn(6).width = 20;
+  summary.getColumn(7).width = 18;
   breakdown('Studio by School / Client', audit.bySchool);
   breakdown('Studio by Package', audit.byPackage);
 

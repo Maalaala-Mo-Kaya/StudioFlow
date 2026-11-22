@@ -55,7 +55,8 @@ function makeLookups(app) {
       balance: balance / 100,
     };
   };
-  return { find, order };
+  const completions = (jobId) => app.findRecordsByFilter("mua_completions", "job_id = {:jobId}", "", 0, 0, { jobId });
+  return { find, order, completions };
 }
 
 /** Payouts by id (voided ones included, so a line can say its payout was voided). */
@@ -94,7 +95,15 @@ function sharedLines(job, lookups) {
   if (job.getString("status") === "cancelled" || !job.getString("job_order_no")) return [];
   const lines = [];
   const pkg = workflow.json(job, "package_snapshot");
-  const isShared = (collection, id) => !lookups.find(collection, id)?.getBool("requires_mua");
+  // Already credited to an artist (a completion logged for it, e.g. Wardrobe before it became a shared
+  // charge): it is on that artist's lines, so it is not counted again in the pool.
+  const credited = new Set();
+  for (const log of lookups.completions(job.id)) {
+    const sources = workflow.json(log, "sources");
+    for (const source of Array.isArray(sources) ? sources : []) if (source?.id) credited.add(source.source + ":" + source.id);
+  }
+  const isShared = (collection, id) => !lookups.find(collection, id)?.getBool("requires_mua")
+    && !credited.has((collection === "packages" ? "package:" : "add_on:") + id);
   if (pkg?.revenue_category === "mua" && isShared("packages", pkg.id)) lines.push({ item: pkg.name, amount: cents(pkg.amount) });
   for (const item of savedAddOns(job)) {
     if (item.revenue_category === "mua" && isShared("add_ons", item.id)) {

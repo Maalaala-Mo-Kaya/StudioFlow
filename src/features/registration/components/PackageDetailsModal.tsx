@@ -43,10 +43,11 @@ function useWide() {
 /** A headline figure: "36 prints", "Pick 3 shots", "7 free". */
 function Stat({ icon: Icon, value, label }: { icon: React.ComponentType<{ className?: string }>; value: React.ReactNode; label: string }) {
   return (
-    <div className="min-w-0 p-1.5 sm:p-2 border border-gold/50 bg-gold-wash text-center">
-      <Icon className="w-4 h-4 mx-auto text-gold" />
-      <div className="font-mono text-lg font-black leading-tight text-ink">{value}</div>
-      <div className="text-[9px] font-black uppercase tracking-wider text-neutral-600">{label}</div>
+    // Compact on phones (all tiles share one row); full size from sm up.
+    <div className="min-w-0 px-1 py-1 sm:p-2 border border-gold/50 bg-gold-wash text-center">
+      <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 mx-auto text-gold" />
+      <div className="font-mono text-sm sm:text-lg font-black leading-tight text-ink">{value}</div>
+      <div className="text-[7.5px] sm:text-[9px] font-black uppercase tracking-wide sm:tracking-wider leading-tight text-neutral-600 break-words">{label}</div>
     </div>
   );
 }
@@ -140,7 +141,9 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </button>
           </div>
           {(s.prints > 0 || s.pick > 0 || s.freebies.length > 0 || s.frame) && (
-            <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(4.5rem,1fr))] gap-1.5 sm:gap-2">
+            // One row whatever the count (2–4 tiles), so a phone never wraps them onto a second line.
+            <div className="mt-3 grid gap-1 sm:gap-2"
+              style={{ gridTemplateColumns: `repeat(${[s.frame, s.prints > 0, s.shots, s.freebies.length > 0].filter(Boolean).length || 1}, minmax(0, 1fr))` }}>
               {s.frame && <Stat icon={Frame} value="1" label="Frame" />}
               {s.prints > 0 && <Stat icon={Printer} value={s.prints} label="Prints" />}
               {s.shots && <Stat icon={Camera} value={s.pick || '∞'} label={s.pick ? 'Shots you pick' : 'Shots'} />}

@@ -1298,7 +1298,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal((await recordsFor('payments', complimentary)).length, 0);
     const complimentaryAudit = await auditFor(complimentary);
     assert.equal(complimentaryAudit.totals.analyticsCollected, 1500);
-    assert.equal(complimentaryAudit.byPackage.find((group) => group.key === studio.id).collected, 1500);
+    // A 100% discount: no Studio revenue (cash), the whole charge is the group's discount.
+    assert.deepEqual(['collected', 'discount', 'balance'].map((key) => complimentaryAudit.byPackage.find((group) => group.key === studio.id)[key]), [0, 1500, 0]);
     await send(`${api}/registrations/${complimentary.id}/cancel`, {
       method: 'POST', token: admin, body: { reason: 'Client postponed' },
     });
@@ -2059,6 +2060,10 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const { analyticsCollected, netCollections, discountCredits, revenue } = buildAudit([settled], [payment], []).totals;
     assert.deepEqual([analyticsCollected, netCollections, discountCredits], [950, 575, 375]);
     assert.deepEqual(revenue, { studio: 375, mua: 200, unallocated: 0 });
+    // The school / package breakdowns: cash revenue (equal to Studio revenue) and the discount apart,
+    // and billed − discount − revenue − still to settle = 0.
+    const [school] = buildAudit([settled], [payment], []).bySchool.filter((group) => group.count);
+    assert.deepEqual([school.billed, school.discount, school.collected, school.balance], [750, 375, 375, 0]);
     const reasonEdit = request(settled, 'pos-reason', 0, 50, null);
     reasonEdit.discount = { reason: 'Student council representative' };
     const corrected = await confirm(settled, reasonEdit);

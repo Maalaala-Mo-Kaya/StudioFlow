@@ -162,7 +162,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   );
   const isReconciled = audit.ordersBalanced && audit.paymentsBalanced;
   // School and package groups report Studio activity only.
-  const hasActivity = (group: AuditGroup) => Boolean(group.count || group.billed || group.collected || group.balance || group.held);
+  const hasActivity = (group: AuditGroup) => Boolean(group.count || group.billed || group.collected || group.discount || group.balance || group.held);
   // Revenue types that were never chosen: their sales can't be counted as Studio or MUA.
   const untypedCatalog = [
     ...packages.filter((pkg) => !pkg.revenue_category).map((pkg) => `${pkg.name} (package)`),
@@ -419,10 +419,12 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             <PhilippinePeso className="w-4 h-4" />
           </div>
           <div className="font-mono text-2xl sm:text-3xl font-black text-gold">
-            {formatCurrency(shown.totalCollections)}
+            {formatCurrency(shown.totalReceived - shown.totalRefunds)}
           </div>
           <p className="text-[11px] text-neutral-400 mt-1">
-            {formatCurrency(shown.totalReceived - shown.totalRefunds, { exact: true })} net payments + {formatCurrency(shown.totalDiscountCredits, { exact: true })} discount credits
+            {shown.totalDiscountCredits > 0
+              ? <>Cash, net of refunds · + {formatCurrency(shown.totalDiscountCredits, { exact: true })} discount credits = {formatCurrency(shown.totalCollections, { exact: true })} settled</>
+              : 'Cash received, net of refunds'}
           </p>
         </div>
 
@@ -793,8 +795,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
 
 const sumGroups = (groups: AuditGroup[]): AuditGroup => groups.reduce((sum, group) => ({
   ...sum, count: sum.count + group.count, billed: sum.billed + group.billed, collected: sum.collected + group.collected,
-  balance: sum.balance + group.balance, held: sum.held + group.held,
-}), { key: 'total', code: 'TOTAL', name: '', count: 0, billed: 0, collected: 0, balance: 0, held: 0 });
+  discount: sum.discount + group.discount, balance: sum.balance + group.balance, held: sum.held + group.held,
+}), { key: 'total', code: 'TOTAL', name: '', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
 
 /**
  * A school / package row's figures: Studio revenue counted, cash held until a mixed order is fully
@@ -803,13 +805,16 @@ const sumGroups = (groups: AuditGroup[]): AuditGroup => groups.reduce((sum, grou
 const GroupFigures: React.FC<{ group: AuditGroup; total?: boolean; fallback?: string }> = ({ group, total, fallback }) => (
   <div className="text-right">
     <div className={`${total ? '' : 'font-black '}text-ink`}>{formatCurrency(group.collected, { exact: true })}</div>
+    {group.discount > 0 && (
+      <span className="text-[10px] text-neutral-500 font-bold block">Discount given: {formatCurrency(group.discount, { exact: true })}</span>
+    )}
     {group.held > 0 && (
       <span className="text-[10px] text-amber-700 font-bold block">Held, not yet split: {formatCurrency(group.held, { exact: true })}</span>
     )}
     {group.balance > 0 && (
       <span className="text-[10px] text-neutral-600 font-bold block">Studio still to settle: {formatCurrency(group.balance, { exact: true })}</span>
     )}
-    {!group.held && !group.balance && fallback && (
+    {!group.held && !group.balance && !group.discount && fallback && (
       <span className={`text-[10px] font-bold block ${total ? 'text-neutral-500' : 'text-emerald-600'}`}>{fallback}</span>
     )}
   </div>
@@ -819,11 +824,13 @@ const GroupFigures: React.FC<{ group: AuditGroup; total?: boolean; fallback?: st
 const GroupFootnote: React.FC<{ groups: AuditGroup[] }> = ({ groups }) => {
   const held = groups.some((group) => group.held > 0);
   const toSettle = groups.some((group) => group.balance > 0);
-  if (!held && !toSettle) return null;
+  const discount = groups.some((group) => group.discount > 0);
+  if (!held && !toSettle && !discount) return null;
   return (
     <p className="mt-3 pt-2 border-t border-line text-[10px] text-neutral-500 font-sans leading-relaxed">
       {held && <><b className="text-amber-700">Held, not yet split:</b> payments on orders that mix Studio and MUA charges, counted into each once the order is fully paid (or charges with no revenue type). </>}
-      {toSettle && <><b className="text-neutral-600">Studio still to settle:</b> Studio charges no payment has been counted toward yet.</>}
+      {toSettle && <><b className="text-neutral-600">Studio still to settle:</b> Studio charges no payment has been counted toward yet. </>}
+      {discount && <><b className="text-neutral-600">Discount given:</b> Studio discount credits; not revenue, so the amounts above are cash and add up to the Studio revenue card.</>}
     </p>
   );
 };
