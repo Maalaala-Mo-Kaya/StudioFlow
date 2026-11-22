@@ -24,6 +24,13 @@ const checkCatalogItem = (e) => {
   const kind = e.record.getString("client_kind") || "both";
   if (!["school", "walkin", "both"].includes(kind)) throw new BadRequestError("Choose School, Walk-in or Both.");
   e.record.set("client_kind", kind);
+  if (e.record.getString("category") !== "other") e.record.set("required_photographers", []);
+  if (e.record.isNew() || e.record.getString("required_photographers") !== e.record.original().getString("required_photographers")) {
+    const photography = require(__hooks + "/studio_photography.js");
+    if (e.record.getStringSlice("required_photographers").some((id) => !photography.enabledPhotographer(e.app, id))) {
+      throw new BadRequestError("Select enabled photographer accounts for the item.");
+    }
+  }
   if (e.record.getBool("is_active") && !(amount > 0)) {
     throw new BadRequestError(`Set a price for "${name}" before selling it at the kiosk.`);
   }

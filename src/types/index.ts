@@ -166,6 +166,7 @@ export interface ChosenPackageOptions {
 export type CatalogItemCategory = 'print' | 'frame' | 'other' | 'attire' | 'background';
 /** What the admin sends when saving a single item. */
 export interface CatalogItemInput {
+  required_photographers?: string[];
   name?: string;
   category?: CatalogItemCategory;
   amount?: number;
@@ -174,6 +175,7 @@ export interface CatalogItemInput {
 }
 
 export interface CatalogItem {
+  required_photographers?: string[];
   id: string;
   name: string;
   category: CatalogItemCategory;
@@ -342,7 +344,20 @@ export interface OrderChange {
   total_after: number;
 }
 
+export interface PhotographyTask {
+  id: string;
+  name: string;
+  photographerId: string;
+  photographerName: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  completedAt?: string;
+  finishingAt?: string;
+  removedAt?: string;
+  assignments?: { from: string; fromName: string; to: string; toName: string; by: string; at: string }[];
+}
+
 export interface Registration {
+  photography?: { tasks: PhotographyTask[] } | null;
   id: string;
   job_order_no: string | null;
   pictorial_date?: string;

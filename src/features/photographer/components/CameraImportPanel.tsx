@@ -96,14 +96,16 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
                   {' · last photo '}{sinceLabel(camera.lastImport)}
                 </div>
               </div>
-              <button
+              {camera.taskId ? (
+                <p role="status" className="text-xs font-bold text-gold">{camera.finishing ? 'Waiting for photos to finish syncing' : 'Linked to a photography session'}</p>
+              ) : <button
                 type="button"
                 disabled={disabled}
                 onClick={() => void link.unlinkClient(client.id)}
                 className="btn-tactile shrink-0 min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-obsidian-2 text-gold border border-gold text-[11px] font-black uppercase tracking-wider cursor-pointer disabled:opacity-50"
               >
                 <Unlink className="w-3.5 h-3.5" /> Stop Sending
-              </button>
+              </button>}
             </div>
           ) : camera.enabled && (
             <p className="text-xs text-neutral-600">

@@ -20,6 +20,7 @@ import { useStudioSettings } from '../../../hooks/useStudioSettings';
 import { MAKEUP_LOOKS, MAKEUP_LOOK_NOTE_MAX } from '../../../constants/makeupLook';
 import { discountCents, revenueTerms } from '../../../utils/revenue';
 import { PackageOptionsPicker } from '../../../components/common/PackageOptionsPicker';
+import { PhotographyProgress } from '../../photographer/components/PhotographyProgress';
 import {
   chosenOptionLines, keepValidPicks, missingPicks, optionGroups, picksFromSaved, picksPayload, type OptionPicks,
 } from '../../../utils/packageOptions';
@@ -230,6 +231,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
           </button>
         </div>
 
+        <PhotographyProgress registration={reg} audit />
         <form onSubmit={handleSubmit} className="space-y-4">
           <fieldset className="border border-line p-3 space-y-2">
             <legend className="px-1 font-black uppercase">Revenue review and discounts</legend>

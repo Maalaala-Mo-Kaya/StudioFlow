@@ -20,6 +20,9 @@ export interface CameraStatus {
     /** Photos currently in the client's folder (null if it can't be read). */
     photoCount: number | null;
   };
+  taskId: string;
+  photographerId: string;
+  finishing: boolean;
   sessionStarted: string;
   sessionImported: number;
   /** Files in the folder that are not being sent to the linked client. */

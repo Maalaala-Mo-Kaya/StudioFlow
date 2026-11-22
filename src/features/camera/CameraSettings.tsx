@@ -141,7 +141,7 @@ export const CameraSettings: React.FC = () => {
             <li>Point the camera software (EOS Utility, Lightroom, Capture One, Nikon tether, Wi-Fi/FTP transfer…) at the folder above.</li>
             <li>On the Photo Floor, the photographer picks this camera under <strong>Camera Auto-Import</strong>.</li>
             <li>Pressing <strong>Call Client</strong> links the camera to that client. Every finished shot moves into the client's folder within a few seconds.</li>
-            <li><strong>Mark Done</strong> sends the last shots and unlinks the camera. Shots taken with no client linked stay in the camera folder.</li>
+            <li>After your camera software finishes sending the last shot, press <strong>Mark Done</strong>. Assigned sessions keep the camera linked while StudioFlow checks for remaining files and syncs them.</li>
           </ol>
           <p className="text-neutral-500 pt-1">
             If the camera is tethered to a different PC, share this folder on the network and save to that share.

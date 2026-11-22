@@ -7,6 +7,7 @@ import {
   formatQueueNumber,
 } from '../../../utils/formatters';
 import { clientDetail, clientGroup } from '../../../utils/clientInfo';
+import { PhotographyProgress } from './PhotographyProgress';
 
 interface PhotographerHistoryListProps {
   recentlyDone: Registration[];
@@ -56,9 +57,9 @@ export const PhotographerHistoryList: React.FC<PhotographerHistoryListProps> = (
               </div>
 
               <div className="flex items-center justify-between sm:justify-end gap-3 pl-11 sm:pl-0">
-                <span className="inline-flex items-center gap-1 font-mono text-[10px] font-black uppercase tracking-wider text-ink bg-gold-wash px-2.5 py-1 border border-gold">
+                {reg.photography?.tasks.length ? <PhotographyProgress registration={reg} /> : <span className="inline-flex items-center gap-1 font-mono text-[10px] font-black uppercase tracking-wider text-ink bg-gold-wash px-2.5 py-1 border border-gold">
                   <CheckCircle2 className="w-3.5 h-3.5 text-gold-soft" /> Done Shooting
-                </span>
+                </span>}
               </div>
             </div>
           ))}

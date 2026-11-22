@@ -23,7 +23,7 @@ export interface CatalogBackup {
   format: typeof FORMAT;
   version: 1;
   exported_at: string;
-  items: { id: string; name: string; category: string; amount: number; client_kind: string; is_active: boolean }[];
+  items: { id: string; name: string; category: string; amount: number; client_kind: string; is_active: boolean; required_photographers?: string[] }[];
   poses: { id: string; name: string; items: { item: string; qty: number }[] }[];
   packages: {
     id: string; code: string; name: string; amount: number; description: string; tagline: string;
@@ -43,6 +43,7 @@ export function makeBackup(data: { items: CatalogItem[]; poses: ItemPackage[]; p
     items: data.items.map((i) => ({
       id: i.id, name: i.name, category: i.category || 'other', amount: Number(i.amount) || 0,
       client_kind: i.client_kind || 'both', is_active: !!i.is_active,
+      ...(i.required_photographers === undefined ? {} : { required_photographers: i.required_photographers }),
     })),
     poses: data.poses.map((p) => ({ id: p.id, name: p.name, items: (p.items || []).map((r) => ({ item: r.item, qty: Number(r.qty) || 1 })) })),
     packages: data.packages.map((p) => ({
@@ -228,7 +229,8 @@ export async function restoreCatalog(pb: PocketBase, backup: CatalogBackup, upda
   for (const b of backup.items) {
     step('Single items');
     const found = items.find((r) => r.id === b.id) ?? items.find((r) => key(r.name) === key(b.name) && (r.category || 'other') === b.category);
-    const body = { name: b.name, category: b.category, amount: b.amount, client_kind: b.client_kind, is_active: b.is_active && b.amount > 0 };
+    const body = { name: b.name, category: b.category, amount: b.amount, client_kind: b.client_kind, is_active: b.is_active && b.amount > 0,
+      ...(Array.isArray(b.required_photographers) ? { required_photographers: b.required_photographers } : {}) };
     const id = await put('catalog_items', 'Single item', b.name, found, b.id, body);
     if (id) itemIds.set(b.id, id);
   }

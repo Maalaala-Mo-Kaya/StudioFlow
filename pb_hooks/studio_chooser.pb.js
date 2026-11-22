@@ -47,8 +47,9 @@ routerAdd("GET", "/api/studioflow/chooser", (e) => {
     AND ({:course} = '' OR r.course = {:course} OR r.session_type = {:course})
     AND ({:dayFrom} = '' OR (r.created >= {:dayFrom} AND r.created < {:dayTo}))`;
   const bind = { q, pattern: escaped, school, course, dayFrom: from_, dayTo: to_ };
-  // A saved (confirmed) selection = "already selected". (Defined here: handlers can't see file-level constants.)
-  const CHOOSER_SAVED = "COALESCE(r.photo_selection, '') NOT IN ('', 'null', '[]')";
+  // An order can keep its previous selection and still need a review after a new shoot.
+  const CHOOSER_SAVED = "COALESCE(r.photo_selection, '') NOT IN ('', 'null', '[]')"
+    + " AND (CASE WHEN json_valid(r.photography) THEN COALESCE(json_extract(r.photography, '$.selectionReview'), '') ELSE '' END) = ''";
 
   const tally = new DynamicModel({ total: 0, selected: 0 });
   e.app.db().newQuery(`SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN ${CHOOSER_SAVED} THEN 1 ELSE 0 END), 0) AS selected ${from}`)
