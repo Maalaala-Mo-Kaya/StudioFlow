@@ -1,8 +1,9 @@
-import { useId, useMemo } from 'react';
+import { useId, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Paintbrush } from 'lucide-react';
 import { DataTable, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
-import { defaultTableExpansion, type TableExpansion, type TablePage, type TableSort } from '../../components/common/dataTableModel';
+import { Modal } from '../../components/common/Modal';
+import type { TableExpansion, TablePage, TableSort } from '../../components/common/dataTableModel';
 import { makeupLookLabel } from '../../constants/makeupLook';
 import { useWorkflowData } from '../../hooks/useWorkflowData';
 import { formatQueueNumber } from '../../utils/formatters';
@@ -102,6 +103,8 @@ export function MakeupClientsView({
   title, kind, rows, empty, loading, view, onViewChange, renderAction, assignmentSelection,
 }: MakeupClientsViewProps) {
   const heading = useId();
+  // The client whose details are open in a popup (by row key, so it shows the latest data).
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const { query = '', service = '', artist = '', state = '', page = firstPage,
     sort = kind === 'completed' ? completedSort : null } = view;
   const changeFilter = (change: MakeupTableView) => onViewChange({ ...change, page: { ...page, page: 1 } });
@@ -184,12 +187,20 @@ export function MakeupClientsView({
       <DataTable label={title} rows={filteredRows} columns={columns} getRowId={(row) => row.rowKey ?? row.id}
         pagination={{ pageSizes, value: page, onChange: (next) => onViewChange({ page: next }) }}
         sorting={{ value: sort, onChange: (next) => onViewChange({ sort: next }) }}
-        expansion={{ value: view.expansion ?? defaultTableExpansion, onChange: (next) => onViewChange({ expansion: next }) }}
         loading={loading} emptyMessage={empty} filtered={filtersActive}
         headerClassName="uppercase tracking-wide" tableClassName="min-w-[650px]"
         toolbar={toolbar}
-        renderExpanded={(row) => <MakeupClientDetails row={row}>{renderAction?.(row)}</MakeupClientDetails>}
+        onRowClick={(row) => setOpenKey(row.rowKey ?? row.id)}
       />
+      {(() => {
+        const open = openKey ? rows.find((row) => (row.rowKey ?? row.id) === openKey) : undefined;
+        return open && (
+          <Modal title={open.name || 'Client'} subtitle={<>Job Order № {open.jobOrder || open.id} · {serviceNames(open)} · {status(open)}</>}
+            icon={Paintbrush} onClose={() => setOpenKey(null)}>
+            <MakeupClientDetails row={open}>{renderAction?.(open)}</MakeupClientDetails>
+          </Modal>
+        );
+      })()}
     </section>
   );
 }
@@ -198,6 +209,7 @@ function MakeupAssignmentCard({ row, selected = false, disabled, onToggle, child
   row: MakeupAssignment; selected?: boolean; disabled: boolean; onToggle: () => void; children?: ReactNode;
 }) {
   const look = makeupLookLabel(row.look) || row.look;
+  const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <article className={`flex min-w-0 flex-col gap-4 border-2 bg-panel p-4 text-ink sm:p-5 ${
       selected ? 'border-gold shadow-lux-gold' : 'border-line shadow-lux'
@@ -218,10 +230,16 @@ function MakeupAssignmentCard({ row, selected = false, disabled, onToggle, child
           {row.lookNote && <p className="whitespace-pre-wrap">{selected ? row.lookNote : 'Client note'}</p>}
         </div>}
       </div>
-      {selected && <details className="border border-line bg-canvas px-3 py-2">
-        <summary className="cursor-pointer text-xs font-bold text-gold-soft">Client details</summary>
-        <div className="mt-3"><MakeupClientDetails row={row} /></div>
-      </details>}
+      {selected && <button type="button" onClick={() => setDetailsOpen(true)}
+        className="self-start min-h-9 px-3 border border-line bg-canvas text-xs font-bold text-gold-soft cursor-pointer hover:border-gold">
+        Client details
+      </button>}
+      {detailsOpen && (
+        <Modal title={row.name || 'Client'} subtitle={<>Job Order № {row.jobOrder || row.id} · {serviceNames(row)} · {status(row)}</>}
+          icon={Paintbrush} onClose={() => setDetailsOpen(false)}>
+          <MakeupClientDetails row={row} />
+        </Modal>
+      )}
       <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line pt-3">
         {children}
         <button type="button" disabled={disabled} onClick={onToggle} className={selected

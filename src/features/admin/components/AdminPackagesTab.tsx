@@ -7,6 +7,7 @@ import { parseInclusionTree } from '../../../utils/inclusions';
 import { optionGroups } from '../../../utils/packageOptions';
 import { InclusionTreeView } from '../../../components/common/InclusionTreeView';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
+import { Modal } from '../../../components/common/Modal';
 import { useToast } from '../../../context/ToastContext';
 import type { PackageBuilderData, PackageKind } from '../useAdminData';
 import { PACKAGE_KIND_LABELS, addOnKind, revenueLabels } from '../packageLabels';
@@ -215,22 +216,21 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
 
       {view === 'packages' && (
         <div className="space-y-4">
-          {building ? (
+          {building && (
             <PackageBuilder key={building === 'new' ? 'new' : building.id} items={catalogItems} sets={itemPackages} packages={packages}
               pkg={building === 'new' ? null : building} onSave={onSavePackage} onSaveItem={onSaveCatalogItem} onSavePose={onSaveItemPackage}
               onClose={() => setBuilding(null)} />
-          ) : (
-            <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-panel border-2 border-line shadow-lux">
-              <p className="font-sans text-xs text-neutral-600 max-w-2xl">
-                Build a package from <b>poses</b> (each with its own sizes and quantities), the frame, unlimited shots, exchanges and freebies.
-                Start from a <b>saved pose</b> or <b>copy another package</b> and change what differs.
-              </p>
-              <button type="button" onClick={() => setBuilding('new')}
-                className="btn-tactile flex items-center gap-1.5 px-4 py-2.5 bg-obsidian text-gold border border-line font-black uppercase tracking-widest cursor-pointer">
-                <Plus className="w-4 h-4" /> Create package
-              </button>
-            </div>
           )}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-panel border-2 border-line shadow-lux">
+            <p className="font-sans text-xs text-neutral-600 max-w-2xl">
+              Build a package from <b>poses</b> (each with its own sizes and quantities), the frame, unlimited shots, exchanges and freebies.
+              Start from a <b>saved pose</b> or <b>copy another package</b> and change what differs.
+            </p>
+            <button type="button" onClick={() => setBuilding('new')}
+              className="btn-tactile flex items-center gap-1.5 px-4 py-2.5 bg-obsidian text-gold border border-line font-black uppercase tracking-widest cursor-pointer">
+              <Plus className="w-4 h-4" /> Create package
+            </button>
+          </div>
 
           <div className="bg-panel border-2 border-line shadow-lux p-5 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b-2 border-line">
@@ -398,8 +398,43 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                   : 'bg-neutral-100 border-neutral-300 opacity-60'
               }`}
             >
-              {editingAddonId === add.id ? (
-                <div className="space-y-2 w-full bg-canvas p-2 border border-line">
+                <>
+                  <div>
+                    <span className="font-bold text-ink uppercase block">{add.name}</span>
+                    <span className="font-mono font-black text-gold-soft">
+                      +{formatCurrency(add.amount)}
+                    </span>
+                    {add.code && (
+                      <span className="text-[10px] text-neutral-500 ml-2">({add.code})</span>
+                    )}
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <MuaRequirementBadge required={add.requires_mua} revenue={add.revenue_category} />
+                      {add.default_when_no_mua && <span className="border border-gold bg-gold-wash px-2 py-0.5 text-[10px] font-bold uppercase text-gold-soft">Default service — confirmation required</span>}
+                      <span className="text-[10px] font-bold uppercase">{revenueLabels[add.revenue_category || '']}</span>
+                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[addOnKind(add)]}</span>
+                    </div>
+                  </div>
+                  <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onToggleAddOnActive(add.id, add.is_active !== false)}
+                      className={`px-1.5 py-0.5 text-[9px] font-bold uppercase border cursor-pointer ${
+                        add.is_active !== false
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-400'
+                          : 'bg-neutral-200 text-neutral-600'
+                      }`}
+                    >
+                      {add.is_active !== false ? 'Active' : 'Off'}
+                    </button>
+                    <span className={recordActionGroup}>
+                      <RecordActionButton variant="edit" recordName={add.name} onClick={() => startEditAddon(add)} />
+                      <RecordActionButton variant="delete" recordName={add.name} onClick={() => promptDeleteAddOn(add)} />
+                    </span>
+                  </div>
+                </>
+              {editingAddonId === add.id && (
+                <Modal title="Edit add-on" subtitle={add.name} icon={Sparkles} size="md" onClose={() => setEditingAddonId(null)}>
+                <div className="space-y-3 w-full">
                   <div>
                     <label className="block text-[9px] font-black uppercase text-neutral-600 mb-0.5">
                       Add-On Item Name
@@ -466,41 +501,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     </button>
                   </div>
                 </div>
-              ) : (
-                <>
-                  <div>
-                    <span className="font-bold text-ink uppercase block">{add.name}</span>
-                    <span className="font-mono font-black text-gold-soft">
-                      +{formatCurrency(add.amount)}
-                    </span>
-                    {add.code && (
-                      <span className="text-[10px] text-neutral-500 ml-2">({add.code})</span>
-                    )}
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      <MuaRequirementBadge required={add.requires_mua} revenue={add.revenue_category} />
-                      {add.default_when_no_mua && <span className="border border-gold bg-gold-wash px-2 py-0.5 text-[10px] font-bold uppercase text-gold-soft">Default service — confirmation required</span>}
-                      <span className="text-[10px] font-bold uppercase">{revenueLabels[add.revenue_category || '']}</span>
-                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[addOnKind(add)]}</span>
-                    </div>
-                  </div>
-                  <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onToggleAddOnActive(add.id, add.is_active !== false)}
-                      className={`px-1.5 py-0.5 text-[9px] font-bold uppercase border cursor-pointer ${
-                        add.is_active !== false
-                          ? 'bg-emerald-100 text-emerald-800 border-emerald-400'
-                          : 'bg-neutral-200 text-neutral-600'
-                      }`}
-                    >
-                      {add.is_active !== false ? 'Active' : 'Off'}
-                    </button>
-                    <span className={recordActionGroup}>
-                      <RecordActionButton variant="edit" recordName={add.name} onClick={() => startEditAddon(add)} />
-                      <RecordActionButton variant="delete" recordName={add.name} onClick={() => promptDeleteAddOn(add)} />
-                    </span>
-                  </div>
-                </>
+                </Modal>
               )}
             </div>
           ))}

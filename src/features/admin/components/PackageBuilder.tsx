@@ -1,8 +1,8 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import {
   Plus, Minus, Trash2, ChevronUp, ChevronDown, Frame, Camera, Layers, ArrowLeftRight, Gift, Eye, Check, X, AlertTriangle,
-  Copy, BookmarkPlus, Printer, MonitorSmartphone, ClipboardList, ArrowLeft, ArrowRight, ImagePlus, Images, ChevronLeft, ChevronRight, Star, Loader2,
-} from 'lucide-react';
+  Copy, BookmarkPlus, Printer, MonitorSmartphone, ClipboardList, ArrowLeft, ArrowRight, ImagePlus, Images, ChevronLeft, ChevronRight, Star, Loader2, Package as PackageIcon } from 'lucide-react';
+import { Modal } from '../../../components/common/Modal';
 import type {
   CatalogItem, CatalogItemCategory, ExchangeOption, FreebieChoice, ItemPackage, Package, PackageExchange, PackageInclusionRef, PackagePose,
   PackageStructure, PoseRow, RevenueCategory,
@@ -521,26 +521,22 @@ export const PackageBuilder: React.FC<PackageBuilderProps> = ({ items, sets, pac
 
   const poseLabel = (pose: PackagePose) => `${poseTitle(pose, catalog) || 'Untitled pose'} (${rowSummary(pose.items.filter((r) => r.item), catalog)})`;
 
+  // A full-screen popup over the package list. Only the ✕ closes it, so a stray click or Esc never loses work.
   return (
-    <div className="bg-panel border-2 border-gold shadow-lux-gold p-5 space-y-4 font-mono text-xs">
+    <Modal size="full" dismissable={false} busy={saving} icon={PackageIcon} onClose={onClose}
+      title={pkg ? 'Edit package' : 'Create a package'}
+      subtitle={pkg ? <>{pkg.name} · {pkg.code}</> : 'Poses, frame, shots, exchanges and freebies, one step at a time.'}>
+    <div className="space-y-4 font-mono text-xs">
       <datalist id={titleList}>{titles.map((t) => <option key={t} value={t} />)}</datalist>
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b-2 border-line">
-        <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink">
-          {pkg ? `③ Editing package // ${pkg.code}` : '③ Create a package'}
-        </h3>
-        <div className="flex flex-wrap items-center gap-2">
-          {otherPackages.length > 0 && (
-            <select value="" aria-label="Copy from package" onChange={(e) => copyFrom(e.target.value)}
-              className="min-h-[32px] p-1 border border-gold/70 bg-canvas text-[10px] font-black uppercase cursor-pointer">
-              <option value="">⧉ Copy from package…</option>
-              {otherPackages.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.code})</option>)}
-            </select>
-          )}
-          <button type="button" onClick={onClose} className="flex items-center gap-1 px-2 py-1 border border-neutral-400 font-bold uppercase cursor-pointer">
-            <X className="w-3.5 h-3.5" /> Close
-          </button>
+      {otherPackages.length > 0 && (
+        <div className="flex justify-end">
+          <select value="" aria-label="Copy from package" onChange={(e) => copyFrom(e.target.value)}
+            className="min-h-[32px] p-1 border border-gold/70 bg-canvas text-[10px] font-black uppercase cursor-pointer">
+            <option value="">⧉ Copy from package…</option>
+            {otherPackages.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.code})</option>)}
+          </select>
         </div>
-      </div>
+      )}
 
       {/* Steps: one section at a time; any step can be opened. */}
       <nav ref={builderTop} aria-label="Package builder steps" className="scroll-mt-4 flex gap-1.5 overflow-x-auto pb-1">
@@ -862,7 +858,7 @@ export const PackageBuilder: React.FC<PackageBuilderProps> = ({ items, sets, pac
         </div>
 
         {/* Preview */}
-        <aside className="xl:sticky xl:top-4 space-y-3">
+        <aside className="xl:sticky xl:top-0 space-y-3">
           <section className="p-3 border-2 border-line bg-canvas space-y-2">
             <h4 className="flex items-center gap-2 text-[11px] font-black uppercase text-ink"><Eye className="w-4 h-4 text-gold" /> What clients see</h4>
             <div className="font-black uppercase text-ink">{name || 'Package name'} <span className="text-gold-soft">{formatCurrency(amount)}</span></div>
@@ -905,5 +901,6 @@ export const PackageBuilder: React.FC<PackageBuilderProps> = ({ items, sets, pac
           photoUrls={photos.map((photo) => (photo.kind === 'saved' ? photo.fullUrl : photo.url))} />
       )}
     </div>
+    </Modal>
   );
 };
