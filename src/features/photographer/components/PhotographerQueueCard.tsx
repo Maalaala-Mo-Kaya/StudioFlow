@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Megaphone, CheckCircle2, Folder, Copy, Check, Aperture, Gift, ListChecks } from 'lucide-react';
+import { Megaphone, CheckCircle2, Folder, Copy, Check, Aperture, Gift, ListChecks, MousePointer2 } from 'lucide-react';
 import type { Registration } from '../../../types';
 import { chosenOptionLines } from '../../../utils/packageOptions';
 import {
@@ -16,30 +16,29 @@ import { clientDetail, clientGroup } from '../../../utils/clientInfo';
 
 interface PhotographerQueueCardProps {
   registration: Registration;
-  index: number;
-  isShooting: boolean;
-  onCallStudent: (reg: Registration) => void;
+  selected?: boolean;
+  nextUp?: boolean;
+  busy: boolean;
+  onSelect?: (reg: Registration) => void;
   onMarkDone: (reg: Registration) => void;
-  /** Name of this device's camera, or '' when no camera is in use. */
+  /** Name of the camera currently sending photos to this client. */
   cameraName?: string;
-  cameraLinked?: boolean;
-  onLinkCamera?: (registrationId: string) => void;
 }
 
 export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
   registration: reg,
-  index,
-  isShooting,
-  onCallStudent,
+  selected = false,
+  nextUp = false,
+  busy,
+  onSelect,
   onMarkDone,
   cameraName = '',
-  cameraLinked = false,
-  onLinkCamera,
 }) => {
   const [copied, setCopied] = useState(false);
   const [folderPath, setFolderPath] = useState('');
   const { toast } = useToast();
   const inclusionsArray = orderInclusions(reg);
+  const alreadyOnSet = reg.status === 'shooting';
   const freebies = orderFreebies(reg);
   const optionLines = chosenOptionLines(reg.package_options);
 
@@ -59,10 +58,10 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
 
   return (
     <article
-      className={`card-interactive border-2 p-5 sm:p-6 flex flex-col justify-between relative ${
-        isShooting
+      className={`card-interactive min-w-0 border-2 p-4 sm:p-5 flex flex-col justify-between relative ${
+        selected
           ? 'bg-obsidian text-white border-gold shadow-lux-gold'
-          : index === 0
+          : nextUp
           ? 'bg-panel text-ink border-line shadow-lux-gold'
           : 'bg-panel text-ink border-line shadow-lux'
       }`}
@@ -72,16 +71,16 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
         <div className="flex items-center gap-2">
           <span
             className={`font-mono text-lg font-black px-3 py-1 ${
-              isShooting ? 'bg-gold text-on-gold' : 'bg-obsidian text-gold'
+              selected ? 'bg-gold text-on-gold' : 'bg-obsidian text-gold'
             }`}
           >
             {formatQueueNumber(reg.queue_number)}
           </span>
-          {isShooting ? (
+          {selected ? (
             <span className="bg-gold/20 text-gold font-mono text-[10px] font-black uppercase tracking-widest px-2 py-0.5 border border-gold animate-pulse">
               ON SET
             </span>
-          ) : index === 0 ? (
+          ) : nextUp ? (
             <span className="bg-gold-wash text-gold-soft font-mono text-[10px] font-black uppercase tracking-widest px-2 py-0.5 border border-gold">
               NEXT UP
             </span>
@@ -97,21 +96,21 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
       <div className="mb-5">
         <h3
           className={`text-xl font-black uppercase tracking-tight leading-snug ${
-            isShooting ? 'text-white' : 'text-ink'
+            selected ? 'text-white' : 'text-ink'
           }`}
         >
           {formatClientName(reg)}
         </h3>
         <div
           className={`text-xs font-bold mt-1 uppercase ${
-            isShooting ? 'text-gold' : 'text-neutral-700'
+            selected ? 'text-gold' : 'text-neutral-700'
           }`}
         >
           {clientGroup(reg, true) || 'School Organization'}
         </div>
         <div
           className={`font-mono text-[11px] mt-0.5 ${
-            isShooting ? 'text-neutral-400' : 'text-neutral-500'
+            selected ? 'text-neutral-400' : 'text-neutral-500'
           }`}
         >
           {clientDetail(reg, true) || 'General Program'}{' '}
@@ -121,7 +120,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
         {/* Package Spec Box */}
         <div
           className={`mt-4 p-3.5 border ${
-            isShooting
+            selected
               ? 'bg-obsidian-2 border-neutral-800 text-neutral-200'
               : 'bg-canvas border-neutral-300 text-ink'
           }`}
@@ -135,7 +134,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
           {inclusionsArray.length > 0 && (
             <ul
               className={`text-[11px] space-y-1 mt-2 border-t pt-2 ${
-                isShooting
+                selected
                   ? 'border-neutral-800 text-neutral-400'
                   : 'border-neutral-200 text-neutral-600'
               }`}
@@ -149,7 +148,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
           )}
           {optionLines.length > 0 && (
             <ul className={`text-[11px] space-y-1 mt-2 border-t pt-2 font-bold ${
-              isShooting ? 'border-neutral-800 text-white' : 'border-neutral-200 text-ink'
+              selected ? 'border-neutral-800 text-white' : 'border-neutral-200 text-ink'
             }`}>
               {optionLines.map((line) => (
                 <li key={line} className="flex items-center gap-1.5">
@@ -160,7 +159,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
           )}
           {freebies.length > 0 && (
             <ul className={`text-[11px] space-y-1 mt-2 border-t pt-2 ${
-              isShooting ? 'border-neutral-800 text-gold' : 'border-neutral-200 text-gold-soft'
+              selected ? 'border-neutral-800 text-gold' : 'border-neutral-200 text-gold-soft'
             }`}>
               {freebies.map((item, i) => (
                 <li key={i} className="truncate flex items-center gap-1.5 font-semibold">
@@ -201,42 +200,35 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
       </div>
 
       {/* Camera auto-import link */}
-      {cameraName && (cameraLinked ? (
-        <div className="mb-3 flex items-center gap-2 px-3 py-2 border border-gold bg-gold-wash text-gold font-mono text-[10px] font-black uppercase tracking-widest">
-          <Aperture className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">{cameraName} → sending photos here</span>
+      {cameraName && (
+        <div role="status" className="mb-3 flex min-h-10 items-center gap-2 border-2 border-gold bg-gold px-3 py-2 font-mono text-[11px] font-black uppercase tracking-wider text-on-gold shadow-lux-gold">
+          <Aperture className="size-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 wrap-break-word">{cameraName} → sending photos here</span>
+          <span aria-hidden="true" className="ml-auto size-2 shrink-0 rounded-full bg-emerald-700 motion-safe:animate-status-pulse" />
         </div>
-      ) : isShooting && onLinkCamera && (
-        <button
-          type="button"
-          onClick={() => onLinkCamera(reg.id)}
-          className="btn-tactile mb-3 w-full min-h-[38px] flex items-center justify-center gap-2 px-3 py-2 border border-gold text-gold bg-obsidian-2 font-mono text-[10px] font-black uppercase tracking-widest cursor-pointer"
-        >
-          <Aperture className="w-3.5 h-3.5" /> Link Camera ({cameraName})
-        </button>
-      ))}
+      )}
 
       {/* Large Touch Action Buttons */}
-      <div className="grid grid-cols-2 gap-2.5 pt-3 border-t border-neutral-500/20">
-        <button
-          type="button"
-          onClick={() => onCallStudent(reg)}
-          className={`btn-tactile min-h-[46px] flex items-center justify-center gap-1.5 py-2.5 text-xs font-black uppercase tracking-wider border cursor-pointer ${
-            isShooting
-              ? 'bg-obsidian-2 text-gold border-gold'
-              : 'bg-obsidian text-white border-line hover:bg-neutral-800'
-          }`}
-        >
-          <Megaphone className="w-4 h-4 text-gold" />
-          <span>{isShooting ? 'Recall' : 'Call Client'}</span>
-        </button>
+      <div className={`grid gap-2.5 pt-3 border-t border-neutral-500/20 ${onSelect ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        {onSelect && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onSelect(reg)}
+            className="btn-tactile flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 border border-line bg-obsidian px-1 py-2.5 text-xs font-black uppercase tracking-wider text-white hover:border-gold disabled:cursor-default disabled:opacity-50"
+          >
+            {alreadyOnSet ? <MousePointer2 className="size-4 shrink-0 text-gold" /> : <Megaphone className="size-4 shrink-0 text-gold" />}
+            <span>{alreadyOnSet ? 'Select' : 'Call Client'}</span>
+          </button>
+        )}
 
         <button
           type="button"
+          disabled={busy}
           onClick={() => onMarkDone(reg)}
-          className="btn-tactile min-h-[46px] flex items-center justify-center gap-1.5 py-2.5 text-xs font-black uppercase tracking-wider bg-gold text-on-gold border border-line cursor-pointer"
+          className="btn-tactile flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 border border-line bg-gold px-1 py-2.5 text-xs font-black uppercase tracking-wider text-on-gold disabled:cursor-default disabled:opacity-50"
         >
-          <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+          <CheckCircle2 className="size-4 shrink-0 stroke-[2.5]" />
           <span>Mark Done</span>
         </button>
       </div>

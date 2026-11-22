@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Edit3, Trash2, Sparkles, Gift, Package as PackageIcon, Layers, Box, ListChecks, FileSpreadsheet, FileText, FileDown, Loader2 } from 'lucide-react';
+import { Plus, Sparkles, Gift, Package as PackageIcon, Layers, Box, ListChecks, FileSpreadsheet, FileText, FileDown, Loader2 } from 'lucide-react';
+import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
 import type { Package, AddOn, RevenueCategory, CatalogItem, CatalogItemInput, ItemPackage } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
 import { parseInclusionTree } from '../../../utils/inclusions';
@@ -260,10 +261,10 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                             ? 'bg-emerald-100 text-emerald-800 border-emerald-400' : 'bg-neutral-200 text-neutral-600 border-neutral-400'}`}>
                           {pkg.is_active !== false ? 'Active' : 'Archived'}
                         </button>
-                        <button type="button" title="Edit package" onClick={() => { setBuilding(pkg); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                          className="p-1 hover:bg-neutral-200 border border-neutral-300 cursor-pointer"><Edit3 className="w-3.5 h-3.5" /></button>
-                        <button type="button" title="Delete package" onClick={() => promptDeletePackage(pkg)}
-                          className="p-1 text-red-600 hover:bg-red-50 border border-neutral-300 hover:border-red-600 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                        <span className={recordActionGroup}>
+                          <RecordActionButton variant="edit" recordName={pkg.name} onClick={() => { setBuilding(pkg); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+                          <RecordActionButton variant="delete" recordName={pkg.name} onClick={() => promptDeletePackage(pkg)} />
+                        </span>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1">
@@ -391,7 +392,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
           {addOns.filter((add) => !add.catalog_item).map((add) => (
             <div
               key={add.id}
-              className={`p-3 border-2 flex justify-between items-center ${
+              className={`p-3 border-2 flex flex-wrap justify-between items-center gap-2 ${
                 add.is_active !== false
                   ? 'bg-panel border-line'
                   : 'bg-neutral-100 border-neutral-300 opacity-60'
@@ -482,7 +483,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                       <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[addOnKind(add)]}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => onToggleAddOnActive(add.id, add.is_active !== false)}
@@ -494,22 +495,10 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     >
                       {add.is_active !== false ? 'Active' : 'Off'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => startEditAddon(add)}
-                      className="p-1 border border-neutral-300 hover:bg-neutral-100 cursor-pointer"
-                      title="Edit Add-on"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => promptDeleteAddOn(add)}
-                      className="p-1 text-red-600 border border-neutral-300 hover:border-red-600 hover:bg-red-50 cursor-pointer"
-                      title="Delete Add-on"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    <span className={recordActionGroup}>
+                      <RecordActionButton variant="edit" recordName={add.name} onClick={() => startEditAddon(add)} />
+                      <RecordActionButton variant="delete" recordName={add.name} onClick={() => promptDeleteAddOn(add)} />
+                    </span>
                   </div>
                 </>
               )}

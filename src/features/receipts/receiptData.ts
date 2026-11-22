@@ -21,12 +21,18 @@ export interface ReceiptData {
  * a stamp across the sheet (like VOIDED on a receipt) and the settlement label in the totals box.
  * A partial refund (e.g. an overpayment given back) leaves the order valid: no stamp.
  */
+export function isComplimentarySettlement(reg: Registration): boolean {
+  return reg.status !== 'cancelled' && reg.total_amount === 0 && reg.paid_amount === 0
+    && reg.balance === 0 && discountCents(reg) > 0;
+}
+
 export function jobOrderMarks(reg: Registration): { stamp: string; settlement: string | null } {
   const refunded = (reg.refunded_amount ?? 0) > 0;
   const fullyRefunded = refunded && (reg.paid_amount ?? 0) <= 0;
   if (reg.status === 'cancelled') {
     return { stamp: fullyRefunded ? 'CANCELLED · REFUNDED' : 'CANCELLED', settlement: fullyRefunded ? 'Cancelled · Refunded' : 'Cancelled' };
   }
+  if (isComplimentarySettlement(reg)) return { stamp: '', settlement: 'Complimentary Settlement' };
   return fullyRefunded ? { stamp: 'REFUNDED', settlement: 'Refunded' } : { stamp: '', settlement: null };
 }
 
@@ -113,6 +119,14 @@ export function orderExtras(reg: Registration): [string, number][] {
   ];
 }
 
+export function paymentDiscount(payment: PaymentRecord) {
+  const snapshot = payment.discount_snapshot;
+  if (!snapshot) return null;
+  const amount = (snapshot.studio + snapshot.mua) / 100;
+  if (!amount) return null;
+  return { amount, percentage: snapshot.percentage, reason: snapshot.reason };
+}
+
 export function receiptRevenueLine(data: ReceiptData, payment?: PaymentRecord, currency = true) {
   const reg = data.registration;
   const split = payment
@@ -129,11 +143,12 @@ export function receiptRevenueLine(data: ReceiptData, payment?: PaymentRecord, c
 export const isCounted = (payment: PaymentRecord) => (payment.status || 'completed') === 'completed';
 
 /**
- * The payment that opened the job order (no completed payment before it) prints the
- * letter-size job order sheet. Every later payment prints a half-letter receipt.
+ * Start on the letter-size job order for ordinary first payments and the
+ * payment receipt for later payments or a payment with a discount snapshot.
  */
 export function printModeFor(payment: PaymentRecord | undefined, payments: PaymentRecord[]): PrintMode {
   if (!payment) return 'joborder';
+  if (paymentDiscount(payment)) return 'receipt';
   const index = payments.findIndex((item) => item.id === payment.id);
   return payments.slice(0, Math.max(0, index)).some(isCounted) ? 'receipt' : 'joborder';
 }

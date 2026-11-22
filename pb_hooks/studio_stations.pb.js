@@ -12,9 +12,10 @@ routerAdd("GET", "/api/studioflow/makeup", (e) => {
   const perms = team.permissions(team.settings(e.app), account);
   const waiting = "status = 'paid' && " + workflow.paymentFilter + " && makeup_service != '' && makeup_state = ''";
   const assigned = "(makeup_state = 'claimed' || makeup_state = 'in_progress')";
-  const showCompleted = !perms.canClaim || e.request.url.query().get("completed") === "1";
+  const completed = e.request.url.query().get("completed");
+  const showCompleted = completed !== "0" && (!perms.canClaim || completed === "1");
   const personal = `makeup_artist = {:artist} && ((${assigned} && status != 'cancelled')${showCompleted ? " || makeup_state = 'completed'" : ""})`;
-  const filter = perms.manage ? `(${waiting}) || ${assigned} || makeup_state = 'completed'`
+  const filter = perms.manage ? `(${waiting}) || ${assigned}${completed !== "0" ? " || makeup_state = 'completed'" : ""}`
     : perms.canClaim ? `(${waiting}) || (${personal})` : personal;
   const registrations = e.app.findRecordsByFilter("registrations", filter, "created,queue_number,id", 0, 0, { artist: account.id });
   e.response.header().set("Cache-Control", "private, no-store");
@@ -31,7 +32,8 @@ routerAdd("GET", "/api/studioflow/makeup", (e) => {
       state: record.getString("makeup_state") || "waiting",
       version: record.getInt("makeup_version"),
       artistId,
-      artistName: artist?.getString("name") || artist?.getString("username") || artistId,
+      artistName: artist?.getString("name") || artist?.getString("username") || (artistId === account.id
+        ? account.getString("name") || account.getString("username") : artistId),
       completedAt: record.getString("makeup_completed_at"),
       eligible: record.getString("status") === "paid" && workflow.paymentEligible(record) && !!record.getString("makeup_service"),
     };

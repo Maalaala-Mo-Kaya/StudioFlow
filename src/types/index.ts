@@ -429,6 +429,7 @@ export interface PaymentRecord {
   cashier_name?: string;
   receipt_no?: string;
   client_key?: string;
+  discount_snapshot?: { studio: number; mua: number; percentage: number; reason: string } | null;
   balance_before?: number;
   balance_after?: number;
   remarks?: string;

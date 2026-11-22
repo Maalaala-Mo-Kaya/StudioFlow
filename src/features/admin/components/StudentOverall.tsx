@@ -258,7 +258,6 @@ export function StudentOverall({ title, level, registrations, organizations, lev
         visibleColumnIds={visible}
         getRowId={(row) => row.id}
         defaultSort={{ column: 'name', direction: 'ascending' }}
-        viewportClassName="h-[600px]"
         tableClassName="tabular-nums"
         rowClassName={() => 'even:bg-canvas hover:bg-gold-wash'}
         loading={ledger.status === 'loading'}

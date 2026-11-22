@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Edit3, Trash2, Building, GraduationCap } from 'lucide-react';
+import { Building, GraduationCap } from 'lucide-react';
+import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
 import type { Organization, Level, Course, SchoolCourse, AssignSchoolCourse } from '../../../types';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
@@ -377,7 +378,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                       </div>
                     </div>
                   ) : (
-                    <div className="flex justify-between items-center gap-2">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
                       <button
                         type="button"
                         aria-pressed={selectedSchool?.id === o.id}
@@ -402,7 +403,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                           </span>
                         )}
                       </button>
-                      <div className="relative flex shrink-0 items-center gap-1.5">
+                      <div className="relative ml-auto flex flex-wrap items-center justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => onToggleOrgActive(o.id, o.is_active !== false)}
@@ -414,22 +415,10 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                         >
                           {o.is_active !== false ? 'Active' : 'Archived'}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => startEditOrg(o)}
-                          className="p-1 bg-panel text-ink border border-neutral-300 hover:bg-neutral-100 cursor-pointer"
-                          title="Edit School"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => promptDeleteOrg(o)}
-                          className="p-1 bg-panel text-red-600 border border-neutral-300 hover:border-red-600 hover:bg-red-50 cursor-pointer"
-                          title="Delete School"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <span className={recordActionGroup}>
+                          <RecordActionButton variant="edit" recordName={o.name} onClick={() => startEditOrg(o)} />
+                          <RecordActionButton variant="delete" recordName={o.name} onClick={() => promptDeleteOrg(o)} />
+                        </span>
                       </div>
                     </div>
                   )}
@@ -585,7 +574,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                       {lvlCourses.map(({ assignment, course: c }) => (
                           <div
                             key={c.id}
-                            className="p-2 bg-panel border border-neutral-300 flex justify-between items-center"
+                            className="p-2 bg-panel border border-neutral-300 flex flex-wrap justify-between items-center gap-2"
                           >
                             {editingCourseId === c.id ? (
                               <div className="w-full space-y-2 p-1 bg-canvas border border-line">
@@ -640,23 +629,10 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => startEditCourse(c)}
-                                    className="p-1 border border-neutral-300 hover:bg-neutral-100 cursor-pointer"
-                                    title="Edit Course"
-                                  >
-                                    <Edit3 className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => promptRemoveCourse(c, assignment.id)}
-                                    className="p-1 text-red-600 border border-neutral-300 hover:border-red-600 hover:bg-red-50 cursor-pointer"
-                                    title="Remove Course from School"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
+                                <div className={`${recordActionGroup} ml-auto`}>
+                                  <RecordActionButton variant="edit" recordName={c.name} onClick={() => startEditCourse(c)} />
+                                  <RecordActionButton variant="delete" recordName={`${c.name} from this school`}
+                                    onClick={() => promptRemoveCourse(c, assignment.id)} />
                                 </div>
                               </>
                             )}

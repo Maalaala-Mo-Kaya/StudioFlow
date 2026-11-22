@@ -1,5 +1,5 @@
 import React from 'react';
-import { receiptRevenueLine } from './receiptData';
+import { paymentDiscount, receiptRevenueLine } from './receiptData';
 import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
@@ -42,6 +42,7 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
   const status = statusLabel(payment);
   const after = payment.balance_after ?? 0;
   const isCash = payment.payment_method === 'cash' && (payment.cash_tendered ?? 0) > 0;
+  const discount = paymentDiscount(payment);
   const method = methodLabel(payment.payment_method) + (payment.remarks ? ` · ${payment.remarks}` : '');
 
   return (
@@ -90,6 +91,10 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
         <Row label="Payment For" value={paymentTypeLabel(payment)} />
         <Row label="Method" value={method} />
         <Row label="Previous Balance" value={peso(payment.balance_before)} />
+        {discount && <>
+          <Row label={`Discount Credit (${Number(discount.percentage.toFixed(2))}%)`} value={peso(-discount.amount)} />
+          <p className="break-words text-[8px] leading-[9px]">Reason · {discount.reason}</p>
+        </>}
       </div>
 
       <div className="mt-[4px] flex items-baseline justify-between border-y-2 border-[#0a0a0a] py-[3px] font-mono">

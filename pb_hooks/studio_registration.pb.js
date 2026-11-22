@@ -13,7 +13,7 @@ onRecordCreateRequest((e) => {
     photo_edit_until: 0, photo_revision: 0,
     photo_selection: null, photo_pending: null, photo_last_request: null,
     refunded_amount: 0, cancelled_at: "", cancelled_by: "", cancel_reason: "", status_before_cancel: "",
-    restored_at: "", restored_by: "",
+    restored_at: "", restored_by: "", deleted_by_id: "", had_discount_credit: false,
   })) e.record.set(field, value);
   // Other fees change the price: only an admin sets them (the kiosk is public, so it can't).
   if (!e.hasSuperuserAuth() && e.auth?.getString("role") !== "admin") e.record.set("other_fees", 0);
@@ -29,6 +29,11 @@ onRecordCreate((e) => {
 }, "registrations");
 
 onRecordUpdate((e) => {
+  const workflow = require(__hooks + "/studio_workflow.js");
+  const original = e.record.original();
+  // A removed discount still leaves financial history for deletion eligibility.
+  e.record.set("had_discount_credit", original.getBool("had_discount_credit")
+    || !!workflow.json(original, "revenue_discount") || !!workflow.json(e.record, "revenue_discount"));
   const status = e.record.getString("status");
   if (["done_shooting", "completed"].includes(status)) e.record.set("shoot_completed", true);
   // Cancelling keeps shoot_completed, so a restored order returns with its photography done.
@@ -56,6 +61,10 @@ onRecordUpdate((e) => {
 onRecordUpdateRequest((e) => {
   const before = e.record.original();
   const changed = (key) => e.record.getString(key) !== before.getString(key);
+  const body = e.requestInfo().body || {};
+  if (["deleted_by_id", "had_discount_credit"].some((field) => Object.hasOwn(body, field) || changed(field))) {
+    throw new ForbiddenError("Deletion and discount history are managed by the studio workflow.");
+  }
   const role = e.auth?.getString("role");
   const correction = e.requestInfo().body.mua_correction;
   if (correction !== undefined) {
@@ -72,7 +81,6 @@ onRecordUpdateRequest((e) => {
   ];
   if (fields.some(changed)) throw new ForbiddenError("Use the studio workflow to update station assignments or selections.");
   // Money and cancellation records are server-owned: payments, refunds, Cancel and Restore set them.
-  const body = e.requestInfo().body || {};
   const owned = ["paid_amount", "balance", "payment_status", "refunded_amount", "cancelled_at", "cancelled_by",
     "cancel_reason", "status_before_cancel", "restored_at", "restored_by"];
   if (!e.hasSuperuserAuth() && owned.some((field) => field in body && String(body[field] ?? "") !== before.getString(field))) {
@@ -171,21 +179,8 @@ onRecordUpdateRequest((e) => {
   });
 }, "registrations");
 
-onRecordDeleteRequest((e) => {
-  const workflow = require(__hooks + "/studio_workflow.js");
-  const app = e.app;
-  return workflow.withRegistration(app, e.record.id, (tx, current) => {
-    if (!e.hasSuperuserAuth()) workflow.staff(tx, e.auth, ["admin"]);
-    if (workflow.json(current, "photo_pending")) throw new ApiError(409, "Finish recovering the photo selection before removing this registration.");
-    // Payments cascade-delete with their registration. Keep the ledger and receipt
-    // numbers intact: a job order with any payment record is cancelled, never deleted.
-    if (tx.findRecordsByFilter("payments", "registration = {:id}", "", 1, 0, { id: current.id }).length) {
-      throw new ApiError(409, "This job order has payment records. Cancel it instead of deleting it.");
-    }
-    e.app = tx;
-    e.record = current;
-    try { return e.next(); } finally { e.app = app; }
-  });
+onRecordDeleteRequest(() => {
+  throw new ApiError(409, "Use Delete Registration for unpaid forms or Cancel for job orders.");
 }, "registrations");
 
 onRecordUpdateRequest((e) => {

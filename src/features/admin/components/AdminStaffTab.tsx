@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { UserPlus, Trash2, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { UserPlus, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 import { ResetPasswordModal } from './ResetPasswordModal';
 import type { StaffUser, StaffRole } from '../../../types';
 import { PROTECTED_SYSTEM_USERNAMES } from '../../../constants/studio';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useAuth } from '../../../context/AuthContext';
+import { DataTable, tableFilterControl, type DataTableColumn } from '../../../components/common/DataTable';
 
 const roles: Record<StaffRole, string> = {
   cashier: 'Cashier', photographer: 'Photographer', mua: 'MUA', chooser: 'Chooser', admin: 'Studio Admin',
@@ -74,10 +76,45 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
     }
   };
 
+  const columns: DataTableColumn<StaffUser>[] = [
+    { id: 'account', header: 'Account', sortable: true, accessor: (account) => account.username,
+      cell: (account) => <><span className="font-mono font-bold text-gold-soft">@{account.username}</span>
+        <span className="block text-neutral-600">{account.name}</span></> },
+    { id: 'role', header: 'Role', sortable: true, accessor: (account) => roles[account.role],
+      cell: (account) => (
+        <select aria-label={'Role for ' + account.username} value={account.role}
+          disabled={account.id === user?.id || !!updating}
+          onChange={(event) => void update(account, { role: event.target.value as StaffRole })}
+          className={`${tableFilterControl} disabled:opacity-65`}>
+          {Object.entries(roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      ) },
+    { id: 'status', header: 'Status', sortable: true, accessor: (account) => account.disabled ? 'Disabled' : 'Enabled' },
+    { id: 'actions', header: 'Actions', cell: (account) => (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button type="button" disabled={account.id === user?.id || !!updating}
+          onClick={() => void update(account, { disabled: !account.disabled })}
+          className="min-h-8 border border-line px-2 disabled:opacity-45">
+          {account.disabled ? 'Enable' : 'Disable'}
+        </button>
+        {account.id !== user?.id && (
+          <button type="button" disabled={!!updating} onClick={() => setResetTarget(account)}
+            title={'Reset password for @' + account.username}
+            className="flex min-h-8 items-center gap-1 border border-line px-2 hover:bg-gold-wash disabled:opacity-45">
+            <KeyRound className="size-3.5" aria-hidden="true" /> Reset Password
+          </button>
+        )}
+        {account.id !== user?.id && !PROTECTED_SYSTEM_USERNAMES.includes(account.username) && (
+          <RecordActionButton variant="delete" recordName={`staff account ${account.username}`} onClick={() => promptDeleteStaff(account)} />
+        )}
+      </div>
+    ) },
+  ];
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 animate-enter">
       {/* Provision New Staff Account */}
-      <div className="bg-panel border-2 border-line shadow-lux p-6">
+      <div className="min-w-0 bg-panel border-2 border-line shadow-lux p-6">
         <div className="flex items-center gap-3 pb-3 border-b-2 border-line mb-4">
           <div className="w-8 h-8 bg-obsidian text-gold flex items-center justify-center shrink-0">
             <UserPlus className="w-4 h-4" />
@@ -183,7 +220,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
       </div>
 
       {/* Active Staff Accounts Directory */}
-      <div className="bg-panel border-2 border-line shadow-lux p-6">
+      <div className="min-w-0 bg-panel border-2 border-line shadow-lux p-6">
         <div className="flex items-center justify-between pb-3 border-b-2 border-line mb-4">
           <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink">
             Staff Accounts
@@ -192,59 +229,9 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
             {staffAccounts.length} Staff
           </span>
         </div>
-        <div className="space-y-3">
-          {staffAccounts.map((acc) => (
-            <div
-              key={acc.id}
-              className="p-4 bg-obsidian text-white border border-line flex flex-wrap items-center justify-between gap-3"
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm font-black text-gold">
-                    @{acc.username}
-                  </span>
-                  <span className="px-2 py-0.5 text-[10px] font-mono font-black uppercase tracking-widest bg-obsidian-2 text-white border border-gold/50">
-                    {acc.disabled ? 'Disabled' : 'Enabled'}
-                  </span>
-                </div>
-                <p className="text-xs text-neutral-300 font-semibold mt-1">{acc.name}</p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <select aria-label={`Role for ${acc.username}`} value={acc.role}
-                  disabled={acc.id === user?.id || !!updating}
-                  onChange={(event) => void update(acc, { role: event.target.value as StaffRole })}
-                  className="bg-obsidian-2 border border-neutral-600 text-xs p-2 disabled:opacity-65">
-                  {Object.entries(roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-                <button type="button" disabled={acc.id === user?.id || !!updating}
-                  onClick={() => void update(acc, { disabled: !acc.disabled })}
-                  className="border border-neutral-600 text-xs p-2 disabled:opacity-45">
-                  {acc.disabled ? 'Enable' : 'Disable'}
-                </button>
-                {acc.id !== user?.id && (
-                  <button type="button" disabled={!!updating}
-                    onClick={() => setResetTarget(acc)}
-                    title={`Reset password for @${acc.username}`}
-                    className="flex items-center gap-1 border border-neutral-600 text-xs p-2 hover:border-gold hover:text-gold cursor-pointer disabled:opacity-45">
-                    <KeyRound className="w-3.5 h-3.5" />
-                    Reset Password
-                  </button>
-                )}
-              {acc.id !== user?.id && !PROTECTED_SYSTEM_USERNAMES.includes(acc.username) && (
-                <button
-                  type="button"
-                  onClick={() => promptDeleteStaff(acc)}
-                  title="Delete Staff Account"
-                  className="p-2 bg-red-950/80 hover:bg-red-700 text-red-300 hover:text-white transition cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
-              </div>
-            </div>
-          ))}
-        </div>
+        <DataTable label="Staff accounts" rows={staffAccounts} columns={columns} getRowId={(account) => account.id}
+          pagination={false} tableClassName="min-w-[460px]" headerClassName="uppercase"
+          emptyMessage="No staff accounts found." />
       </div>
 
       {resetTarget && (

@@ -16,7 +16,7 @@ export const emptyCashierFilters: CashierFilters = { school: [], level: [], pack
 
 /** Columns the cashier can show or hide (Actions always stays). */
 export const cashierColumns = [
-  { id: 'job', label: 'Queue & Job №' },
+  { id: 'job', label: 'Job Order №' },
   { id: 'name', label: 'Client Name' },
   { id: 'school', label: 'School / Session' },
   { id: 'package', label: 'Package' },

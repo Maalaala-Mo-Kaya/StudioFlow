@@ -10,6 +10,12 @@ onRecordEnrich((e) => {
   require(__hooks + "/studio_numbering.js").exposeNumbers(e.record);
 }, "registrations");
 
+onRecordCreateRequest((e) => {
+  // The settlement route attaches its own immutable receipt snapshot.
+  e.record.set("discount_snapshot", null);
+  return e.next();
+}, "payments");
+
 onRecordCreate((e) => {
   const app = e.app;
   let reg;
@@ -32,6 +38,7 @@ onRecordCreate((e) => {
       if (!regId) throw new BadRequestError("A job order is required.");
       tx.db().newQuery("UPDATE registrations SET id = id WHERE id = {:id}").bind({ id: regId }).execute();
       reg = tx.findRecordById("registrations", regId);
+      if (reg.getString("deleted_by_id")) throw new ApiError(409, "This registration was deleted and cannot accept payment.");
       if (reg.getString("status") === "cancelled") {
         throw new BadRequestError("This job order is cancelled. Restore it before collecting payment.");
       }
@@ -101,6 +108,7 @@ onRecordCreate((e) => {
   });
 
   // Create the folder on disk (also retried on later payments if the photo drive was offline).
+  if (app.isTransactional()) return;
   try {
     const storage = require(__hooks + "/studio_photo_storage.js");
     const path = reg.getString("photo_folder");
@@ -118,7 +126,7 @@ onRecordUpdate((e) => {
   const status = e.record.getString("status") || "completed";
   // Printed receipt facts and the cashier's remarks never change after the payment is saved.
   for (const field of ["registration", "amount", "payment_type", "payment_method", "cash_tendered", "change_amount",
-    "receipt_no", "client_key", "balance_before", "balance_after", "remarks", "cashier_name", "cashier_id"]) {
+    "receipt_no", "client_key", "balance_before", "balance_after", "remarks", "cashier_name", "cashier_id", "discount_snapshot"]) {
     if (String(e.record.get(field)) !== String(before.get(field))) {
       throw new BadRequestError("A saved payment can't be changed. Void it and record a new payment instead.");
     }

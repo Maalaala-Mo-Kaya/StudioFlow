@@ -3,15 +3,11 @@ import { PickupNoticeInfo } from './PickupNoticeInfo';
 import type { Registration } from '../../../types';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
 import { isReadyForRelease, releaseBlocker } from '../../../utils/releaseReadiness';
-import {
-  formatClientName,
-  formatCurrency,
-  formatJobOrderNo,
-  formatQueueNumber,
-} from '../../../utils/formatters';
+import { formatClientName, formatCurrency } from '../../../utils/formatters';
 import { DataTable } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { CashierMobileCard } from './CashierMobileCard';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 import { clientDetail, clientGroup, clientSummary } from '../../../utils/clientInfo';
 
 interface CashierTableProps {
@@ -19,6 +15,8 @@ interface CashierTableProps {
   loading: boolean;
   filtered: boolean;
   onOpenPayment: (reg: Registration) => void;
+  onOpenDelete?: (reg: Registration) => void;
+  deletableIds: ReadonlySet<string>;
   onOpenPrint: (reg: Registration) => void;
   onOpenRelease: (reg: Registration) => void;
   /** Ready for Pickup tab: shows when each order became ready and whether the client was told. */
@@ -29,20 +27,17 @@ interface CashierTableProps {
 }
 
 export function CashierTable({
-  registrations, loading, filtered, onOpenPayment, onOpenPrint, onOpenRelease, pickupMode = false, onOpenNotify, visibleColumns,
+  registrations, loading, filtered, onOpenPayment, onOpenDelete, deletableIds, onOpenPrint, onOpenRelease,
+  pickupMode = false, onOpenNotify, visibleColumns,
 }: CashierTableProps) {
   const columns: DataTableColumn<Registration>[] = [
     {
-      id: 'job', header: 'Queue & Job №', sortable: true, accessor: (reg) => reg.job_order_no,
+      id: 'job', header: 'JOB ORDER №', sortable: true, accessor: (reg) => reg.job_order_no,
+      headerClassName: 'whitespace-nowrap',
       cell: (reg) => (
-        <div className="flex items-center gap-2">
-          <span className="font-mono font-black text-gold bg-obsidian px-2 py-0.5 text-xs">
-            {formatQueueNumber(reg.queue_number)}
-          </span>
-          <span className="font-mono font-black text-red-600 text-sm">
-            {formatJobOrderNo(reg.job_order_no)}
-          </span>
-        </div>
+        <span className="whitespace-nowrap font-mono font-black text-red-600 text-sm">
+          {reg.job_order_no?.trim() || '—'}
+        </span>
       ),
     },
     {
@@ -150,7 +145,9 @@ export function CashierTable({
           ) : null}
 
           {reg.balance === 0 && reg.revenue_discount && !['cancelled', 'released'].includes(reg.status) &&
-            <button type="button" className="border border-line px-3 py-2 font-bold" onClick={() => onOpenPayment(reg)}>Edit discount</button>}
+            <RecordActionButton variant="edit" recordName={`discount for ${formatClientName(reg)}`} onClick={() => onOpenPayment(reg)} />}
+          {onOpenDelete && deletableIds.has(reg.id) &&
+            <RecordActionButton variant="delete" recordName={`unpaid registration for ${formatClientName(reg)}`} onClick={() => onOpenDelete(reg)} />}
           {reg.job_order_no && <button
             type="button"
             onClick={() => onOpenPrint(reg)}
@@ -195,13 +192,13 @@ export function CashierTable({
       filtered={filtered}
       emptyMessage={pickupMode ? 'No orders are waiting for pickup.' : 'No cashier records available.'}
       filteredEmptyMessage="No records matching current filter."
-      className="animate-enter-delay-1 md:h-[660px]"
-      viewportClassName="flex-1"
+      className="animate-enter-delay-1"
       headerClassName="font-mono uppercase tracking-wider"
       rowClassName={() => 'hover:bg-gold-wash/50 transition'}
       renderCompactRow={(reg) => (
         <CashierMobileCard registration={reg} onOpenPayment={onOpenPayment}
           onOpenPrint={onOpenPrint} onOpenRelease={onOpenRelease}
+          onOpenDelete={deletableIds.has(reg.id) ? onOpenDelete : undefined}
           onOpenNotify={pickupMode ? onOpenNotify : undefined} />
       )}
     />

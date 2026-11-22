@@ -15,19 +15,24 @@ function sourceKey(source) {
   return `${source?.source || ""}:${source?.id || source?.name || ""}`;
 }
 
-function logCompletion(app, job, artist, actor, completedAt) {
-  const basisForService = earnings.purchasedEarnings(job);
+function uncreditedServices(app, job, before = "") {
   // A client can come back for more makeup (added later on the job order): credit only the services
   // not already logged for this job, so earlier work is never paid twice.
   const credited = new Set();
-  for (const log of app.findRecordsByFilter("mua_completions", "job_id = {:id}", "", 0, 0, { id: job.id })) {
+  const filter = "job_id = {:id}" + (before ? " && completed_at < {:before}" : "");
+  for (const log of app.findRecordsByFilter("mua_completions", filter, "", 0, 0, { id: job.id, before })) {
     let sources;
     try { sources = JSON.parse(log.getString("sources") || "[]"); } catch (_) { sources = []; }
     for (const source of Array.isArray(sources) ? sources : []) credited.add(sourceKey(source));
   }
-  const services = new Map(workflow.makeupServices(job)
+  return new Map(workflow.makeupServices(job)
     .filter((source) => !credited.has(sourceKey(source)))
     .map((source) => [earnings.serviceKey(source), source]));
+}
+
+function logCompletion(app, job, artist, actor, completedAt) {
+  const basisForService = earnings.purchasedEarnings(job);
+  const services = uncreditedServices(app, job);
   const collection = app.findCollectionByNameOrId("mua_completions");
   const pkg = workflow.json(job, "package_snapshot");
   for (const [serviceId, source] of services) {
@@ -52,7 +57,7 @@ function artistRow(id) {
   return { id, jobs: new Set(), counts: {}, earnings: {}, totalEarnings: 0, totalServices: 0, details: [] };
 }
 
-function dailyReport(app, date, today, includeAudit = false) {
+function dailyReport(app, date, today, includeAudit = false, roster) {
   const columns = new Map();
   const artists = new Map();
   const allJobs = new Set();
@@ -61,6 +66,7 @@ function dailyReport(app, date, today, includeAudit = false) {
   const logs = app.findRecordsByFilter("mua_completions", "local_date = {:date}", "completed_at,id", 0, 0, { date });
   for (const log of logs) {
     const id = log.getString("artist_id");
+    if (roster && !roster.has(id)) continue;
     const basis = earnings.basisFor(log);
     const adjustments = earnings.adjustmentsFor(log);
     const unmatched = basis.kind === "historical" && !basis.groupKey;
@@ -79,7 +85,7 @@ function dailyReport(app, date, today, includeAudit = false) {
     const earned = basis.earned + adjustments.reduce((sum, entry) => sum + entry.amount, 0);
     row.earnings[serviceId] = (row.earnings[serviceId] || 0) + earned;
     row.totalEarnings += earned;
-    row.details.push({
+    if (includeAudit) row.details.push({
       id: log.id, jobId, jobOrder: log.getString("job_order"), studentId: log.getString("student_id"),
       studentName: log.getString("student_name"), artistName: row.name,
       actorId: log.getString("actor_id"), actorName: log.getString("actor_name"), actorRole: log.getString("actor_role"),
@@ -94,12 +100,13 @@ function dailyReport(app, date, today, includeAudit = false) {
   }
   if (date === today) {
     for (const [collection, source] of [["packages", "package"], ["add_ons", "add_on"]]) {
-      for (const item of app.findRecordsByFilter(collection, "is_active = true && requires_mua = true", "name", 0, 0)) {
+      const eligible = source === "add_on" ? "(requires_mua = true || default_when_no_mua = true)" : "requires_mua = true";
+      for (const item of app.findRecordsByFilter(collection, "is_active = true && " + eligible, "name", 0, 0)) {
         const service = workflow.serviceRequirement(item, source);
         if (service) columns.set(earnings.serviceKey(service), service.name);
       }
     }
-    for (const artist of app.findRecordsByFilter("users", "role = 'mua'", "name,id", 0, 0)) {
+    for (const artist of roster?.values() || app.findRecordsByFilter("users", "role = 'mua'", "name,id", 0, 0)) {
       const row = artists.get(artist.id) || artistRow(artist.id);
       row.name = staffName(artist);
       artists.set(artist.id, row);
@@ -116,4 +123,4 @@ function dailyReport(app, date, today, includeAudit = false) {
   };
 }
 
-module.exports = { dailyReport, logCompletion, studioDate };
+module.exports = { dailyReport, logCompletion, studioDate, uncreditedServices };

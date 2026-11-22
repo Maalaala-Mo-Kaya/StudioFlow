@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Aperture, FolderSearch, Pencil, Plus, Trash2, Save } from 'lucide-react';
+import { Aperture, FolderSearch, Pencil, Plus, Save } from 'lucide-react';
+import { RecordActionButton, recordActionGroup } from '../../components/common/RecordActionButton';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -167,12 +168,10 @@ export const CameraSettings: React.FC = () => {
                     </div>
                     <div className="font-mono text-[11px] text-neutral-500 truncate mt-1" title={station.watchFolder}>{station.watchFolder}</div>
                   </div>
-                  <div className="flex gap-1.5 shrink-0">
-                    <button type="button" onClick={() => edit(station)} aria-label={`Edit ${station.name}`}
-                      className="btn-tactile p-2 bg-obsidian text-gold cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                  <div className={recordActionGroup}>
+                    <RecordActionButton variant="edit" recordName={station.name} onClick={() => edit(station)} />
                     {isAdmin && (
-                      <button type="button" onClick={() => setDeleting(station)} aria-label={`Remove ${station.name}`}
-                        className="btn-tactile p-2 bg-red-600 text-white cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                      <RecordActionButton variant="delete" recordName={station.name} onClick={() => setDeleting(station)} />
                     )}
                   </div>
                 </div>

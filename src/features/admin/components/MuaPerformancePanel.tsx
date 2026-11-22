@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react';
+import { MuaAnalyticsTable } from '../../workflow/MuaAnalyticsTable';
 import { pb } from '../../../db/pocketbase';
 import { useToast } from '../../../context/ToastContext';
 import { useWorkflowData, workflowApi, workflowError } from '../../../hooks/useWorkflowData';
 import { randomId } from '../../../utils/randomId';
 import { stationButton, stationCard } from '../../workflow/StationLayout';
-import { formatMuaAmount, muaEarningsTable, muaReportTable, type MuaCompletion, type MuaPerformanceReport } from '../muaPerformance';
+import { formatMuaAmount, type MuaCompletion, type MuaPerformanceReport } from '../muaPerformance';
 
 const studioTime = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
 const sourceLabels: Record<string, string> = {
@@ -13,14 +14,10 @@ const sourceLabels: Record<string, string> = {
 
 export function MuaPerformancePanel() {
   const [date, setDate] = useState('');
-  const [selected, setSelected] = useState<{ id: string; date: string }>();
   const [exporting, setExporting] = useState(false);
   const [tab, setTab] = useState<'performance' | 'earnings'>('performance');
   const { toast } = useToast();
   const { data: report, error, refresh } = useWorkflowData<MuaPerformanceReport>(`/mua-performance?date=${encodeURIComponent(date)}`);
-  const table = report && muaReportTable(report);
-  const artist = selected?.date === report?.date ? report?.rows.find((row) => row.id === selected?.id) : undefined;
-  const selectArtist = (id: string) => setSelected(artist?.id === id || !report ? undefined : { id, date: report.date });
 
   async function exportReport(format: 'csv' | 'xlsx') {
     if (!report || exporting) return;
@@ -40,15 +37,10 @@ export function MuaPerformancePanel() {
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs font-bold">
             <span className="block">Date · Asia/Manila</span>
-            <input type="date" value={date || report?.today || ''} onChange={(event) => {
-              setDate(event.target.value);
-              setSelected(undefined);
-            }} className="min-h-10 border border-line bg-panel px-2" />
+            <input type="date" value={date || report?.today || ''} onChange={(event) => setDate(event.target.value)}
+              className="min-h-10 border border-line bg-panel px-2" />
           </label>
-          {date && <button type="button" className={stationButton} onClick={() => {
-            setDate('');
-            setSelected(undefined);
-          }}>Today</button>}
+          {date && <button type="button" className={stationButton} onClick={() => setDate('')}>Today</button>}
           {report && (
             <details className="relative">
               <summary className={stationButton}>{exporting ? 'Exporting…' : 'Export Report ▾'}</summary>
@@ -64,7 +56,7 @@ export function MuaPerformancePanel() {
       </div>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {!report && !error && <p role="status" className="text-sm">Loading daily report…</p>}
-      {report && table && (
+      {report && (
         <>
           <div role="tablist" aria-label="MUA analytics views" className="flex flex-wrap gap-2 border-b-2 border-line pb-2">
             {(['performance', 'earnings'] as const).map((key) => <button key={key} type="button" role="tab" aria-selected={tab === key}
@@ -72,97 +64,36 @@ export function MuaPerformancePanel() {
               {key === 'performance' ? 'Performance' : 'Earnings'}
             </button>)}
           </div>
-          {tab === 'earnings' ? <>
-            <EarningsTable report={report} selectedId={artist?.id} onSelect={selectArtist} />
-            <p className="text-xs text-neutral-600">Select an artist to review purchase prices, refunds, voids, and earnings adjustments.</p>
-          </> : <>
-          {!report.rows.length && <p className="text-sm">No completions recorded for this date.</p>}
-          <div className="overflow-x-auto border border-line" tabIndex={0} role="region" aria-label="Daily MUA counts">
-            <table className="min-w-full whitespace-nowrap text-sm">
-              <thead className="bg-obsidian text-gold">
-                <tr>{table.headers.slice(1).map((name, index) => (
-                  <th key={index} scope="col" className={`px-3 py-2 uppercase ${index ? 'text-right' : 'text-left'}`}>{name}</th>
-                ))}</tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-200">
-                {report.rows.map((row, index) => (
-                  <tr key={row.id}>
-                    <th scope="row" className="px-3 py-2 text-left">
-                      <button type="button" className="cursor-pointer underline font-bold" aria-expanded={artist?.id === row.id}
-                        onClick={() => selectArtist(row.id)}>
-                        {row.name}
-                      </button>
-                    </th>
-                    {table.rows[index].slice(2).map((value, column) => (
-                      <td key={column} className="px-3 py-2 text-right font-mono">{value}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="border-t border-line bg-gold-wash font-black">
-                <tr>
-                  <th scope="row" className="px-3 py-2 text-left">TOTAL</th>
-                  {table.total.slice(2).map((value, column) => (
-                    <td key={column} className="px-3 py-2 text-right font-mono">{value}</td>
-                  ))}
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          </>}
-          {artist && (
-            <section className="space-y-2 border-t border-line pt-3" aria-label="MUA service details">
-              <h4 className="font-black uppercase">{tab === 'earnings' ? 'MUA earnings details' : 'MUA performance details'}</h4>
-              <p className="text-sm">{artist.name} · {report.date} · {artist.totalClients} clients</p>
-              {!artist.details.length && <p className="text-sm text-neutral-600">No services completed.</p>}
-              <ul className="divide-y divide-neutral-200">
-                {artist.details.map((item) => (
-                  <li key={item.id} className="py-2 text-sm">
-                    <p className="font-bold">{studioTime.format(new Date(item.completedAt.replace(' ', 'T')))} · {item.studentName} · {item.serviceName}</p>
-                    <p>Job order {item.jobOrder} · {item.sources.map(({ source, name }) => `${name} (${sourceLabels[source]})`).join(', ')}</p>
-                    {item.packageName && !item.sources.some(({ source }) => source === 'package') && <p>Portrait package {item.packageName}</p>}
-                    <p className="text-neutral-600">Performed by {item.artistName} · Recorded by {item.actorName}</p>
-                    {item.reviewReason && <p className="font-semibold text-amber-700">Review required. {item.reviewReason}</p>}
-                    {tab === 'earnings' && <EarningsDetails item={item} refresh={refresh} />}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <MuaAnalyticsTable key={`${report.date}:${tab}`} report={report} earnings={tab === 'earnings'}
+            renderDetails={(artist) => <AdminArtistDetails artist={artist} date={report.date} earnings={tab === 'earnings'} refresh={refresh} />} />
         </>
       )}
     </section>
   );
 }
 
-function EarningsTable({ report, selectedId, onSelect }: {
-  report: MuaPerformanceReport; selectedId?: string; onSelect: (id: string) => void;
+function AdminArtistDetails({ artist, date, earnings, refresh }: {
+  artist: MuaPerformanceReport['rows'][number]; date: string; earnings: boolean; refresh: () => void;
 }) {
-  const table = muaEarningsTable(report);
-  return <div className="overflow-x-auto border border-line" tabIndex={0} role="region" aria-label="Daily MUA earnings">
-    <table className="min-w-full whitespace-nowrap text-sm">
-      <thead className="bg-obsidian text-gold"><tr>{table.headers.slice(1).map((name, index) =>
-        <th key={index} scope="col" className={`px-3 py-2 uppercase ${index ? 'text-right' : 'text-left'}`}>{name}</th>
-      )}</tr></thead>
-      <tbody className="divide-y divide-neutral-200">{report.rows.map((artist, index) => (
-        <tr key={artist.id}>
-          <th scope="row" className="px-3 py-2 text-left">
-            <button type="button" className="cursor-pointer font-bold underline"
-              aria-expanded={selectedId === artist.id} onClick={() => onSelect(artist.id)}>{artist.name}</button>
-          </th>
-          {table.rows[index].slice(2).map((value, column) => (
-            <td key={column} className="px-3 py-2 text-right font-mono">{formatMuaAmount(Number(value))}</td>
-          ))}
-        </tr>
-      ))}</tbody>
-      <tfoot className="border-t border-line bg-gold-wash font-black"><tr>
-        <th scope="row" className="px-3 py-2 text-left">TOTAL</th>
-        {table.total.slice(2).map((value, column) => (
-          <td key={column} className="px-3 py-2 text-right font-mono">{formatMuaAmount(Number(value))}</td>
+  return (
+    <section className="space-y-2 whitespace-normal" aria-label={artist.name + ' service details'}>
+      <h4 className="font-black uppercase">{earnings ? 'MUA earnings details' : 'MUA performance details'}</h4>
+      <p className="text-sm">{artist.name} · {date} · {artist.totalClients} clients</p>
+      {!artist.details.length && <p className="text-sm text-neutral-600">No services completed.</p>}
+      <ul className="divide-y divide-neutral-200">
+        {artist.details.map((item) => (
+          <li key={item.id} className="py-2 text-sm">
+            <p className="font-bold">{studioTime.format(new Date(item.completedAt.replace(' ', 'T')))} · {item.studentName} · {item.serviceName}</p>
+            <p>Job order {item.jobOrder} · {item.sources.map(({ source, name }) => `${name} (${sourceLabels[source]})`).join(', ')}</p>
+            {item.packageName && !item.sources.some(({ source }) => source === 'package') && <p>Portrait package {item.packageName}</p>}
+            <p className="text-neutral-600">Performed by {item.artistName} · Recorded by {item.actorName}</p>
+            {item.reviewReason && <p className="font-semibold text-amber-700">Review required. {item.reviewReason}</p>}
+            {earnings && <EarningsDetails item={item} refresh={refresh} />}
+          </li>
         ))}
-      </tr></tfoot>
-    </table>
-  </div>;
+      </ul>
+    </section>
+  );
 }
 
 function EarningsDetails({ item, refresh }: { item: MuaCompletion; refresh: () => void }) {

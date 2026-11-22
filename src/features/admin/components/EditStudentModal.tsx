@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { RecordActionButton } from '../../../components/common/RecordActionButton';
 import type {
   AddOn,
   RegistrationAddOn,
@@ -513,11 +514,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                         <span className="flex shrink-0 items-center gap-2">
                           <span title={isNew ? 'Today\'s catalog price' : 'Price it was sold at'}>{formatCurrency(item.amount, { exact: true })}</span>
                           {canEditAddOns && (
-                            <button type="button" onClick={() => setAddOns((current) => current.filter((_, i) => i !== index))}
-                              aria-label={`Remove ${item.name}`}
-                              className="btn-tactile px-2 py-0.5 border border-red-600 text-red-700 bg-canvas text-[10px] font-black uppercase cursor-pointer">
-                              Remove
-                            </button>
+                            <RecordActionButton variant="delete" recordName={item.name}
+                              onClick={() => setAddOns((current) => current.filter((_, i) => i !== index))} />
                           )}
                         </span>
                       </li>

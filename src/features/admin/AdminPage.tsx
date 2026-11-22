@@ -153,7 +153,7 @@ export const AdminPage: React.FC = () => {
                 <button role="tab" type="button" className={`${stationButton} ${workflow === 'makeup' ? 'border-b-4 border-b-gold bg-obsidian !text-gold' : 'bg-panel !text-ink'}`} aria-selected={workflow === 'makeup'} onClick={() => setWorkflow('makeup')}>Makeup / Grooming</button>
                 <button role="tab" type="button" className={`${stationButton} ${workflow === 'photos' ? 'border-b-4 border-b-gold bg-obsidian !text-gold' : 'bg-panel !text-ink'}`} aria-selected={workflow === 'photos'} onClick={() => setWorkflow('photos')}>Photo Selection</button>
               </div>
-              {workflow === 'makeup' ? <><MuaTeamSettings /><MakeupPage embedded /></> : <ChooserPage embedded />}
+              {workflow === 'makeup' ? <MakeupPage embedded teamSettings={<MuaTeamSettings />} /> : <ChooserPage embedded />}
             </div>
           )}
 

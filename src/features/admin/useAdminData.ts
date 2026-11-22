@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
@@ -55,6 +55,7 @@ export function useAdminData() {
 
   // Master Data
   const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const loadGeneration = useRef(0);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -87,6 +88,7 @@ export function useAdminData() {
   const [staffRole, setStaffRole] = useState<StaffRole>('cashier');
 
   const loadAllData = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     try {
       const [regsRes, orgsRes, levelsRes, coursesRes, schoolCoursesRes, pkgsRes, addonsRes, rosterRes, usersRes, paymentsRes, refundsRes] =
         await Promise.all([
@@ -108,6 +110,7 @@ export function useAdminData() {
           pb.collection('refunds').getFullList<RefundRecord>({ sort: 'created', requestKey: null }).catch(() => []),
         ]);
 
+      if (generation !== loadGeneration.current) return;
       setRegistrations(regsRes);
       setOrganizations(orgsRes);
       setLevels(levelsRes);
@@ -128,6 +131,7 @@ export function useAdminData() {
       setRefunds(refundsRes);
       if (orgsRes.length > 0 && !rosterOrgId) setRosterOrgId(orgsRes[0].id);
     } catch (err) {
+      if (generation !== loadGeneration.current) return;
       if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
       setCourseCatalogStatus((status) => status === 'ready' ? status : 'error');
       console.error('Failed to load admin data:', err);
@@ -139,6 +143,7 @@ export function useAdminData() {
     pb.collection('registrations').subscribe('*', () => {
       loadAllData();
     });
+    void pb.realtime.subscribe('studioflow-registration-deleted', loadAllData).catch(console.error);
     pb.collection('packages').subscribe('*', () => {
       loadAllData();
     }).catch((error) => console.error('Could not subscribe to package updates:', error));
@@ -150,6 +155,7 @@ export function useAdminData() {
     }).catch((error) => console.error('Could not subscribe to refund updates:', error));
     return () => {
       pb.collection('registrations').unsubscribe('*');
+      void pb.realtime.unsubscribeByTopicAndListener('studioflow-registration-deleted', loadAllData).catch(console.error);
       pb.collection('packages').unsubscribe('*');
       pb.collection('payments').unsubscribe('*');
       pb.collection('refunds').unsubscribe('*');

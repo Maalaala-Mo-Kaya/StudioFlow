@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { workflowApi, workflowError } from '../../hooks/useWorkflowData';
 import type { PaymentRecord, RefundRecord, Registration } from '../../types';
 import { studioDayStartUtc } from '../../utils/studioDay';
 import { randomId } from '../../utils/randomId';
@@ -9,6 +11,7 @@ import { refreshClientDocuments } from '../receipts/clientDocuments';
 import { clientSummary } from '../../utils/clientInfo';
 import { isReadyForRelease } from '../../utils/releaseReadiness';
 import { ALL_CLIENTS, matchesClientGroup } from '../../utils/clientGroup';
+import type { CashierPaymentIntent } from './components/PaymentModal';
 import {
   cashierFilterOptions, defaultCashierColumns, emptyCashierFilters, matchesCashierFilters,
   type CashierColumnId, type CashierFilterKey, type CashierFilters,
@@ -45,6 +48,9 @@ export function useCashierState() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [deletableIds, setDeletableIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [deleteReg, setDeleteReg] = useState<Registration | null>(null);
+  const fetchGeneration = useRef(0);
   const [collectedTodayCentavos, setCollectedTodayCentavos] = useState(0);
   const [paymentsToday, setPaymentsToday] = useState(0);
   const [refundsToday, setRefundsToday] = useState(0);
@@ -83,7 +89,7 @@ export function useCashierState() {
   const [isProcessing, setIsProcessing] = useState(false);
   const submittingPayment = useRef(false);
   // Sent with the payment so a retried request can find the payment the server already saved.
-  const clientKey = useRef<string | null>(null);
+  const confirmationAttempt = useRef<{ payload: string; key: string } | null>(null);
 
   // Print Modal State
   const [printReg, setPrintReg] = useState<Registration | null>(null);
@@ -92,10 +98,11 @@ export function useCashierState() {
   // Release Modal State
   const [releaseReg, setReleaseReg] = useState<Registration | null>(null);
 
-  const fetchRegistrations = useCallback(async () => {
+  const fetchRegistrations = useCallback(async (background = false) => {
+    const generation = ++fetchGeneration.current;
     try {
-      setLoading(true);
-      const [records, todaysPayments, todaysRefunds, lastPayment] = await Promise.all([
+      if (!background) setLoading(true);
+      const [records, todaysPayments, todaysRefunds, lastPayment, eligibleIds] = await Promise.all([
         pb.collection('registrations').getFullList<Registration>({
           sort: '-created',
           expand: 'organization,level,course,package,session_type',
@@ -120,8 +127,11 @@ export function useCashierState() {
           fields: 'created',
           requestKey: null,
         }),
+        pb.send<string[]>('/api/studioflow/deletable-registrations', { requestKey: null, cache: 'no-store' }).catch(() => []),
       ]);
+      if (generation !== fetchGeneration.current) return;
       setRegistrations(records);
+      setDeletableIds(new Set(Array.isArray(eligibleIds) ? eligibleIds : []));
       const refundedToday = todaysRefunds.reduce((sum, refund) => sum + toCentavos(refund.amount), 0);
       setCollectedTodayCentavos(todaysPayments.reduce((sum, payment) => sum + toCentavos(payment.amount), 0) - refundedToday);
       setRefundedTodayCentavos(refundedToday);
@@ -132,7 +142,7 @@ export function useCashierState() {
       if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
       console.error('Failed to fetch registrations:', err);
     } finally {
-      setLoading(false);
+      if (generation === fetchGeneration.current) setLoading(false);
     }
   }, []);
 
@@ -142,11 +152,37 @@ export function useCashierState() {
     pb.collection('registrations').subscribe('*', () => {
       fetchRegistrations();
     });
+    const refreshDeleted = () => void fetchRegistrations(true);
+    void pb.realtime.subscribe('studioflow-registration-deleted', refreshDeleted).catch(console.error);
 
     return () => {
       pb.collection('registrations').unsubscribe('*');
+      void pb.realtime.unsubscribeByTopicAndListener('studioflow-registration-deleted', refreshDeleted).catch(console.error);
     };
   }, [fetchRegistrations]);
+
+  const deleteRegistration = async (reg: Registration, reason: string) => {
+    try {
+      await pb.send(`/api/studioflow/registrations/${reg.id}/delete`, { method: 'POST', body: { reason }, requestKey: null });
+      setRegistrations((current) => current.filter((item) => item.id !== reg.id));
+      setDeleteReg(null);
+      toast.success('Registration deleted.');
+    } catch (error) {
+      if (error instanceof ClientResponseError) {
+        if (error.status === 409 || error.status === 404) {
+          setDeleteReg(null);
+          toast.error(error.response.message || 'This registration is no longer available.');
+          return;
+        }
+        if (error.status === 401 || error.status === 403) return 'Your account does not have permission to delete this registration.';
+        if (error.status === 400) return error.response.message || 'Check the deletion reason and try again.';
+        if (error.status >= 500) return 'The server could not delete the registration. Try again.';
+      }
+      return 'Deletion could not be confirmed. Check your connection and try again.';
+    } finally {
+      void fetchRegistrations(true);
+    }
+  };
 
   // At Manila midnight "Collected Today" starts over on its own, even if the screen was left open.
   // A sleeping PC can miss the timer, so the day is also checked when the window gets focus.
@@ -199,14 +235,11 @@ export function useCashierState() {
       };
       const mode: CollectionMode = !canUseCollectionMode(hydrated, 'full')
         ? 'additional' : latest.payment_type === 'downpayment' ? 'initial' : 'full';
-      const paymentCentavos = mode === 'initial'
-        ? Math.min(balanceCentavos, Math.round(totalCentavos / 200) * 100)
-        : balanceCentavos;
       if (submittingPayment.current) return;
-      clientKey.current = null;
+      confirmationAttempt.current = null;
       setSelectedReg(hydrated);
       setPaymentType(mode);
-      setAmountPaid(mode === 'additional' ? '' : String(fromCentavos(paymentCentavos)));
+      setAmountPaid('');
       setRemarks('');
       setCashReceived('');
     } catch (err) {
@@ -252,81 +285,46 @@ export function useCashierState() {
     }
   };
 
-  const handleConfirmPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleConfirmPayment = async ({ balanceDue, discount, amount }: CashierPaymentIntent) => {
     if (!selectedReg || submittingPayment.current) return;
-    if (!canUseCollectionMode(selectedReg, paymentType)) {
-      toast.error('This collection mode is unavailable for the current job order.');
-      return;
+    const request = {
+      updated: selectedReg.updated,
+      balanceDue,
+      discount,
+      payment: amount === undefined ? undefined : {
+        amount, type: paymentType, method: paymentMethod, cashierName,
+        cash: paymentMethod === 'cash' ? Number(cashReceived) : 0,
+        remarks: remarks.trim(),
+      },
+    };
+    const payload = JSON.stringify(request);
+    if (confirmationAttempt.current?.payload !== payload) {
+      confirmationAttempt.current = { payload, key: randomId() };
     }
-    const amount = Number(amountPaid);
-    const amountCentavos = toCentavos(amount);
-    const balanceCentavos = toCentavos(selectedReg.balance);
-    const discountSettlement = paymentType !== 'initial' && !!selectedReg.revenue_discount && amountCentavos === balanceCentavos && balanceCentavos % 100 !== 0;
-    const moneyPattern = discountSettlement ? /^\d+(\.\d{1,2})?$/ : /^\d+$/;
-    if (!moneyPattern.test(amountPaid) || !Number.isFinite(amount)
-      || amountCentavos < (discountSettlement ? 1 : 100) || amountCentavos > balanceCentavos) {
-      toast.error('Please enter a valid payment amount.');
-      return;
-    }
-    const cash = Number(cashReceived);
-    if (paymentMethod === 'cash' && (!moneyPattern.test(cashReceived) || toCentavos(cash) < amountCentavos)) {
-      toast.error('Enter the cash received. It must cover the payment amount.');
-      return;
-    }
+    const clientKey = confirmationAttempt.current.key;
     submittingPayment.current = true;
     setIsProcessing(true);
     try {
-      const key = clientKey.current ??= randomId();
-      const payments = pb.collection('payments');
-      const saved = await payments.create<PaymentRecord>({
-        registration: selectedReg.id,
-        amount: fromCentavos(amountCentavos),
-        payment_type: paymentType,
-        payment_method: paymentMethod,
-        cashier_name: cashierName,
-        cashier_id: user?.id || '',
-        cash_tendered: paymentMethod === 'cash' ? fromCentavos(toCentavos(cash)) : 0,
-        client_key: key,
-        remarks: remarks.trim(),
-      }, { requestKey: null }).catch(async (err: unknown) => {
-        // The server may have saved the payment before the response was lost.
-        return payments.getFirstListItem<PaymentRecord>(pb.filter('registration = {:registration} && client_key = {:key}', {
-          registration: selectedReg.id, key,
-        }), { requestKey: null, cache: 'no-store' }).catch(() => { throw err; });
-      });
-
-      setSelectedReg(null);
-      refreshClientDocuments(selectedReg.id, toast.warning);
-      toast.success(saved.change_amount
-        ? `Payment recorded. Change: ₱${saved.change_amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
-        : 'Payment recorded successfully.');
-      const updated = await pb.collection('registrations').getOne<Registration>(selectedReg.id, {
-        expand: 'organization,level,course,package,session_type',
-        requestKey: null,
-        cache: 'no-store',
-      }).catch((err: unknown) => {
-        console.error('Failed to load the job order for the receipt:', err);
-        toast.error('Payment was recorded. Refresh the job order to print the receipt.');
-        fetchRegistrations();
-        return null;
-      });
-      if (!updated) return;
-
-      // Instant 0ms optimistic UI update for Cashier Table
-      setRegistrations((prev) =>
-        prev.map((r) => (r.id === selectedReg.id ? updated : r))
+      const confirm = () => pb.send<{ registration: Registration; paymentId: string; changeAmount: number }>(
+        `${workflowApi}/registrations/${selectedReg.id}/confirm-payment`,
+        { method: 'POST', body: { ...request, clientKey }, requestKey: null },
       );
-
+      const result = await confirm().catch((error: unknown) => {
+        if (error instanceof ClientResponseError && (error.status === 0 || error.status >= 500)) return confirm();
+        throw error;
+      });
+      const updated = { ...result.registration, expand: selectedReg.expand };
+      setRegistrations((prev) => prev.map((reg) => reg.id === updated.id ? updated : reg));
+      setSelectedReg(null);
       setPrintReg(updated);
-      setPrintPaymentId(saved.id);
-
-      // Trigger background sync
-      fetchRegistrations();
-    } catch (err: unknown) {
-      console.error('Failed to process payment:', err);
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      toast.error('Payment processing failed: ' + msg);
+      setPrintPaymentId(result.paymentId || undefined);
+      refreshClientDocuments(updated.id, toast.warning);
+      toast.success(result.changeAmount
+        ? `Payment recorded. Change: ₱${result.changeAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
+        : result.paymentId ? 'Payment recorded successfully.' : 'Discount settlement recorded.');
+      void fetchRegistrations();
+    } catch (error: unknown) {
+      toast.error(workflowError(error));
     } finally {
       submittingPayment.current = false;
       setIsProcessing(false);
@@ -402,6 +400,11 @@ export function useCashierState() {
 
   return {
     registrations,
+    deletableIds,
+    deleteReg,
+    openDeleteModal: setDeleteReg,
+    closeDeleteModal: () => setDeleteReg(null),
+    deleteRegistration,
     filteredRegistrations,
     loading,
     activeTab,
