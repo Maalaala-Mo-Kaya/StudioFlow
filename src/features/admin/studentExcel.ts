@@ -38,6 +38,8 @@ interface StudentExcelRow {
   /** Other fees on the job order, in centavos (part of TOTAL DUE). */
   otherFees?: number;
   discount?: number;
+  /** "10% · reason · by …", shown as a note on the DISCOUNT cell. */
+  discountNote?: string;
   revenueTerms?: RevenueSplit | null;
   /** Job order total, in centavos. */
   due: number;
@@ -361,6 +363,8 @@ export function buildStudentWorkbook(
           name: student.name, packageCode: student.packageCode,
           ...Object.fromEntries(Object.entries(amountsInRow).map(([column, cents]) => [column, cents / 100])),
         });
+        // Why the discount was given, as a cell note (hover in Excel); no effect on the formulas.
+        if (student.discount && student.discountNote) row.getCell(DISCOUNT).note = student.discountNote;
         const totalCell = row.getCell('total');
         totalCell.value = {
           formula: `ROUND(SUM(${row.getCell('full').address}:${row.getCell('down').address})-${row.getCell('refunded').address},2)`,

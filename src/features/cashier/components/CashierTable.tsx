@@ -4,6 +4,7 @@ import type { Registration } from '../../../types';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
 import { isReadyForRelease, releaseBlocker } from '../../../utils/releaseReadiness';
 import { formatClientName, formatCurrency } from '../../../utils/formatters';
+import { discountRate } from '../../../utils/revenue';
 import { DataTable } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { CashierMobileCard } from './CashierMobileCard';
@@ -90,6 +91,12 @@ export function CashierTable({
           ) : (
             <div className="text-neutral-400 font-bold text-[10px] uppercase">
               Settled
+            </div>
+          )}
+          {/* A discounted order says so at a glance (its reason shows on hover). */}
+          {reg.revenue_discount && reg.status !== 'cancelled' && (
+            <div className="text-amber-700 font-bold text-[10px]" title={reg.revenue_discount.reason ? `Discount reason: ${reg.revenue_discount.reason}` : undefined}>
+              Discount {discountRate(reg.revenue_discount, reg.total_amount)} · −{formatCurrency(((reg.revenue_discount.studio ?? 0) + (reg.revenue_discount.mua ?? 0)) / 100, { exact: true })}
             </div>
           )}
           {/* paid_amount is net of refunds: say when money was given back, so ₱0 paid isn't mistaken for "never paid". */}

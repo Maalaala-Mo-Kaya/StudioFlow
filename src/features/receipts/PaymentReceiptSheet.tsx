@@ -92,7 +92,7 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
         <Row label="Method" value={method} />
         <Row label="Previous Balance" value={peso(payment.balance_before)} />
         {discount && <>
-          <Row label={`Discount Credit (${Number(discount.percentage.toFixed(2))}%)`} value={peso(-discount.amount)} />
+          <Row label={`Discount Credit (${discount.rate})`} value={peso(-discount.amount)} />
           <p className="break-words text-[8px] leading-[9px]">Reason · {discount.reason}</p>
         </>}
       </div>

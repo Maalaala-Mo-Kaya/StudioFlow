@@ -4,7 +4,7 @@ import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import {
-  orderExtras, receiptRevenueLine,
+  orderDiscount, orderExtras, receiptRevenueLine,
   isCounted, isComplimentarySettlement, jobOrderMarks, methodLabel, soldPackagePrice, paymentTypeLabel, peso, receiptDate, receiptLabel, signatureUrl, statusLabel, visiblePayments, profileCells,
   type ReceiptData,
 } from './receiptData';
@@ -135,6 +135,8 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
 
         <div className="w-[2.2in] shrink-0 self-start border-2 border-[#0a0a0a] p-[6px] font-mono space-y-[2px]">
           <Line label="Original billed" value={peso(reg.total_amount + discountCents(reg) / 100)} />
+          {/* The discount on its own line, so Original billed − discount − payments = balance. */}
+          {credit > 0 && <Line label={`Less discount (${orderDiscount(reg).rate})`} value={`−${peso(credit)}`} />}
           <p className="text-[7px] leading-tight">{receiptRevenueLine(data)}</p>
           {/* paid_amount is net of refunds; show the refund so the payment history still adds up. */}
           {(reg.refunded_amount ?? 0) > 0 && <Line label="Less refunds" value={`−${peso(reg.refunded_amount)}`} />}

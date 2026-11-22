@@ -168,6 +168,9 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
       addOns: Object.fromEntries(charges),
       otherFees: record.otherFees,
       discount,
+      // "10% · Loyal client" for the DISCOUNT cell's note in the Overall Excel.
+      discountNote: discount ? [record.discount?.fixed ? "Fixed amount" : record.discount?.percentage !== undefined && record.discount?.percentage !== null ? Number(Number(record.discount.percentage).toFixed(2)) + "%" : "",
+        record.discount?.reason || "", record.discount?.by ? "by " + record.discount.by : ""].filter(Boolean).join(" · ") : "",
       revenueTerms: record.revenueTerms,
       due: record.due,
       payments: paymentsByRegistration.get(record.id) || { full: 0, additional: 0, down: 0, refunded: 0 },

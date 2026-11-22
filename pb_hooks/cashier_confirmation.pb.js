@@ -18,7 +18,7 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/confirm-payment", (e) => {
   // PocketBase decodes objects into Go maps, which don't have a stable field order.
   const fingerprint = $security.sha256(JSON.stringify([
     body.updated, body.balanceDue,
-    discountInput == null ? null : [discountInput.percentage, discountInput.reason],
+    discountInput == null ? null : [discountInput.percentage, discountInput.reason, discountInput.amount],
     paymentInput == null ? null : [
       paymentInput.amount, paymentInput.type, paymentInput.method, paymentInput.cash, paymentInput.cashierName, paymentInput.remarks,
     ],
@@ -46,18 +46,28 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/confirm-payment", (e) => {
     const before = workflow.json(reg, "revenue_discount");
     const discountRequested = discountInput != null;
     if (discountRequested) {
-      const { percentage, reason } = discountInput;
-      const reasonOnly = percentage === undefined && before;
-      if (!reasonOnly && (!Number.isInteger(percentage) || percentage < 0 || percentage > 100)) {
+      const { percentage, reason, amount } = discountInput;
+      // A fixed peso discount (whole pesos, off the Studio charges) instead of a percentage.
+      const fixedAmount = amount !== undefined && amount !== null;
+      if (fixedAmount && (!Number.isInteger(amount) || amount < 1)) {
+        throw new BadRequestError("Enter a whole peso discount amount of at least ₱1.");
+      }
+      const reasonOnly = !fixedAmount && percentage === undefined && before;
+      if (!fixedAmount && !reasonOnly && (!Number.isInteger(percentage) || percentage < 0 || percentage > 100)) {
         throw new BadRequestError("Enter a whole discount percentage from 0 to 100.");
       }
-      const reasonText = percentage === 0 ? "" : ledger.readReason(typeof reason === "string" ? reason : "");
+      const reasonText = !fixedAmount && percentage === 0 ? "" : ledger.readReason(typeof reason === "string" ? reason : "");
       const subtotal = ledger.cents(reg.getFloat("total_amount")) + (before?.studio || 0) + (before?.mua || 0);
       // Keep the original grant date and allocations. This correction has its own audit event.
       if (reasonOnly) {
         if (before.reason !== reasonText) {
           reg.set("revenue_discount", { ...before, reason: reasonText });
         }
+      } else if (fixedAmount) {
+        // Off the Studio charges; an MUA credit an admin gave earlier is kept.
+        const total = require(__hooks + "/studio_revenue.js").changes(e, reg, subtotal, false, reg,
+          { order_discount: { studio: amount, mua: (before?.mua || 0) / 100, reason: reasonText } });
+        reg.set("total_amount", total / 100);
       } else {
         const total = require(__hooks + "/studio_revenue.js").changes(e, reg, subtotal, false, reg,
           { order_discount: { percentage, reason: reasonText } });
@@ -97,7 +107,7 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/confirm-payment", (e) => {
         cashier_id: actor.id, cashier_name: typeof cashierName === "string" && cashierName.trim() || ledger.actorName(actor),
         cash_tendered: method === "cash" ? cash : 0, remarks: typeof remarks === "string" ? remarks.trim() : "",
         discount_snapshot: after ? {
-          studio: after.studio, mua: after.mua, reason: after.reason,
+          studio: after.studio, mua: after.mua, reason: after.reason, ...(after.fixed ? { fixed: true } : {}),
           percentage: after.percentage ?? (after.studio + after.mua) * 100 / (totals.total + after.studio + after.mua),
         } : null,
       });

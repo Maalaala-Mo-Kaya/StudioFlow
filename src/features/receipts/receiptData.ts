@@ -4,7 +4,7 @@ import { formatJobOrderNo } from '../../utils/formatters';
 import { getRegistrationAddOns, sumAddOnAmounts } from '../../utils/registrationAddOns';
 import type { PaymentRecord, RefundRecord, Registration, StudioSettings } from '../../types';
 import { eventDateLabel, isWalkIn } from '../../utils/clientInfo';
-import { discountCents, revenueMovements, revenueTerms } from '../../utils/revenue';
+import { discountCents, discountRate, revenueMovements, revenueTerms } from '../../utils/revenue';
 
 export interface ReceiptData {
   registration: Registration;
@@ -111,12 +111,17 @@ export function soldPackagePrice(reg: Registration): number {
 export function orderExtras(reg: Registration): [string, number][] {
   const addOns = getRegistrationAddOns(reg.add_ons);
   const credit = discountCents(reg) / 100;
-  const percentage = reg.revenue_discount?.percentage ?? (credit ? credit * 100 / (reg.total_amount + credit) : 0);
   return [
     ...addOns.map((item): [string, number] => [item.name + (item.revenue_category === 'mua' ? ' (MUA)' : ''), item.amount]),
     ...(reg.other_fees ? [['Other fees', reg.other_fees] as [string, number]] : []),
-    ...(credit && reg.status !== 'cancelled' ? [[`Discount credit (${Number(percentage.toFixed(2))}%) · ${reg.revenue_discount?.reason}`, -credit] as [string, number]] : []),
+    ...(credit && reg.status !== 'cancelled' ? [[`Discount credit (${discountRate(reg.revenue_discount, reg.total_amount)}) · ${reg.revenue_discount?.reason}`, -credit] as [string, number]] : []),
   ];
+}
+
+/** The job order's discount credit as printed in its totals: percentage and amount (0 when none or cancelled). */
+export function orderDiscount(reg: Registration): { amount: number; rate: string; reason: string } {
+  const amount = reg.status === 'cancelled' ? 0 : discountCents(reg) / 100;
+  return { amount, rate: discountRate(reg.revenue_discount, reg.total_amount), reason: reg.revenue_discount?.reason ?? '' };
 }
 
 export function paymentDiscount(payment: PaymentRecord) {
@@ -124,7 +129,7 @@ export function paymentDiscount(payment: PaymentRecord) {
   if (!snapshot) return null;
   const amount = (snapshot.studio + snapshot.mua) / 100;
   if (!amount) return null;
-  return { amount, percentage: snapshot.percentage, reason: snapshot.reason };
+  return { amount, percentage: snapshot.percentage, rate: discountRate(snapshot), reason: snapshot.reason };
 }
 
 export function receiptRevenueLine(data: ReceiptData, payment?: PaymentRecord, currency = true) {

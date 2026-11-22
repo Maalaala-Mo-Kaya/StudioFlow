@@ -5,6 +5,7 @@ import type { Registration } from '../../../types';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
 import { isReadyForRelease } from '../../../utils/releaseReadiness';
 import { formatClientName, formatCurrency } from '../../../utils/formatters';
+import { discountRate } from '../../../utils/revenue';
 import { clientDetail, clientGroup } from '../../../utils/clientInfo';
 import { RecordActionButton } from '../../../components/common/RecordActionButton';
 
@@ -83,6 +84,12 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
           >
             {reg.balance > 0 ? formatCurrency(reg.balance) : 'Settled'}
           </span>
+          {/* A discounted order says so at a glance (its reason shows on hover). */}
+          {reg.revenue_discount && reg.status !== 'cancelled' && (
+            <div className="text-amber-700 font-bold text-[10px]" title={reg.revenue_discount.reason ? `Discount reason: ${reg.revenue_discount.reason}` : undefined}>
+              Discount {discountRate(reg.revenue_discount, reg.total_amount)} · −{formatCurrency(((reg.revenue_discount.studio ?? 0) + (reg.revenue_discount.mua ?? 0)) / 100, { exact: true })}
+            </div>
+          )}
         </div>
       </div>
 

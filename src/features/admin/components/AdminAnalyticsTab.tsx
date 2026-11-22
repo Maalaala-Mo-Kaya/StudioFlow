@@ -29,7 +29,7 @@ import { clientGroup, clientSummary } from '../../../utils/clientInfo';
 import { overviewMetrics, type OverviewMetrics } from '../overviewMetrics';
 import { buildAudit, isCountedPayment, type AuditGroup } from '../auditData';
 import { RegistrationDeletionHistory } from './RegistrationDeletionHistory';
-import { allocateRevenue, discountCents, revenuePesos, revenueTerms } from '../../../utils/revenue';
+import { allocateRevenue, discountCents, discountRate, revenuePesos, revenueTerms } from '../../../utils/revenue';
 import { studioDayStartUtc, studioMonthStartUtc } from '../../../utils/studioDay';
 
 const transactionDate = new Intl.DateTimeFormat('en-PH', {
@@ -211,6 +211,21 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       cell: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code || 'PKG' },
     { id: 'billed', header: 'Original billed', sortable: true, accessor: ({ registration }) => registration.total_amount + discountCents(registration) / 100, align: 'right',
       cell: ({ registration }) => formatCurrency(registration.total_amount + discountCents(registration) / 100), cellClassName: 'font-bold' },
+    // The order's discount, with its rate and reason, so it is visible without opening the cashier.
+    { id: 'discount', header: 'Discount', sortable: true, accessor: ({ registration, cancelled }) => (cancelled ? 0 : discountCents(registration)), align: 'right',
+      cell: ({ registration, cancelled }) => {
+        const amount = cancelled ? 0 : discountCents(registration) / 100;
+        if (!amount) return <span className="text-neutral-400">—</span>;
+        const d = registration.revenue_discount;
+        return (
+          <>
+            <div className="text-amber-700">−{formatCurrency(amount, { exact: true })}</div>
+            <div className="text-[9px] font-normal text-neutral-500 whitespace-normal max-w-40">
+              {discountRate(d, registration.total_amount)}{d?.reason ? ` · ${d.reason}` : ''}
+            </div>
+          </>
+        );
+      }, cellClassName: 'font-bold' },
     { id: 'collected', header: 'Collected (payments + credits)', sortable: true, accessor: ({ collected }) => collected, align: 'right',
       cell: ({ collected, refunded, credit, netPayments }) => (
         <>

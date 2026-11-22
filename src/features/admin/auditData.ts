@@ -71,11 +71,26 @@ export interface AuditGroup {
   balance: number;
 }
 
+/** A discount credit counted in the period (granted then, on an active order), for the Discounts sheet. */
+export interface AuditDiscount {
+  registration: Registration;
+  /** The credit counted (in pesos): the discount, up to what was still unpaid when it was given. */
+  credit: number;
+  percentage: number;
+  /** Given as a peso amount (the percentage is worked out). */
+  fixed: boolean;
+  reason: string;
+  by: string;
+  at: string;
+  earlierOrder: boolean;
+}
+
 export interface AuditData {
   since?: string;
   orders: AuditOrder[];
   payments: AuditPayment[];
   refunds: AuditRefund[];
+  discounts: AuditDiscount[];
   totals: {
     gross: number;
     paidOnOrders: number;
@@ -240,6 +255,7 @@ export function buildAudit(
   const revenue = emptyRevenue();
   let discountCredits = 0;
   const orderCredits = new Map<string, number>();
+  const discountRows: Omit<AuditDiscount, 'credit'>[] = [];
   for (const reg of registrations) {
     const discount = reg.revenue_discount;
     if (!discount || reg.status === 'cancelled' || !inPeriod(discount.at, since)) continue;
@@ -249,6 +265,12 @@ export function buildAudit(
     const credit = studioCredit + Math.min(discount.mua, unpaid - studioCredit);
     orderCredits.set(reg.id, credit);
     discountCredits += credit;
+    const full = cents(reg.total_amount) + discount.studio + discount.mua;
+    discountRows.push({
+      registration: reg, percentage: Number((discount.percentage ?? (full ? (discount.studio + discount.mua) * 100 / full : 0)).toFixed(2)),
+      fixed: Boolean(discount.fixed), reason: discount.reason || '', by: discount.by || '', at: discount.at || '',
+      earlierOrder: Boolean(since) && !periodOrderIds.has(reg.id),
+    });
     schoolGroup(reg).collected += studioCredit;
     packageGroup(reg).collected += studioCredit;
   }
@@ -278,6 +300,9 @@ export function buildAudit(
     })),
     payments: paymentRows.map((row) => ({ ...row, revenue: revenuePesos(row.revenue) })),
     refunds: refundRows.map((row) => ({ ...row, revenue: revenuePesos(row.revenue) })),
+    discounts: discountRows
+      .map((row) => ({ ...row, credit: pesos(orderCredits.get(row.registration.id) ?? 0) }))
+      .sort((a, b) => a.at.localeCompare(b.at)),
     totals: {
       gross: pesos(gross),
       paidOnOrders: pesos(paidOnOrders),

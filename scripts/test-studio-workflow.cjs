@@ -1421,7 +1421,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     })).payload;
     assert.deepEqual(discounted.revenue_terms, { studio: 150000, mua: 30000, unallocated: 0 });
     assert.deepEqual([discounted.total_amount, discounted.balance], [1800, 0]);
-    assert.deepEqual(orderExtras(discounted).at(-1), ['Discount credit (7.69%) · Complimentary grooming', -150]);
+    assert.deepEqual(orderExtras(discounted).at(-1), ['Discount credit (Fixed amount) · Complimentary grooming', -150]);
+    assert.equal(discounted.revenue_discount.fixed, true);
     assert.equal((await auditFor(mixed)).orders[0].overpaid, 150);
     await refundRoute({ registrationId: mixed.id, amount: 150, method: 'cash', reason: 'Approved complimentary service' });
     assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
@@ -1435,6 +1436,27 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     for (const [heading, amount] of [['STUDIO REVENUE', 1500], ['OTHER PAYMENT - MUA', 300], ['DISCOUNT', -150]]) {
       assert.equal(discountSheet.getRow(2).getCell(discountHeaders.indexOf(heading)).value, amount, heading);
     }
+    // The discount's reason travels with it: a note on the Overall Excel's DISCOUNT cell, the ledger CSV,
+    // and the Audit Export (a Discounts sheet whose total is DISCOUNT CREDITS, checked on the Summary).
+    assert.match(exportRow.discountNote, /Complimentary grooming/);
+    assert.match(String(discountSheet.getRow(2).getCell(discountHeaders.indexOf('DISCOUNT')).note), /Complimentary grooming/);
+    const discountCsv = buildRegistrationsCsv([discounted], []).split('\r\n');
+    const csvCells = (line) => line.split(',').map((value) => value.replace(/^"|"$/g, ''));
+    assert.equal(csvCells(discountCsv[1])[csvCells(discountCsv[0]).indexOf('Discount reason')], 'Complimentary grooming');
+    const discountAudit = await auditFor(mixed);
+    assert.deepEqual(discountAudit.discounts.map((row) => [row.registration.id, row.reason]), [[mixed.id, 'Complimentary grooming']]);
+    assert.equal(discountAudit.discounts.reduce((sum, row) => sum + row.credit, 0), discountAudit.totals.discountCredits);
+    const discountAuditBook = new excel.default.Workbook();
+    await discountAuditBook.xlsx.load(await buildAuditWorkbook(discountAudit, { label: 'All time' }).xlsx.writeBuffer());
+    const discountsSheet = discountAuditBook.getWorksheet('Discounts');
+    assert.equal(discountsSheet.getRow(5).getCell(9).value, 'Complimentary grooming');
+    const jobOrdersSheet = discountAuditBook.getWorksheet('Job Orders');
+    assert.deepEqual([jobOrdersSheet.getRow(4).getCell(15).value, jobOrdersSheet.getRow(5).getCell(15).value], ['Discount', 1.5 * 100]);
+    const summaryChecks = [];
+    discountAuditBook.getWorksheet('Summary').eachRow((row) => {
+      if (String(row.getCell(1).value).startsWith('Operational collected −')) summaryChecks.push(row.getCell(3).value.result);
+    });
+    assert.deepEqual(summaryChecks, ['OK - balanced']);
     await send(records('payments', mixedLast.id), { token: admin, method: 'PATCH', body: { amount: 825 }, status: 403 });
     await send(`${api}/payments/${mixedLast.id}/void`, { method: 'POST', token: admin, body: { reason: 'Incorrect receipt amount' } });
     assert.equal((await registrations(mixed)).payload.balance, 975);
@@ -2009,6 +2031,29 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.deepEqual([replacementAudit.discount_before.studio, replacementAudit.discount_after.studio], [15000, 37500]);
     const ledger = await entries('payments', editable);
     assert.equal(ledger.find((p) => p.id !== revised.paymentId).discount_snapshot.studio, 15000);
+
+    // A fixed peso discount: comes off the Studio charges, so it works even while another charge has
+    // no revenue type (where a percentage is refused); it can't exceed the Studio charges.
+    const unclassifiedAddOn = await create('add_ons', { code: 'POS-UNCL', name: 'POS Unclassified Test', amount: 400, is_active: true });
+    const partly = await load(await register(studio, [{ id: unclassifiedAddOn.id }]));
+    assert.deepEqual(partly.revenue_terms, { studio: 75000, mua: 0, unallocated: 40000 });
+    await confirm(partly, request(partly, 'pos-uncl-pct', 1035, 10, 1035), 400);
+    const fixed = (amount, due, key, pay = due) => ({
+      clientKey: key, updated: partly.updated, balanceDue: due * 100, discount: { amount, reason: 'Loyal client' },
+      payment: { amount: pay, type: 'full', method: 'cash', cash: pay, cashierName: 'Test Cashier' },
+    });
+    await confirm(partly, fixed(751, 399, 'pos-fixed-too-much'), 400);
+    await confirm(partly, fixed(0, 1150, 'pos-fixed-zero'), 400);
+    await confirm(partly, fixed(12.5, 1137.5, 'pos-fixed-decimal'), 400);
+    const fixedPaid = await confirm(partly, fixed(200, 950, 'pos-fixed'));
+    assert.deepEqual([fixedPaid.registration.total_amount, fixedPaid.registration.balance], [950, 0]);
+    assert.deepEqual([fixedPaid.registration.revenue_discount.studio, fixedPaid.registration.revenue_discount.fixed,
+      fixedPaid.registration.revenue_discount.reason], [20000, true, 'Loyal client']);
+    assert.deepEqual(fixedPaid.registration.revenue_terms, { studio: 55000, mua: 0, unallocated: 40000 });
+    const [fixedPayment] = await entries('payments', partly);
+    assert.deepEqual([fixedPayment.discount_snapshot.studio, fixedPayment.discount_snapshot.fixed], [20000, true]);
+    const { orderExtras: extrasOf } = await vite.ssrLoadModule('/src/features/receipts/receiptData.ts');
+    assert.deepEqual(extrasOf(fixedPaid.registration).at(-1), ['Discount credit (Fixed amount) · Loyal client', -200]);
   });
 
 });

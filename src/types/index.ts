@@ -365,7 +365,8 @@ export interface Registration {
   other_fees?: number;
   revenue_terms?: RevenueSplit | null;
   revenue_review?: { mua: number; reason: string; by: string; at: string } | null;
-  revenue_discount?: { studio: number; mua: number; percentage?: number; reason: string; by: string; byId?: string; at: string } | null;
+  /** Discount credit (centavos). `fixed`: given as a peso amount, not a percentage. */
+  revenue_discount?: { studio: number; mua: number; percentage?: number; fixed?: boolean; reason: string; by: string; byId?: string; at: string } | null;
   total_amount: number;
   paid_amount: number;
   balance: number;
@@ -429,7 +430,7 @@ export interface PaymentRecord {
   cashier_name?: string;
   receipt_no?: string;
   client_key?: string;
-  discount_snapshot?: { studio: number; mua: number; percentage: number; reason: string } | null;
+  discount_snapshot?: { studio: number; mua: number; percentage: number; fixed?: boolean; reason: string } | null;
   balance_before?: number;
   balance_after?: number;
   remarks?: string;
