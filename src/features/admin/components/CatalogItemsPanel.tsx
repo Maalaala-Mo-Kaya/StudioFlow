@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2, Pencil, Check, X, Printer, Frame, Box, Store, Shirt, Palette, Loader2, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Check, X, Printer, Frame, Box, Store, Shirt, Palette, Loader2, ShieldCheck, AlertTriangle } from 'lucide-react';
 import type { CatalogItem, CatalogItemCategory, CatalogItemInput } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { formatCurrency } from '../../../utils/formatters';
+import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
 import { PackageKindInput } from './PackageFormInputs';
 import type { PackageKind } from '../useAdminData';
 import { PACKAGE_KIND_LABELS } from '../packageLabels';
@@ -277,7 +278,7 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, onS
                           </span>
                         )}
                       </div>
-                      <div className="flex shrink-0 gap-1">
+                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                         {sellable(group) && <button type="button" disabled={busy} aria-pressed={!!item.is_active}
                           title={item.is_active ? 'Sold at the kiosk. Click to stop selling it.' : item.amount ? 'Click to sell it at the kiosk.' : 'Set a price first to sell it at the kiosk.'}
                           onClick={() => {
@@ -290,11 +291,11 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, onS
                           }`}>
                           <Store className="w-3 h-3" /> {item.is_active ? 'At kiosk' : 'Sell at kiosk'}
                         </button>}
-                        <button type="button" title="Edit" onClick={() => setEditing(item)}
-                          className="p-1 border border-neutral-300 hover:border-line cursor-pointer"><Pencil className="w-3 h-3" /></button>
-                        <button type="button" title="Delete" disabled={busy}
-                          onClick={() => void run(() => onDelete(item.id), `"${item.name}" deleted.`)}
-                          className="p-1 text-red-600 border border-neutral-300 hover:border-red-600 cursor-pointer"><Trash2 className="w-3 h-3" /></button>
+                        <span className={recordActionGroup}>
+                          <RecordActionButton variant="edit" recordName={item.name} onClick={() => setEditing(item)} />
+                          <RecordActionButton variant="delete" recordName={item.name} disabled={busy}
+                            onClick={() => void run(() => onDelete(item.id), `"${item.name}" deleted.`)} />
+                        </span>
                       </div>
                     </div>
                   )}

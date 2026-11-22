@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Pencil, Check, X, Layers } from 'lucide-react';
+import { Plus, Trash2, Check, X, Layers } from 'lucide-react';
 import type { CatalogItem, CatalogItemCategory, ItemPackage } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { makeCatalog, setPrints, setSummary } from '../../../utils/catalogRender';
 import { ITEM_CATEGORY_LABELS } from '../packageLabels';
 import { CategoryPicker } from './CatalogItemsPanel';
+import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
 
 interface ItemPackagesPanelProps {
   items: CatalogItem[];
@@ -164,15 +165,13 @@ export const ItemPackagesPanel: React.FC<ItemPackagesPanelProps> = ({ items, set
                   <div className="text-[10px] text-neutral-600 font-sans">{setSummary(set, catalog)}</div>
                   {setPrints(set, catalog) > 0 && <div className="text-[10px] font-bold text-gold-soft">{setPrints(set, catalog)} prints</div>}
                 </div>
-                <div className="flex shrink-0 gap-1">
-                  <button type="button" title="Edit" onClick={() => startEdit(set)}
-                    className="p-1 border border-neutral-300 hover:border-line cursor-pointer"><Pencil className="w-3 h-3" /></button>
-                  <button type="button" title="Delete"
+                <span className={recordActionGroup}>
+                  <RecordActionButton variant="edit" recordName={set.name} onClick={() => startEdit(set)} />
+                  <RecordActionButton variant="delete" recordName={set.name}
                     onClick={async () => {
                       try { await onDelete(set.id); toast.success(`"${set.name}" deleted.`); } catch (err) { toast.error(err instanceof Error ? err.message : 'Could not be deleted.'); }
-                    }}
-                    className="p-1 text-red-600 border border-neutral-300 hover:border-red-600 cursor-pointer"><Trash2 className="w-3 h-3" /></button>
-                </div>
+                    }} />
+                </span>
               </div>
             </div>
           ))}
