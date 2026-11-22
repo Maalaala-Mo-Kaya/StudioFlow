@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ClientResponseError } from 'pocketbase';
-import { pb } from '../../db/pocketbase';
+// The kiosk talks to the server as a guest, whoever is signed in on this browser.
+import { kioskPb as pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import type {
   Organization,

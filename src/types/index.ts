@@ -236,6 +236,31 @@ export interface PackageExchange {
 export type PackageInclusionRef = PackagePose | { type: 'item'; id: string; qty: number };
 
 /** A freebie with choices: the client picks one at the kiosk. */
+/**
+ * A choice in an option (`PackagePick`): normally an attire (on a background) with its own prints, like
+ * a pose ("Glamour shots": 1 pc - 3R, 2 pcs - wallet). Older choices may be a single item or typed text.
+ */
+export interface PickChoice {
+  id: string;
+  /** Attire choice: its title (made from the attire and background), attire, background and prints. */
+  title?: string;
+  attire?: string;
+  background?: string;
+  items?: PoseRow[];
+  item?: string;
+  qty?: number;
+  label?: string;
+  for: 'all' | 'female' | 'male';
+}
+
+/** "Backdrop — choose 2": the client picks `pick` of the choices at the kiosk. */
+export interface PackagePick {
+  id: string;
+  name: string;
+  pick: number;
+  choices: PickChoice[];
+}
+
 export interface FreebieChoice {
   id: string;
   /** The freebie's single item id (one of the package's freebies). */
@@ -252,6 +277,8 @@ export interface PackageStructure {
   exchanges: PackageExchange[];
   /** Freebies the client picks a version of ("Free 7x9 classic frame": Family / Barkada / Couple). */
   freebie_choices: FreebieChoice[];
+  /** Options: the client chooses `pick` of a list (part of the package; nothing exchanged, no price change). */
+  picks: PackagePick[];
   /** Older choice groups (not exchanges), kept as they were. */
   choice_groups: PackageOptionGroup[];
 }

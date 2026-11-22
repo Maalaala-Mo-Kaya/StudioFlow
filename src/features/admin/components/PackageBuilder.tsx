@@ -1,17 +1,17 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import {
   Plus, Minus, Trash2, ChevronUp, ChevronDown, Frame, Camera, Layers, ArrowLeftRight, Gift, Eye, Check, X, AlertTriangle,
-  Copy, BookmarkPlus, Printer, MonitorSmartphone, ClipboardList, ArrowLeft, ArrowRight, ImagePlus, Images, ChevronLeft, ChevronRight, Star, Loader2, Package as PackageIcon } from 'lucide-react';
+  Copy, BookmarkPlus, Printer, MonitorSmartphone, ClipboardList, ArrowLeft, ArrowRight, ImagePlus, Images, ChevronLeft, ChevronRight, Star, Loader2, ListChecks, Package as PackageIcon } from 'lucide-react';
 import { Modal } from '../../../components/common/Modal';
 import type {
-  CatalogItem, CatalogItemCategory, ExchangeOption, FreebieChoice, ItemPackage, Package, PackageExchange, PackageInclusionRef, PackagePose,
-  PackageStructure, PoseRow, RevenueCategory,
+  CatalogItem, CatalogItemCategory, ExchangeOption, FreebieChoice, ItemPackage, Package, PackageExchange, PackageInclusionRef, PackagePick, PackagePose,
+  PackageStructure, PickChoice, PoseRow, RevenueCategory,
 } from '../../../types';
 import type { PackageBuilderData, PackageKind } from '../useAdminData';
 import { useToast } from '../../../context/ToastContext';
 import { formatCurrency } from '../../../utils/formatters';
 import {
-  copyStructure, emptyStructure, makeCatalog, newId, poseFromSaved, poseTitle, printRows, readStructure, renderPackage, rowPrints, rowSummary,
+  copyStructure, emptyStructure, itemLine, makeCatalog, newId, poseFromSaved, poseTitle, printRows, readStructure, renderPackage, rowPrints, rowSummary,
   setSummary, totalPrints, type Catalog,
 } from '../../../utils/catalogRender';
 import { InclusionTreeView } from '../../../components/common/InclusionTreeView';
@@ -230,10 +230,105 @@ const STEPS = [
   { id: 'details', label: 'Details', hint: 'Name, price, who it is for', icon: ClipboardList },
   { id: 'photos', label: 'Photos', hint: 'Flyer and sample shots', icon: Images },
   { id: 'prints', label: 'Frame & poses', hint: 'Frame, attires, prints', icon: Layers },
-  { id: 'shoot', label: 'Shoot & exchange', hint: 'Shots, options', icon: Camera },
+  { id: 'shoot', label: 'Shoot & exchange', hint: 'Shots, exchanges', icon: Camera },
+  { id: 'options', label: 'Options', hint: 'Client picks from a list', icon: ListChecks },
   { id: 'freebies', label: 'Freebies', hint: 'Free extras', icon: Gift },
 ] as const;
 type StepId = (typeof STEPS)[number]['id'];
+
+/** A choice's label as clients see it: the attire (· background), the item line ("2 pcs - 5R") or the typed text. */
+const choiceLabel = (c: PickChoice, catalog: Catalog) => {
+  if (c.attire || c.title !== undefined) return poseTitle({ title: c.title ?? '', attire: c.attire, background: c.background }, catalog).trim();
+  const item = c.item ? catalog.items.get(c.item) : undefined;
+  return item ? itemLine(item, c.qty ?? 1) : (c.label ?? '').trim();
+};
+
+/**
+ * One option: a name, how many the client picks and the choices (single items with a quantity, or
+ * typed text), each for everyone, girls or boys. Part of the package: nothing exchanged, same price.
+ */
+function PickEditor({ pick, items, catalog, titleList, onCreateAttire, onChange, onRemove }: {
+  pick: PackagePick; items: CatalogItem[]; catalog: Catalog; titleList: string;
+  onCreateAttire: (name: string) => Promise<string | null>; onChange: (next: PackagePick) => void; onRemove: () => void;
+}) {
+  const set = (patch: Partial<PackagePick>) => onChange({ ...pick, ...patch });
+  const setChoice = (index: number, patch: Partial<PickChoice>) => set({ choices: pick.choices.map((c, i) => (i === index ? { ...c, ...patch } : c)) });
+  const filled = pick.choices.filter((c) => choiceLabel(c, catalog)).length;
+  const field = 'min-h-[36px] p-1.5 border border-neutral-400 bg-canvas';
+  return (
+    <div className="p-2.5 border-2 border-gold/60 bg-panel space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto_auto] gap-2 items-end">
+        <label className="block min-w-0">
+          <span className="block text-[9px] font-black uppercase text-neutral-600 mb-0.5">Shown to clients as</span>
+          <input value={pick.name} maxLength={60} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Choose 2 attires"
+            className={`w-full ${field} font-semibold`} />
+        </label>
+        <label className="block">
+          <span className="block text-[9px] font-black uppercase text-neutral-600 mb-0.5">Client picks</span>
+          <span className="flex items-center gap-1.5">
+            <input type="number" min={1} max={Math.max(1, filled - 1)} value={pick.pick} aria-label="How many the client picks"
+              onChange={(e) => set({ pick: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+              className={`w-16 ${field} font-black text-center`} />
+            <span className="font-bold whitespace-nowrap">of {filled}</span>
+          </span>
+        </label>
+        <button type="button" title="Remove option" onClick={onRemove}
+          className="p-2 text-red-600 border border-neutral-300 hover:border-red-600 cursor-pointer justify-self-start"><Trash2 className="w-3.5 h-3.5" /></button>
+      </div>
+      <span className="block text-[9px] font-black uppercase text-neutral-600">Choices</span>
+      {pick.choices.map((c, i) => (c.attire !== undefined || c.title !== undefined ? (
+        <PoseEditor key={c.id} look={{ title: c.title ?? '', attire: c.attire, background: c.background }} rows={c.items ?? []}
+          items={items} catalog={catalog} titleList={titleList} onCreateAttire={onCreateAttire}
+          onLook={(look) => setChoice(i, { title: look.title, attire: look.attire, background: look.background })}
+          onRows={(rows) => setChoice(i, { items: rows })}
+          tools={(
+            <>
+              <select value={c.for} aria-label="Who can pick this" onChange={(e) => setChoice(i, { for: e.target.value as PickChoice['for'] })}
+                className={`${field} font-bold`}>
+                {(['all', 'female', 'male'] as const).map((v) => <option key={v} value={v}>{FOR_LABELS[v]}</option>)}
+              </select>
+              <button type="button" title="Remove choice" onClick={() => set({ choices: pick.choices.filter((_, j) => j !== i) })}
+                className={`${iconButton} text-neutral-500 hover:text-red-600`}><Trash2 className="w-3.5 h-3.5" /></button>
+            </>
+          )} />
+      ) : (
+        <div key={c.id} className="flex flex-wrap items-center gap-1.5">
+          <div className="flex-1 min-w-[12rem]">
+            {c.item !== undefined ? (
+              <ItemSelect items={items} value={c.item} onChange={(id) => setChoice(i, { item: id })} placeholder="Choose a single item…"
+                only={['print', 'frame', 'other', 'attire', 'background']} />
+            ) : (
+              <input value={c.label ?? ''} maxLength={120} onChange={(e) => setChoice(i, { label: e.target.value })} placeholder="e.g. Blue backdrop"
+                className={`w-full ${field} font-semibold`} />
+            )}
+          </div>
+          {c.item !== undefined && (
+            <input type="number" min={1} max={999} value={c.qty ?? 1} aria-label="Quantity"
+              onChange={(e) => setChoice(i, { qty: Math.max(1, Math.min(999, Math.floor(Number(e.target.value) || 1))) })}
+              className={`w-16 ${field} font-black text-center`} />
+          )}
+          <select value={c.for} aria-label="Who can pick this" onChange={(e) => setChoice(i, { for: e.target.value as PickChoice['for'] })}
+            className={`${field} font-bold`}>
+            {(['all', 'female', 'male'] as const).map((v) => <option key={v} value={v}>{FOR_LABELS[v]}</option>)}
+          </select>
+          <button type="button" title="Remove choice" onClick={() => set({ choices: pick.choices.filter((_, j) => j !== i) })}
+            className={`${iconButton} text-neutral-500 hover:text-red-600`}><Trash2 className="w-3.5 h-3.5" /></button>
+        </div>
+      )))}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => set({ choices: [...pick.choices, { id: newId(), title: '', attire: '', items: [], for: 'all' }] })}
+          className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase border border-gold text-gold-soft hover:bg-gold-wash cursor-pointer">
+          <Plus className="w-3 h-3" /> Attire choice
+        </button>
+      </div>
+      {filled > 0 && (
+        <p className="text-[11px] font-sans text-neutral-600">
+          Clients see: <b>{pick.name.trim() || 'Choose'}</b>, choose {Math.min(pick.pick, filled)} of {pick.choices.map((c) => choiceLabel(c, catalog)).filter(Boolean).join(' / ')}.
+        </p>
+      )}
+    </div>
+  );
+}
 
 /** One freebie: its name, whether the client chooses a version of it, and those choices. */
 function FreebieRow({ name, choice, onChoice, onRemove, onUp, onDown }: {
@@ -449,6 +544,16 @@ export const PackageBuilder: React.FC<PackageBuilderProps> = ({ items, sets, pac
     else if (!ex.options.length) issues.push({ step: 'shoot', text: `Add options to exchange "${poseTitle(target, catalog)}" for.` });
     else if (ex.options.some((o) => !poseTitle(o, catalog).trim())) issues.push({ step: 'shoot', text: `Choose an attire (or type a title) for every option for "${poseTitle(target, catalog)}".` });
   }
+  for (const pk of structure.picks) {
+    const filled = pk.choices.filter((c) => choiceLabel(c, catalog)).length;
+    const label = pk.name.trim() || 'an option';
+    if (!pk.name.trim()) issues.push({ step: 'options', text: 'Give each option a name, such as Choose 2 attires.' });
+    if (pk.choices.some((c) => (c.attire !== undefined || c.title !== undefined) && !choiceLabel(c, catalog))) {
+      issues.push({ step: 'options', text: `Choose an attire (or type a title) for every choice in "${label}".` });
+    }
+    if (filled < 2) issues.push({ step: 'options', text: `Give "${label}" at least two choices.` });
+    else if (pk.pick >= filled) issues.push({ step: 'options', text: `"${label}": the client must pick fewer than all ${filled} choices.` });
+  }
   for (const fc of structure.freebie_choices) {
     if (fc.choices.length < 2) issues.push({ step: 'freebies', text: `Give "${catalog.items.get(fc.item)?.name ?? 'the freebie'}" at least two choices, or switch its choices off.` });
   }
@@ -466,6 +571,8 @@ export const PackageBuilder: React.FC<PackageBuilderProps> = ({ items, sets, pac
           ...structure,
           inclusions: structure.inclusions.map((e) => (e.type === 'pose' ? { ...e, title: poseTitle(e, catalog).trim(), items: filledRows(e.items) } : e)),
           exchanges: structure.exchanges.map((ex) => ({ ...ex, options: ex.options.map((o) => ({ ...o, title: poseTitle(o, catalog).trim(), items: filledRows(o.items) })) })),
+          picks: structure.picks.map((pk) => ({ ...pk, name: pk.name.trim(), choices: pk.choices.filter((c) => choiceLabel(c, catalog))
+            .map((c) => (c.attire !== undefined || c.title !== undefined ? { ...c, title: choiceLabel(c, catalog), items: filledRows(c.items ?? []) } : c)) })),
         },
       });
       toast.success(pkg ? `"${name.trim()}" saved. The kiosk shows the changes.` : `"${name.trim()}" created and active.`);
@@ -789,6 +896,22 @@ export const PackageBuilder: React.FC<PackageBuilderProps> = ({ items, sets, pac
             {!poses.length && <p className="text-[10px] text-neutral-500 font-sans">Add a pose first; an exchange swaps one of them.</p>}
           </Card>
 
+          </>)}
+          {step === 'options' && (<>
+          {/* Options: the client picks from a list (part of the package) */}
+          <Card icon={ListChecks} title="Options" hint={<>The client chooses from a list, as part of the package: nothing is exchanged and the price stays the same.
+            E.g. <b>Choose 2 attires</b>: Toga w/ cap, Filipiniana, Glamour shots. Each choice is an attire (on a background, if any) with the prints that
+            come with it, for everyone, girls or boys; the client gets the prints of the attires they pick. To swap one of the poses instead, use <b>Exchange</b> in the previous step.</>}>
+            {structure.picks.map((pk) => (
+              <PickEditor key={pk.id} pick={pk} items={items} catalog={catalog} titleList={titleList} onCreateAttire={createAttire}
+                onChange={(next) => patch({ picks: structure.picks.map((x) => (x.id === pk.id ? next : x)) })}
+                onRemove={() => patch({ picks: structure.picks.filter((x) => x.id !== pk.id) })} />
+            ))}
+            <button type="button" onClick={() => patch({ picks: [...structure.picks, { id: newId(), name: '', pick: 1, choices: [] }] })}
+              className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase border border-neutral-400 hover:border-line cursor-pointer">
+              <Plus className="w-3 h-3" /> Option
+            </button>
+          </Card>
           </>)}
           {step === 'freebies' && (<>
           {/* Freebies */}

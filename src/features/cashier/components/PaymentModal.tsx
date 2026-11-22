@@ -83,7 +83,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const validPercentage = percentage === String(savedPercentage) || (/^\d+$/.test(percentage) && percentageNumber <= 100);
   const replacingRate = kind === 'percent' && validPercentage && (percentageNumber !== savedPercentage || savedFixed);
   const removingCredit = replacingRate && percentageNumber === 0;
-  const studioCredit = Math.round(eligibleBaseCents * percentageNumber / 100);
+  // Whole pesos, rounded to the nearest peso (as the server does): payments are whole pesos.
+  const studioCredit = Math.round(eligibleBaseCents * percentageNumber / 10000) * 100;
   // Fixed amount (whole pesos)
   const fixedCents = /^\d+$/.test(fixedInput) ? Number(fixedInput) * 100 : NaN;
   const replacingFixed = kind === 'amount' && Number.isFinite(fixedCents) && fixedCents >= 100
@@ -131,10 +132,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       : amountPaid;
   const amount = Number(paymentValue);
   const amountCentavos = toCentavos(amount);
-  const allowDecimal = paymentType !== 'initial' && previewCredit > 0 && balanceCentavos % 100 !== 0;
-  const moneyPattern = allowDecimal && amountCentavos === balanceCentavos ? /^\d+(\.\d{1,2})?$/ : /^\d+$/;
+  // Payments are whole pesos (the payments table refuses centavos); discounts are whole pesos too.
+  const allowDecimal = false;
+  const moneyPattern = /^\d+$/;
   const amountError = !paymentValue ? 'Payment amount is required.'
-    : !moneyPattern.test(paymentValue) || !Number.isFinite(amount) ? 'Enter a valid payment amount.'
+    : /^\d+\.\d*$/.test(paymentValue) ? 'Payments are in whole pesos. Enter the amount without centavos.'
+    : !/^\d+$/.test(paymentValue) || !Number.isFinite(amount) ? 'Enter a valid payment amount.'
     : amountCentavos <= 0 ? 'Enter a positive payment amount.'
     : amountCentavos > balanceCentavos ? 'Payment cannot exceed the remaining balance.' : '';
   const projectedBalance = Math.max(0, balanceCentavos - (amountError ? 0 : amountCentavos));

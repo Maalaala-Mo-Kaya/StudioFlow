@@ -34,6 +34,7 @@ type StudentFilterKey = typeof filterSections[number]['key'];
 type StudentFilters = Record<StudentFilterKey, string[]>;
 
 const columns = [
+  { id: 'job', label: 'Job Order', heading: 'whitespace-nowrap', cell: 'whitespace-nowrap' },
   { id: 'student', label: 'Client Name', heading: '', cell: '' },
   { id: 'school', label: 'School / Session', heading: '', cell: '' },
   { id: 'contact', label: 'Section & Contact', heading: '', cell: '' },
@@ -45,7 +46,8 @@ const columns = [
 
 type ColumnId = typeof columns[number]['id'];
 const defaultColumns = columns.map(({ id }) => id);
-const columnStorageKey = 'studioflow.students.visibleColumns';
+// v2: the Job Order column was added (older saved choices would hide it).
+const columnStorageKey = 'studioflow.students.visibleColumns.v2';
 const emptyFilters: StudentFilters = { school: [], level: [], queue: [], financial: [] };
 
 function readColumnPreferences(): ColumnId[] {
@@ -79,24 +81,26 @@ interface AdminStudentsTabProps {
   onRestoreRegistration: (id: string) => Promise<void>;
 }
 
-const fixedViews: Record<string, string> = { list: 'All Clients', college: 'College Payment Report', shs: 'SHS Payment Report' };
+const ALL_CLIENTS = 'All clients (list)';
 
 export function AdminStudentsTab(props: AdminStudentsTabProps) {
   const [view, setView] = useState('list');
-  // The payment reports ("Overall" sheets) are per academic level. Besides College and SHS,
-  // a level gets a report only once clients are registered under it (e.g. Elementary).
-  const directoryViews = { ...fixedViews };
+  // Besides the client list, a payment report per academic level: the on-screen version of the
+  // Overall Excel's level sheets (packages, add-ons, payments and balances per client, with totals).
+  // A level is offered once clients are registered under it.
+  const directoryViews: Record<string, string> = { list: ALL_CLIENTS };
   const levelsInUse = new Set(props.registrations.map((reg) => reg.level).filter(Boolean));
   for (const level of props.levels) {
     const key = overallLevelKey(level.name);
-    if (key && !directoryViews[key] && levelsInUse.has(level.id)) directoryViews[key] = `${level.name.trim()} Payment Report`;
+    if (key && !directoryViews[key] && levelsInUse.has(level.id)) directoryViews[key] = `${level.name.trim()} · payment report`;
   }
   const activeView = directoryViews[view] ? view : 'list';
 
   return (
     <div className="min-w-0 space-y-6">
-      <label className="inline-flex max-w-full flex-wrap items-center gap-2 bg-panel border-2 border-line shadow-lux px-3 py-2 font-mono text-xs font-black uppercase">
-        Clients Directory
+      <div className="inline-flex max-w-full flex-col gap-1 bg-panel border-2 border-line shadow-lux px-3 py-2">
+      <label className="inline-flex max-w-full flex-wrap items-center gap-2 font-mono text-xs font-black uppercase">
+        Show
         <select
           value={activeView}
           onChange={(event) => setView(event.target.value)}
@@ -104,12 +108,20 @@ export function AdminStudentsTab(props: AdminStudentsTabProps) {
           className="max-w-full border border-line bg-obsidian px-2 py-1.5 text-gold"
         >
           <option value="list">{directoryViews.list}</option>
-          <optgroup label="Payment reports by level">
-            {Object.entries(directoryViews).filter(([id]) => id !== 'list')
-              .map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </optgroup>
+          {Object.keys(directoryViews).length > 1 && (
+            <optgroup label="Payment report by level (like the Overall Excel)">
+              {Object.entries(directoryViews).filter(([id]) => id !== 'list')
+                .map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </optgroup>
+          )}
         </select>
       </label>
+      <p className="text-[11px] font-sans text-neutral-500">
+        {activeView === 'list'
+          ? 'Every registration, with its job order, package, balance and status. Search, filter, edit or cancel here.'
+          : 'One academic level: each client\'s package, add-ons, payments, refunds and balance, with totals, the same as that level\'s sheet in the Overall Excel.'}
+      </p>
+      </div>
       <div hidden={activeView !== 'list'}>
         <StudentList {...props} />
       </div>
@@ -268,6 +280,9 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
   }, [registrations, searchQuery, filters, levelNames, clientGroupFilter]);
 
   const cells = {
+    job: (reg: Registration) => (reg.job_order_no
+      ? <span className="font-mono font-black text-sm text-red-600">{reg.job_order_no}</span>
+      : <span className="text-[10px] font-mono text-neutral-500">Not yet paid</span>),
     student: (reg: Registration) => <>
       <div className="font-bold text-ink">{formatClientName(reg)}</div>
       <div className="text-[10px] text-neutral-500 font-mono">
@@ -361,6 +376,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
     ),
   };
   const accessors = {
+    job: (reg: Registration) => reg.job_order_no || '',
     student: (reg: Registration) => `${reg.family_name} ${reg.given_name}`,
     school: (reg: Registration) => clientSummary(reg, true),
     contact: (reg: Registration) => `${reg.section || ''} ${reg.mobile_number || ''}`,

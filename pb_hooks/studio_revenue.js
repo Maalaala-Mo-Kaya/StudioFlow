@@ -57,7 +57,9 @@ function changes(e, original, subtotal, itemsChanged, record = e.record, body = 
       if (!Number.isInteger(percentage) || percentage < 0 || percentage > 100 || (percentage > 0 && charges.unallocated)) {
         throw new BadRequestError("Enter a whole percentage from 0 to 100 on an order with classified charges.");
       }
-      const credit = (charge) => Math.round(charge * percentage / 100) / 100;
+      // Whole pesos (rounded to the nearest peso): payments are whole pesos, so a credit with centavos
+      // (50% of ₱3,845 = ₱1,922.50) would leave a balance that can never be paid exactly.
+      const credit = (charge) => Math.round(charge * percentage / 10000);
       values = { ...values, studio: credit(charges.studio), mua: percentage === 0 ? 0 : (previousDiscount?.mua || 0) };
     }
     if (!values || !Number.isFinite(values.studio) || !Number.isFinite(values.mua)

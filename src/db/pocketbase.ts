@@ -1,4 +1,4 @@
-import PocketBase from 'pocketbase';
+import PocketBase, { BaseAuthStore } from 'pocketbase';
 
 const getBaseUrl = () => {
   const envUrl = import.meta.env?.VITE_PB_URL || import.meta.env?.PB_URL;
@@ -16,3 +16,11 @@ export const pb = new PocketBase(getBaseUrl());
 // Globally disable PocketBase JS SDK auto-cancellation so concurrent queries
 // from navbar counters, cashier, and photographer queues never abort each other.
 pb.autoCancellation(false);
+
+/**
+ * The public kiosk's own client: its auth store lives in memory and is never signed in, so a
+ * registration from the kiosk page is always sent as a client (a guest), even when a staff member
+ * is signed in on the same browser.
+ */
+export const kioskPb = new PocketBase(getBaseUrl(), new BaseAuthStore());
+kioskPb.autoCancellation(false);

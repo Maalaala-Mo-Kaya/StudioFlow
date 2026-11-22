@@ -1,5 +1,7 @@
 import { downloadBlob } from '../../utils/downloadBlob.ts';
 import { muaEarningsTable, muaReportTable, type MuaPerformanceReport } from './muaPerformance.ts';
+// Loaded only when needed (this module is also loaded directly by Node in the tests).
+import type { MuaPayoutLine, MuaSharedLine } from './muaPayouts.ts';
 
 export function muaReportCsv(report: MuaPerformanceReport, tab: 'performance' | 'earnings' = 'performance') {
   const { headers, rows, total } = tab === 'earnings' ? muaEarningsTable(report) : muaReportTable(report);
@@ -12,10 +14,22 @@ export function muaReportCsv(report: MuaPerformanceReport, tab: 'performance' | 
   return [headers, ...rows, total].map((row) => row.map(csvCell).join(',')).join('\r\n');
 }
 
-export async function buildMuaWorkbook(report: MuaPerformanceReport, tab: 'performance' | 'earnings' = 'performance') {
+export async function buildMuaWorkbook(report: MuaPerformanceReport, tab: 'performance' | 'earnings' = 'performance',
+  payouts?: { lines: MuaPayoutLine[]; shared: MuaSharedLine[] }) {
   const { default: { Workbook } } = await import('exceljs');
   const { headers, rows, total } = tab === 'earnings' ? muaEarningsTable(report) : muaReportTable(report);
   const workbook = new Workbook();
+  // MUA SUMMARY first (artists and Wardrobe / shared money for the day), then the Wardrobe page.
+  if (payouts) {
+    const { addMuaPayoutSheets } = await import('./muaPayoutSheets.ts');
+    const used = new Set<string>();
+    addMuaPayoutSheets(workbook, { ...payouts, period: `${report.date} · services completed / job orders made that day`, name: (wanted) => {
+      let candidate = wanted.slice(0, 28);
+      for (let n = 2; used.has(candidate.toLowerCase()); n++) candidate = `${wanted.slice(0, 26)} ${n}`;
+      used.add(candidate.toLowerCase());
+      return candidate;
+    } });
+  }
   const sheet = workbook.addWorksheet(tab === 'earnings' ? 'MUA Earnings' : 'MUA Performance', {
     views: [{ state: 'frozen', xSplit: 2, ySplit: 1 }],
     properties: { tabColor: { argb: 'FFC9A227' } },
@@ -68,7 +82,12 @@ export async function downloadMuaReport(report: MuaPerformanceReport, format: 'c
   if (format === 'csv') {
     downloadBlob(new Blob(['\uFEFF', muaReportCsv(report, tab)], { type: 'text/csv;charset=utf-8' }), filename);
   } else {
-    const workbook = await buildMuaWorkbook(report, tab);
+    // The day's payout lines and Wardrobe / shared charges, for the summary pages.
+    const { pb } = await import('../../db/pocketbase.ts');
+    const payouts = tab === 'earnings'
+      ? await pb.send<{ lines: MuaPayoutLine[]; shared: MuaSharedLine[] }>(`/api/studioflow/mua-payouts?from=${report.date}&to=${report.date}`, {})
+      : undefined;
+    const workbook = await buildMuaWorkbook(report, tab, payouts);
     const bytes = await workbook.xlsx.writeBuffer();
     downloadBlob(new Blob([new Uint8Array(bytes)], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

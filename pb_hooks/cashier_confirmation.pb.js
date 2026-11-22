@@ -111,7 +111,14 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/confirm-payment", (e) => {
           percentage: after.percentage ?? (after.studio + after.mua) * 100 / (totals.total + after.studio + after.mua),
         } : null,
       });
-      tx.save(payment);
+      try {
+        tx.save(payment);
+      } catch (error) {
+        // The payments table's own checks (whole pesos, not over the balance …): say what they refused.
+        const refused = String(error && error.message || error).match(/constraint failed: ([^(]+)/);
+        if (refused) throw new BadRequestError(refused[1].trim().replace(/\.?$/, "."));
+        throw error;
+      }
       reg = tx.findRecordById("registrations", id);
     } else {
       if (totals.balance || !after || JSON.stringify(before) === JSON.stringify(after)) {

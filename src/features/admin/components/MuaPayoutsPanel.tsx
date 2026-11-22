@@ -76,6 +76,7 @@ export const MuaPayoutsPanel: React.FC = () => {
           </label>
           <button type="button" className={`${stationButton} !bg-panel !text-ink`} onClick={() => setRange(within(monthStart(today), today))}>This month</button>
           <button type="button" className={`${stationButton} !bg-panel !text-ink`} disabled={!!start && lastMonth().to < start} onClick={() => { const last = lastMonth(); setRange(within(last.from, last.to)); }}>Last month</button>
+          <button type="button" className={`${stationButton} !bg-panel !text-ink`} disabled={!start} onClick={() => setRange({ from: start, to: today })}>All time</button>
           <button type="button" className={stationButton} disabled={!report || exporting} onClick={() => void exportExcel()}>
             <FileSpreadsheet className="w-4 h-4" /> {exporting ? 'Exporting…' : 'Export Excel'}
           </button>
@@ -91,7 +92,7 @@ export const MuaPayoutsPanel: React.FC = () => {
           <div className="grid gap-3 sm:grid-cols-4">
             {([
               ['Earned by artists', sum('earned')], ['Paid out', sum('paid')], ['Still owed', sum('unpaid')],
-              ['Shared MUA money', pool?.total ?? 0],
+              ['Wardrobe / shared MUA', pool?.total ?? 0],
             ] as const).map(([label, amount]) => (
               <div key={label} className="border-2 border-line bg-canvas p-3">
                 <p className="text-[10px] font-black uppercase text-gold-soft">{label}</p>
@@ -139,7 +140,7 @@ export const MuaPayoutsPanel: React.FC = () => {
 
           {pool && (
             <div className="border-2 border-line bg-canvas p-3 text-xs space-y-1">
-              <p className="font-black uppercase text-ink">Shared MUA money · {peso(pool.total)}
+              <p className="font-black uppercase text-ink">Wardrobe / shared MUA money · {peso(pool.total)} · {new Set(report.shared.map((line) => line.jobId)).size} job orders
                 <span className="ml-2 font-mono font-bold normal-case text-neutral-500">({peso(pool.clientPaid)} on fully paid orders)</span></p>
               <p className="text-neutral-600 font-sans">
                 MUA charges that are not one artist&apos;s service (e.g. Wardrobe), on job orders made in this period. The money is for the

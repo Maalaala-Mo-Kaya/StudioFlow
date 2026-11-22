@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
+import { isStaleBuildError, reloadForNewVersion } from '../utils/staleBuild';
 import { CheckCircle2, AlertTriangle, AlertCircle, Info, X } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -50,7 +51,15 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const toast = {
     success: (message: string, title?: string) => showToast(message, 'success', title),
-    error: (message: string, title?: string) => showToast(message, 'error', title, 6000),
+    error: (message: string, title?: string) => {
+      // An export (or other lazy part) of the old app failed to load after an update: reload once.
+      if (isStaleBuildError(message)) {
+        if (reloadForNewVersion()) { showToast('StudioFlow was updated. Reloading to load the new version…', 'info', undefined, 0); return; }
+        showToast('StudioFlow was updated on the server. Reload the page (Ctrl+F5), then try again.', 'warning', title, 10000);
+        return;
+      }
+      showToast(message, 'error', title, 6000);
+    },
     warning: (message: string, title?: string) => showToast(message, 'warning', title, 5000),
     info: (message: string, title?: string) => showToast(message, 'info', title),
   };
