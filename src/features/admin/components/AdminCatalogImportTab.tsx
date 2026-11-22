@@ -1,28 +1,35 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   FileImage, FileSpreadsheet, FileText, Loader2, Plus, RefreshCw, Trash2, UploadCloud, Download,
-  ArrowLeftRight, AlertTriangle, CheckCircle2, ScanText, Gift,
+  ArrowLeftRight, AlertTriangle, CheckCircle2, ScanText, Gift, DatabaseBackup, X,
 } from 'lucide-react';
 import type { AddOn, Package, RevenueCategory } from '../../../types';
 import { formatCurrency } from '../../../utils/formatters';
 import { useToast } from '../../../context/ToastContext';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { PackageInclusionsEditor } from './PackageInclusionsEditor';
+import { PackageOptionGroupsEditor } from './PackageOptionGroupsEditor';
+import { PhotoLimitInput } from './PhotoLimitInput';
+import { InclusionTreeEditor } from './InclusionTreeEditor';
+import { cleanInclusionTree, countInclusionItems, inclusionLines } from '../../../utils/inclusions';
 import { COMMON_FREEBIE_PRESETS } from '../catalogPresets';
 import type { PackageKind } from '../useAdminData';
 import {
-  assignCodes, lineKey, newDraftAddOn, newDraftPackage, parseCatalogText,
+  assignCodes, lineKey, newDraftAddOn, newDraftPackage, parseCatalogJson, parseCatalogText,
   type CatalogDraft, type DraftAddOn, type DraftPackage,
 } from '../catalogImport/catalogParser';
 import {
   ACCEPTED_FILES, downloadCatalogTemplate, readCatalogSource, sourceKind, type SourceKind,
 } from '../catalogImport/readCatalogSource';
 import type { CatalogSaveResult } from '../catalogImport/saveCatalog';
+import type { CatalogBackup, RestoreResult } from '../catalogBackup';
 
 interface AdminCatalogImportTabProps {
   packages: Package[];
   addOns: AddOn[];
   onSave: (packages: DraftPackage[], addOns: DraftAddOn[]) => Promise<CatalogSaveResult>;
+  /** Restores the catalog copy inside an exported price list. */
+  onRestore: (backup: CatalogBackup, update: boolean, onProgress?: (label: string, fraction: number) => void) => Promise<RestoreResult>;
   onOpenCatalog: () => void;
 }
 
@@ -39,10 +46,10 @@ type PackageRow = DraftPackage & { sourceId: string };
 type AddOnRow = DraftAddOn & { sourceId: string };
 
 const MANUAL = 'manual';
-const KIND_ICONS = { image: FileImage, sheet: FileSpreadsheet, doc: FileText, text: FileText } as const;
-const KIND_LABELS = { image: 'Photo', sheet: 'Spreadsheet', doc: 'Word document', text: 'Text file' } as const;
+const KIND_ICONS = { image: FileImage, sheet: FileSpreadsheet, doc: FileText, text: FileText, json: FileText } as const;
+const KIND_LABELS = { image: 'Photo', sheet: 'Spreadsheet', doc: 'Word document', text: 'Text file', json: 'StudioFlow package file' } as const;
 
-export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ packages, addOns, onSave, onOpenCatalog }) => {
+export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ packages, addOns, onSave, onRestore, onOpenCatalog }) => {
   const { toast } = useToast();
   const [sources, setSources] = useState<Source[]>([]);
   const [packageRows, setPackageRows] = useState<PackageRow[]>([]);
@@ -54,6 +61,25 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
   const fileInput = useRef<HTMLInputElement>(null);
   const previewUrls = useRef<string[]>([]);
   const savingRef = useRef(false);
+  // An exported price list carries a catalog backup: offer to restore it instead of reading it as a flyer.
+  const [backupFile, setBackupFile] = useState<{ name: string; backup: CatalogBackup } | null>(null);
+  const [updateExisting, setUpdateExisting] = useState(false);
+  const [restoring, setRestoring] = useState<{ label: string; fraction: number } | null>(null);
+  const [restored, setRestored] = useState<RestoreResult | null>(null);
+  const runRestore = async () => {
+    if (!backupFile || restoring) return;
+    setRestoring({ label: 'Starting', fraction: 0 });
+    try {
+      const result = await onRestore(backupFile.backup, updateExisting, (label, fraction) => setRestoring({ label, fraction }));
+      setRestored(result);
+      if (result.failed.length) toast.warning(`Restored with ${result.failed.length} problem(s). See the list below.`);
+      else toast.success(`Catalog restored: ${result.created} added, ${result.updated} updated, ${result.kept} already there.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'The catalog could not be restored.');
+    } finally {
+      setRestoring(null);
+    }
+  };
 
   useEffect(() => () => previewUrls.current.forEach((url) => URL.revokeObjectURL(url)), []);
 
@@ -95,6 +121,14 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
         previewUrls.current.push(previewUrl);
       }
       setProgress({ label: 'Opening', fraction: 0, file: file.name });
+      // An exported StudioFlow price list: restore it exactly instead of reading it as text.
+      const backup = await (await import('../catalogBackup')).findBackupInFile(file);
+      if (backup) {
+        setBackupFile({ name: file.name, backup });
+        setRestored(null);
+        toast.success(`${file.name} is a StudioFlow catalog backup. Check the summary and press Restore.`);
+        continue;
+      }
       try {
         const result = await readCatalogSource(file, (label, fraction) => setProgress({ label, fraction, file: file.name }));
         const fresh = prepare(result.draft, id, currentPackages, currentAddOns);
@@ -133,7 +167,14 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
   }, []);
 
   const rereadSource = (source: Source) => {
-    const fresh = applyDraft(parseCatalogText(source.text), source.id);
+    let draft: CatalogDraft;
+    try {
+      draft = source.kind === 'json' ? parseCatalogJson(source.text) : parseCatalogText(source.text);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'The text could not be read.');
+      return;
+    }
+    const fresh = applyDraft(draft, source.id);
     toast.info(`Read again: ${fresh.packages.length} package(s), ${fresh.addOns.length} add-on(s).`);
   };
 
@@ -171,7 +212,9 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
     // Adding to an existing package: only its lists change, so name, price and code don't apply.
     if (type === 'package' && (row as PackageRow).mergeInto) {
       const pkg = row as PackageRow;
-      if (!pkg.inclusions.some((i) => i.trim()) && !pkg.freebies.some((f) => f.trim())) problems.push('Add an inclusion or freebie to add to the package.');
+      if (!countInclusionItems(cleanInclusionTree(pkg.inclusions)) && !pkg.freebies.some((f) => f.trim()) && !pkg.optionGroups.length) {
+        problems.push('Add an inclusion, freebie or option to add to the package.');
+      }
       return problems;
     }
     if (!row.name.trim()) problems.push('Enter a name.');
@@ -219,8 +262,66 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
 
   const busy = !!progress || saving;
 
+  const b = backupFile?.backup;
   return (
     <div className="space-y-6 animate-enter font-mono text-xs">
+      {backupFile && b && (
+        <div className="bg-panel border-2 border-gold shadow-lux-gold p-5 space-y-3">
+          <div className="flex items-start justify-between gap-3 pb-2 border-b-2 border-line">
+            <div>
+              <h3 className="flex items-center gap-2 text-xs sm:text-sm font-black uppercase tracking-wider text-ink">
+                <DatabaseBackup className="w-4 h-4 text-gold" /> Restore catalog from backup
+              </h3>
+              <p className="mt-1 font-sans text-xs text-neutral-600">
+                <b>{backupFile.name}</b> is a StudioFlow price list exported {new Date(b.exported_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}.
+                It holds an exact copy of the catalog.
+              </p>
+            </div>
+            <button type="button" aria-label="Close" disabled={!!restoring} onClick={() => { setBackupFile(null); setRestored(null); }}
+              className="w-8 h-8 flex items-center justify-center border border-line bg-canvas cursor-pointer disabled:opacity-50"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {([['Single items', b.items.length], ['Saved poses', b.poses.length], ['Packages', b.packages.length], ['Add-ons', b.add_ons.length]] as const).map(([label, n]) => (
+              <div key={label} className="p-2 border border-gold/50 bg-gold-wash text-center">
+                <div className="text-lg font-black text-ink">{n}</div>
+                <div className="text-[9px] font-black uppercase tracking-wider text-neutral-600">{label}</div>
+              </div>
+            ))}
+          </div>
+          <ul className="font-sans text-xs text-neutral-700 list-disc list-inside space-y-0.5">
+            <li>Restores prices, kiosk settings, attires and backgrounds, poses, exchanges, freebie choices and add-ons exactly as exported.</li>
+            <li>Anything already in the system (same code or name) is kept as it is{updateExisting ? ', then changed to match the backup' : ''}.</li>
+            <li>Package photos are not in the file: add them again in each package's Photos step.</li>
+          </ul>
+          <label className="flex items-center gap-2 font-bold cursor-pointer">
+            <input type="checkbox" className="size-4 accent-gold" checked={updateExisting} disabled={!!restoring} onChange={(e) => setUpdateExisting(e.target.checked)} />
+            Also change existing items and packages to match the backup
+          </label>
+          {restoring && (
+            <div className="space-y-1">
+              <div className="text-[10px] font-black uppercase text-neutral-600">Restoring {restoring.label}… {Math.round(restoring.fraction * 100)}%</div>
+              <div className="h-1.5 bg-canvas border border-line"><div className="h-full bg-gold transition-all" style={{ width: `${Math.round(restoring.fraction * 100)}%` }} /></div>
+            </div>
+          )}
+          {restored && (
+            <div role="status" className={`p-2 border font-sans text-xs space-y-1 ${restored.failed.length ? 'border-amber-500 bg-amber-50 text-amber-900' : 'border-emerald-500 bg-emerald-50 text-emerald-800'}`}>
+              <p className="font-bold">Added {restored.created} · updated {restored.updated} · already there {restored.kept}{restored.failed.length ? ` · ${restored.failed.length} not restored` : ''}</p>
+              {restored.failed.map((f, i) => <p key={i}>{f.what} "{f.name}": {f.message}</p>)}
+            </div>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            {restored && (
+              <button type="button" onClick={onOpenCatalog}
+                className="btn-tactile min-h-[40px] px-4 border border-line bg-canvas font-black uppercase cursor-pointer">Open the catalog</button>
+            )}
+            <button type="button" disabled={!!restoring} onClick={() => void runRestore()}
+              className="btn-tactile min-h-[40px] px-5 flex items-center gap-1.5 bg-obsidian text-gold border border-line font-black uppercase cursor-pointer disabled:opacity-50">
+              {restoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <DatabaseBackup className="w-4 h-4" />} {restored ? 'Restore again' : 'Restore'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Upload */}
       <div className="bg-panel border-2 border-line shadow-lux p-6 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b-2 border-line">
@@ -230,8 +331,9 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
             </h3>
             <p className="mt-1 font-sans text-xs text-neutral-600 max-w-2xl">
               Upload a package flyer photo, an Excel price list or a Word document. StudioFlow reads the
-              package names, prices, inclusions, freebies and add-ons for you to check. Nothing is saved until you
-              press Save. Files are read on this computer and never sent to the internet.
+              package names, prices, inclusions, freebies, options and add-ons for you to check. Nothing is saved until you
+              press Save. Files are read on this computer and never sent to the internet. A price list exported from
+              StudioFlow (Excel, CSV or Word) restores the whole catalog exactly.
             </p>
           </div>
           <button type="button" onClick={() => void downloadCatalogTemplate()}
@@ -270,7 +372,7 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
               <UploadCloud className="w-8 h-8 text-gold" />
               <span className="font-black uppercase tracking-wider text-ink">Drop files here or click to choose</span>
               <span className="text-[11px] text-neutral-600 font-sans">
-                Photos (JPG, PNG) · Excel (.xlsx, .csv) · Word (.docx) · Text (.txt). You can also paste a screenshot (Ctrl+V).
+                Photos (JPG, PNG) · Excel (.xlsx, .csv) · Word (.docx) · Text (.txt) · StudioFlow package (.json). You can also paste a screenshot (Ctrl+V).
               </span>
             </>
           )}
@@ -399,7 +501,7 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
                     <p className="flex items-start gap-1.5 p-2 border border-gold bg-gold-wash text-ink font-sans text-[11px]">
                       <Gift className="w-3.5 h-3.5 shrink-0 mt-0.5 text-gold" />
                       <span>
-                        The inclusions and freebies below are added to <b>{target.name}</b> ({target.code}), skipping any it already has.
+                        The inclusions, freebies and options below are added to <b>{target.name}</b> ({target.code}), skipping any it already has.
                         Its name, price and code stay the same. Job orders already sold keep what they were sold with.
                       </span>
                     </p>
@@ -431,16 +533,16 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
                     <Field label="Revenue">
                       <RevenueSelect value={row.revenue} onChange={(revenue) => updatePackage(row.key, { revenue })} />
                     </Field>
-                    <Field label="Photos to choose (0 = no limit)" className="col-span-2">
-                      <input type="number" min="0" step="1" value={row.photoLimit}
-                        onChange={(e) => updatePackage(row.key, { photoLimit: Number(e.target.value) })}
-                        className="w-full p-2 border border-neutral-400 bg-canvas font-bold" />
-                    </Field>
+                    <div className="col-span-2 sm:col-span-4">
+                      <PhotoLimitInput value={row.photoLimit} onChange={(photoLimit) => updatePackage(row.key, { photoLimit })} />
+                    </div>
                   </div>}
-                  <PackageInclusionsEditor inclusions={row.inclusions}
+                  <InclusionTreeEditor inclusions={row.inclusions}
                     onChange={(inclusions) => updatePackage(row.key, { inclusions })} label="Inclusions" />
                   <PackageInclusionsEditor inclusions={row.freebies} presets={COMMON_FREEBIE_PRESETS} itemName="freebie"
                     onChange={(freebies) => updatePackage(row.key, { freebies })} label="Freebies" />
+                  <PackageOptionGroupsEditor groups={row.optionGroups} inclusionLabels={inclusionLines(row.inclusions)}
+                    onChange={(optionGroups) => updatePackage(row.key, { optionGroups })} />
                   <Problems problems={problems} />
                 </div>
               );
@@ -552,7 +654,7 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
             <b> active</b>, so the registration kiosk and cashier can offer them right away. You can edit or archive
             them later under Packages &amp; Add-ons.
             {mergeCount > 0 && (
-              <><br /><br />{mergeCount} existing package(s) also get the inclusions and freebies you listed; their name,
+              <><br /><br />{mergeCount} existing package(s) also get the inclusions, freebies and options you listed; their name,
               price and code stay the same.</>
             )}
             {zeroPriced > 0 && <><br /><br /><b>{zeroPriced} item(s) are priced at ₱0.</b></>}

@@ -43,12 +43,53 @@ function snapshotAddOn(item) {
  * JSON-encoded string).
  */
 function packageInclusions(pkg, field = "inclusions") {
-  let value = pkg.getString(field);
+  const value = readList(pkg.getString(field));
+  return value.filter((item) => typeof item === "string" && item.trim());
+}
+
+/** A JSON list (saved as an array or a JSON-encoded string); plain text is one item. */
+function readList(text) {
+  let value = text;
   for (let i = 0; i < 2 && typeof value === "string"; i++) {
     // Not JSON: an old record holding one plain-text inclusion.
     try { value = JSON.parse(value || "null"); } catch (_) { return value.trim() ? [value] : []; }
   }
-  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()) : [];
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * Inclusions can be plain items or titled sections with items inside, and a section may hold
+ * sub-sections, three levels in all: ["Toga w/out cap", { title: "Frame and Prints", items: ["33 pcs
+ * hard copy", { title: "Toga w/out cap", items: [{ title: "Colored", items: ["1 pc - 8R"] }] }] }]. Cleans text, drops empty
+ * entries, and returns { items } or { problem }. Keep in step with src/utils/inclusions.ts.
+ */
+function cleanInclusions(raw, depth = 0) {
+  const items = [];
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    if (typeof entry === "string") {
+      const text = entry.trim().replace(/\s+/g, " ");
+      if (!text) continue;
+      if (text.length > 200) return { problem: "Keep each inclusion under 200 characters." };
+      items.push(text);
+    } else if (entry && typeof entry === "object") {
+      const title = typeof entry.title === "string" ? entry.title.trim().replace(/\s+/g, " ") : "";
+      if (depth >= 3) return { problem: "Sections can hold sub-sections two levels deep, but not deeper than that." };
+      const inner = cleanInclusions(entry.items, depth + 1);
+      if (inner.problem) return inner;
+      if (!title && !inner.items.length) continue;
+      if (!title) return { problem: "Give each inclusion section a title, such as Frame and Prints." };
+      if (title.length > 120) return { problem: "Keep section titles under 120 characters." };
+      items.push({ title, items: inner.items });
+    }
+  }
+  if (items.length > 100) return { problem: "A package can list up to 100 inclusions per level." };
+  return { items };
+}
+
+/** A package's inclusions with their sections, cleaned (for the job order snapshot). */
+function packageInclusionTree(pkg) {
+  const cleaned = cleanInclusions(readList(pkg.getString("inclusions")));
+  return cleaned.items || [];
 }
 
 /**
@@ -59,7 +100,7 @@ function snapshotPackage(pkg) {
   return {
     id: pkg.id, code: pkg.getString("code"), name: pkg.getString("name"), amount: pkg.getFloat("amount"),
     revenue_category: pkg.getString("revenue_category"),
-    inclusions: packageInclusions(pkg), freebies: packageInclusions(pkg, "freebies"),
+    inclusions: packageInclusionTree(pkg), freebies: packageInclusions(pkg, "freebies"),
     photo_selection_limit: pkg.getInt("photo_selection_limit"),
   };
 }
@@ -125,4 +166,4 @@ function applyAutoAddOn(app, record, clientKind) {
   return kept;
 }
 
-module.exports = { addOnCents, applyAutoAddOn, cents, defaultAddOns, offeredTo, packageInclusions, priceAddOns, savedAddOns, snapshotAddOn, snapshotPackage };
+module.exports = { addOnCents, applyAutoAddOn, cents, cleanInclusions, defaultAddOns, offeredTo, packageInclusions, packageInclusionTree, readList, priceAddOns, savedAddOns, snapshotAddOn, snapshotPackage };

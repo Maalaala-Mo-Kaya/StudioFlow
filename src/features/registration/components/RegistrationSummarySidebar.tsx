@@ -24,6 +24,8 @@ interface RegistrationSummarySidebarProps {
   isSubmitting: boolean;
   /** Overrides the school line, e.g. for walk-in clients. */
   profileLine?: string;
+  /** "Attire: Filipiniana" lines for the options picked so far. */
+  optionLines?: string[];
 }
 
 export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProps> = ({
@@ -46,6 +48,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
   hasSignature,
   isSubmitting,
   profileLine,
+  optionLines = [],
 }) => {
   const selectedOrg = organizations.find((o) => o.id === selectedOrgId);
   const selectedCourse = courses.find((c) => c.id === selectedCourseId);
@@ -122,6 +125,13 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
           <div className="p-3 border border-dashed border-neutral-700 text-neutral-500 text-center italic text-[11px]">
             Please select a package from Section 03
           </div>
+        )}
+        {selectedPkg && optionLines.length > 0 && (
+          <ul className="space-y-1 text-[11px] text-neutral-300">
+            {optionLines.map((line) => (
+              <li key={line} className="flex items-start gap-1.5"><Check className="w-3 h-3 text-gold shrink-0 mt-0.5" />{line}</li>
+            ))}
+          </ul>
         )}
       </div>
 

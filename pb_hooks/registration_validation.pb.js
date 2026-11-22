@@ -93,6 +93,14 @@ onRecordCreateRequest((e) => {
     invalid("package", "This package is not offered for this type of client. Choose another package.");
   }
 
+  // The client's picks from the package's option groups, checked against the package and saved
+  // with their labels (studio_package_options.js).
+  const options = pkg
+    ? require(__hooks + "/studio_package_options.js").check(pkg, record.getString("gender"), record.getString("package_options"))
+    : { value: [] };
+  if (options.problem) invalid("package_options", options.problem);
+  else record.set("package_options", options.value);
+
   // The preferred-look UI is retired. Keep historical values, but validate only the
   // optional artist note for new MUA orders. Orders without MUA services are cleared.
   const lookRules = require(__hooks + "/studio_makeup_look.js");
@@ -135,6 +143,35 @@ onRecordUpdateRequest((e) => {
     }
     e.record.set("email", email);
   }
+  return e.next();
+}, "registrations");
+
+// Admin edits of the package or of the client's package options: the picks are checked against
+// the order's package. A new package starts with no picks, so its options must be chosen with it.
+// Picks made at sale stay as saved when the package's options are edited later.
+onRecordUpdateRequest((e) => {
+  const before = e.record.original();
+  const changed = (field) => e.record.getString(field) !== before.getString(field);
+  const packageChanged = changed("package");
+  if (!packageChanged && !changed("package_options")) return e.next();
+  const status = before.getString("status");
+  if (["released", "cancelled"].includes(status)) {
+    throw new BadRequestError(status === "released"
+      ? "This order was already released, so its package options can't change."
+      : "This order is cancelled. Restore it before changing its package options.");
+  }
+  const packageId = e.record.getString("package");
+  const pkg = packageId ? e.app.findFirstRecordByFilter("packages", "id = {:id}", { id: packageId }) : null;
+  const sent = changed("package_options") ? e.record.getString("package_options") : "[]";
+  const result = pkg
+    ? require(__hooks + "/studio_package_options.js").check(pkg, e.record.getString("gender"), sent)
+    : { value: [] };
+  if (result.problem) {
+    throw new BadRequestError(result.problem, {
+      package_options: new ValidationError("validation_registration_package_options", result.problem),
+    });
+  }
+  e.record.set("package_options", result.value);
   return e.next();
 }, "registrations");
 

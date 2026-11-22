@@ -1,0 +1,54 @@
+{
+  "studioflow": "catalog",
+  "version": 1,
+  "source": "Hi-Light Studio graduation flyer: STANDARD PACKAGE A, PHP 2895, with 13x16 classic frame",
+  "packages": [
+    {
+      "code": "STD-PKG-A",
+      "name": "Standard Package A",
+      "amount": 2895,
+      "client_kind": "school",
+      "revenue_category": "studio",
+      "photo_selection_limit": 3,
+      "inclusions": [
+        {
+          "title": "Frame and Prints",
+          "items": [
+            "With 13x16 free classic frame",
+            "36 pcs hard printout copy",
+            { "title": "Colored toga w/out cap", "items": ["1 pc - 11R", "2 pcs - wallet size"] },
+            { "title": "Toga w/out cap with BW background", "items": ["4 pcs - passport size", "4 pcs - 2x2", "7 pcs - 1x1"] },
+            { "title": "Colored toga w/out cap (ID sizes)", "items": ["4 pcs - 2x2", "8 pcs - 1x1"] },
+            { "title": "Colored toga w/ cap", "items": ["1 pc - 5R", "2 pcs - wallet size"] },
+            { "title": "Filipiniana (girls) / Coat and tie or Barong (boys)", "items": ["1 pc - 3R", "2 pcs - wallet size"] }
+          ]
+        },
+        "Unlimited shots",
+        "Toga w/out cap",
+        "Toga w/ cap",
+        "Filipiniana"
+      ],
+      "option_groups": [
+        {
+          "name": "Attire",
+          "pick": 1,
+          "replaces": "Filipiniana",
+          "replaces_for": "female",
+          "choices": [
+            { "label": "Glamour shots", "for": "female" },
+            { "label": "Coat and tie or Barong", "for": "male" }
+          ]
+        }
+      ],
+      "freebies": [
+        "Free 13x16 frame",
+        "Free family picture",
+        "Free barkada, couple shot and group shots",
+        "Free use of toga, accessories and Filipiniana, barong and coat and tie",
+        "Free enhanced soft copies (chosen images)",
+        "Free raw copies (unedited pictures)"
+      ]
+    }
+  ],
+  "add_ons": []
+}

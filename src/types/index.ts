@@ -127,6 +127,144 @@ export interface RevenueSplit {
   unallocated: number;
 }
 
+/** One choice in a package's option group; `for` limits it to clients of that gender. */
+export interface PackageOptionChoice {
+  id: string;
+  label: string;
+  for: 'all' | Gender;
+  /** What this choice comes with ("1 pc - 3R", "2 pcs - wallet size"); options never change the price. */
+  items?: string[];
+  /** Set only on the "keep" choice of a group that exchanges an inclusion. */
+  keep?: boolean;
+}
+
+/** A named list the client chooses from ("Attire — choose 1"). Options never change the price. */
+export interface PackageOptionGroup {
+  id: string;
+  name: string;
+  /** How many choices the client picks (fewer if fewer are offered for their gender). */
+  pick: number;
+  /** The inclusion this group can exchange ("Colored toga w/out cap"); keeping it is then a choice too. */
+  replaces?: string;
+  /** Who may keep the exchanged inclusion; the others must pick one of the choices. */
+  replaces_for?: 'all' | Gender;
+  /** A free extra the client picks a version of ("Free 7x9 classic frame": Family / Barkada / Couple). */
+  freebie?: boolean;
+  choices: PackageOptionChoice[];
+}
+
+/** The client's picks in one option group, saved on the job order with their labels. */
+export interface ChosenPackageOptions {
+  group_id: string;
+  group: string;
+  /** The inclusion the pick exchanges, when the group exchanges one. */
+  replaces?: string;
+  choices: { id: string; label: string; items?: string[]; keep?: boolean }[];
+}
+
+/** ① A single item: a print size (counted as hard copies), a frame, or anything else. */
+export type CatalogItemCategory = 'print' | 'frame' | 'other' | 'attire' | 'background';
+/** What the admin sends when saving a single item. */
+export interface CatalogItemInput {
+  name?: string;
+  category?: CatalogItemCategory;
+  amount?: number;
+  is_active?: boolean;
+  client_kind?: ClientKind | 'both';
+}
+
+export interface CatalogItem {
+  id: string;
+  name: string;
+  category: CatalogItemCategory;
+  /** Price of one piece when sold on its own. */
+  amount?: number;
+  /** Sold on its own at the kiosk (as an add-on the server keeps in step). */
+  is_active?: boolean;
+  /** Which kiosk form sells it on its own; empty means both. */
+  client_kind?: ClientKind | 'both' | '';
+}
+
+/** A single item and how many: one row of a pose. */
+export interface PoseRow {
+  item: string;
+  qty: number;
+}
+
+/** ② A saved pose (item_packages): a template copied into packages ("Colored toga w/out cap" = 11R × 1, Wallet × 2). */
+export interface ItemPackage {
+  id: string;
+  name: string;
+  items: PoseRow[];
+  is_active?: boolean;
+}
+
+/**
+ * A pose inside a package: an attire (Toga w/out cap) on a background (Colored, B&W) with its own
+ * prints, or a typed title. Two poses may be the same attire and background with other quantities.
+ */
+export interface PackagePose {
+  type: 'pose';
+  id: string;
+  /** Made from the attire and background when set; typed otherwise. */
+  title: string;
+  attire?: string;
+  background?: string;
+  items: PoseRow[];
+}
+
+/** What a client may take instead of the exchanged pose, with its own contents. */
+export interface ExchangeOption {
+  id: string;
+  title: string;
+  attire?: string;
+  background?: string;
+  for: 'all' | Gender;
+  items: PoseRow[];
+}
+
+/** In a package: the "Filipiniana" pose can be exchanged (girls keep it, boys swap). */
+export interface PackageExchange {
+  id: string;
+  name: string;
+  /** The id of a pose in this package's inclusions. */
+  pose: string;
+  keep_for: 'all' | Gender;
+  options: ExchangeOption[];
+}
+
+export type PackageInclusionRef = PackagePose | { type: 'item'; id: string; qty: number };
+
+/** A freebie with choices: the client picks one at the kiosk. */
+export interface FreebieChoice {
+  id: string;
+  /** The freebie's single item id (one of the package's freebies). */
+  item: string;
+  choices: { id: string; label: string }[];
+}
+
+/** ③ What a package is built from; the server renders inclusions, freebies and options from it. */
+export interface PackageStructure {
+  frame_item: string;
+  unlimited_shots: boolean;
+  inclusions: PackageInclusionRef[];
+  freebies: string[];
+  exchanges: PackageExchange[];
+  /** Freebies the client picks a version of ("Free 7x9 classic frame": Family / Barkada / Couple). */
+  freebie_choices: FreebieChoice[];
+  /** Older choice groups (not exchanges), kept as they were. */
+  choice_groups: PackageOptionGroup[];
+}
+
+/** A titled group of inclusions ("Frame and Prints"), which can hold items and sub-sections. */
+export interface InclusionSection {
+  title: string;
+  items: PackageInclusion[];
+}
+
+/** One inclusion: a plain item, or a titled section. */
+export type PackageInclusion = string | InclusionSection;
+
 export interface Package {
   revenue_category?: RevenueCategory | '';
   id: string;
@@ -134,9 +272,20 @@ export interface Package {
   name: string;
   amount: number;
   description?: string;
-  inclusions?: string[] | string;
+  /** The kiosk line under the price ("with 10x12 PREMIUM frame"); empty shows "with <frame>". */
+  tagline?: string;
+  /** Flyer and sample photo file names, in order (the first is the cover). */
+  photos?: string[];
+  collectionId?: string;
+  collectionName?: string;
+  /** Plain items and titled sections (two levels); old records may hold JSON text. */
+  inclusions?: PackageInclusion[] | string;
   /** Free items given with the package (free frame, raw copies…), listed apart from inclusions. */
   freebies?: string[] | string;
+  /** Groups of options the client chooses from at registration. */
+  option_groups?: PackageOptionGroup[] | null;
+  /** What the package is built from (the builder); the fields above are rendered from it. */
+  structure?: PackageStructure | null;
   photo_selection_limit?: number;
   requires_mua?: boolean;
   is_active?: boolean;
@@ -155,6 +304,8 @@ export interface AddOn {
   is_active?: boolean;
   /** Which kiosk form offers it; empty means both (unlike packages, where empty means school). */
   client_kind?: ClientKind | 'both' | '';
+  /** Set when this add-on is a single item sold at the kiosk; managed from that item. */
+  catalog_item?: string;
 }
 
 export interface RegistrationAddOn {
@@ -206,9 +357,11 @@ export interface Registration {
   /** What the client bought, frozen at sale: price, name and package contents. */
   package_snapshot?: {
     id: string; code: string; name: string; amount?: number; revenue_category?: RevenueCategory | '';
-    inclusions?: string[]; freebies?: string[]; photo_selection_limit?: number;
+    inclusions?: PackageInclusion[]; freebies?: string[]; photo_selection_limit?: number;
   } | null;
   add_ons?: RegistrationAddOn[];
+  /** The client's picks from the package's option groups (checked by the server). */
+  package_options?: ChosenPackageOptions[] | null;
   other_fees?: number;
   revenue_terms?: RevenueSplit | null;
   revenue_review?: { mua: number; reason: string; by: string; at: string } | null;

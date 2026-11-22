@@ -1,90 +1,68 @@
 import React, { useState } from 'react';
-import { Plus, Edit3, Trash2, Sparkles, Gift } from 'lucide-react';
-import type { Package, AddOn, RevenueCategory } from '../../../types';
+import { Plus, Edit3, Trash2, Sparkles, Gift, Package as PackageIcon, Layers, Box, ListChecks, FileSpreadsheet, FileText, FileDown, Loader2 } from 'lucide-react';
+import type { Package, AddOn, RevenueCategory, CatalogItem, CatalogItemInput, ItemPackage } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
-import { PackageInclusionsEditor } from './PackageInclusionsEditor';
-import { COMMON_FREEBIE_PRESETS } from '../catalogPresets';
+import { parseInclusionTree } from '../../../utils/inclusions';
+import { optionGroups } from '../../../utils/packageOptions';
+import { InclusionTreeView } from '../../../components/common/InclusionTreeView';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
-import type { PackageKind } from '../useAdminData';
+import type { PackageBuilderData, PackageKind } from '../useAdminData';
+import { PACKAGE_KIND_LABELS, addOnKind, revenueLabels } from '../packageLabels';
+import { DefaultAddOnInput, MuaRequirementBadge, MuaRequirementInput, PackageKindInput, RevenueInput } from './PackageFormInputs';
+import { PackageBuilder } from './PackageBuilder';
+import { ItemPackagesPanel } from './ItemPackagesPanel';
+import { CatalogItemsPanel } from './CatalogItemsPanel';
+import { packagePhotoUrls } from '../../../utils/packagePhotos';
+
+type View = 'packages' | 'sets' | 'items' | 'addons';
 
 interface AdminPackagesTabProps {
   packages: Package[];
   addOns: AddOn[];
-  newPkgCode: string;
-  onNewPkgCodeChange: (val: string) => void;
-  newPkgName: string;
-  onNewPkgNameChange: (val: string) => void;
-  newPkgAmount: number;
-  onNewPkgAmountChange: (val: number) => void;
-  newPkgPhotoLimit: number;
-  onNewPkgPhotoLimitChange: (val: number) => void;
-  newPkgRequiresMua: boolean;
-  onNewPkgRequiresMuaChange: (val: boolean) => void;
-  newPkgKind: PackageKind;
-  onNewPkgKindChange: (val: PackageKind) => void;
-  newPkgRevenue: RevenueCategory;
-  onNewPkgRevenueChange: (value: RevenueCategory) => void;
-  newPkgInclusions: string;
-  onNewPkgInclusionsChange: (val: string) => void;
-  newPkgFreebies: string[];
-  onNewPkgFreebiesChange: (val: string[]) => void;
-  onAddPackage: (e: React.FormEvent) => void;
-  onUpdatePackage: (
-    id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; freebies: string[]; photo_selection_limit: number; requires_mua: boolean; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
-  ) => Promise<void>;
+  catalogItems: CatalogItem[];
+  itemPackages: ItemPackage[];
+  onSavePackage: (id: string | null, data: PackageBuilderData) => Promise<void>;
   onTogglePackageActive: (id: string, current: boolean) => Promise<void>;
   onDeletePackage: (id: string) => Promise<void>;
+  onSaveCatalogItem: (id: string | null, data: CatalogItemInput) => Promise<CatalogItem>;
+  onDeleteCatalogItem: (id: string) => Promise<void>;
+  onSaveItemPackage: (id: string | null, data: { name: string; items: ItemPackage['items'] }) => Promise<ItemPackage>;
+  onDeleteItemPackage: (id: string) => Promise<void>;
   onAddAddOn: (name: string, code: string, amount: number, requiresMua: boolean, clientKind: PackageKind, revenue: RevenueCategory | '', defaultWhenNoMua: boolean) => Promise<void>;
   onUpdateAddOn: (id: string, name: string, code: string, amount: number, requiresMua: boolean, clientKind: PackageKind, revenue: RevenueCategory | '', defaultWhenNoMua: boolean) => Promise<void>;
   onToggleAddOnActive: (id: string, current: boolean) => Promise<void>;
   onDeleteAddOn: (id: string) => Promise<void>;
 }
 
+const TABS: { id: View; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: 'packages', label: '③ Packages', icon: PackageIcon },
+  { id: 'sets', label: '② Saved Poses', icon: Layers },
+  { id: 'items', label: '① Single Items', icon: Box },
+  { id: 'addons', label: 'Add-ons', icon: Sparkles },
+];
+
 export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
   packages,
   addOns,
-  newPkgCode,
-  onNewPkgCodeChange,
-  newPkgName,
-  onNewPkgNameChange,
-  newPkgAmount,
-  onNewPkgAmountChange,
-  newPkgPhotoLimit,
-  onNewPkgPhotoLimitChange,
-  newPkgRequiresMua,
-  onNewPkgRequiresMuaChange,
-  newPkgKind,
-  onNewPkgKindChange,
-  newPkgRevenue,
-  onNewPkgRevenueChange,
-  newPkgInclusions,
-  onNewPkgInclusionsChange,
-  newPkgFreebies,
-  onNewPkgFreebiesChange,
-  onAddPackage,
-  onUpdatePackage,
+  catalogItems,
+  itemPackages,
+  onSavePackage,
   onTogglePackageActive,
   onDeletePackage,
+  onSaveCatalogItem,
+  onDeleteCatalogItem,
+  onSaveItemPackage,
+  onDeleteItemPackage,
   onAddAddOn,
   onUpdateAddOn,
   onToggleAddOnActive,
   onDeleteAddOn,
 }) => {
   const { toast } = useToast();
-
-  // Editing Package State
-  const [editingPkgId, setEditingPkgId] = useState<string | null>(null);
-  const [editPkgCode, setEditPkgCode] = useState('');
-  const [editPkgName, setEditPkgName] = useState('');
-  const [editPkgAmount, setEditPkgAmount] = useState(0);
-  const [editPkgPhotoLimit, setEditPkgPhotoLimit] = useState(0);
-  const [editPkgRequiresMua, setEditPkgRequiresMua] = useState(false);
-  const [editPkgRevenue, setEditPkgRevenue] = useState<RevenueCategory | ''>('');
-  const [editPkgKind, setEditPkgKind] = useState<PackageKind>('school');
-  const [editPkgInclusionsArray, setEditPkgInclusionsArray] = useState<string[]>([]);
-  const [editPkgFreebies, setEditPkgFreebies] = useState<string[]>([]);
+  const [view, setView] = useState<View>('packages');
+  /** The package open in the builder: a package, 'new', or none. */
+  const [building, setBuilding] = useState<Package | 'new' | null>(null);
 
   // Add-on Form State
   const [newAddonName, setNewAddonName] = useState('');
@@ -117,40 +95,6 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     message: '',
     action: async () => {},
   });
-
-  const startEditPkg = (pkg: Package) => {
-    setEditingPkgId(pkg.id);
-    setEditPkgCode(pkg.code);
-    setEditPkgName(pkg.name);
-    setEditPkgAmount(pkg.amount);
-    setEditPkgPhotoLimit(pkg.photo_selection_limit ?? 0);
-    setEditPkgRequiresMua(!!pkg.requires_mua);
-    setEditPkgRevenue(pkg.revenue_category || '');
-    setEditPkgKind((pkg.client_kind || 'school') as PackageKind);
-    setEditPkgInclusionsArray(parsePackageInclusions(pkg.inclusions));
-    setEditPkgFreebies(parsePackageInclusions(pkg.freebies));
-  };
-
-  const handleSavePkgEdit = async () => {
-    if (!editingPkgId) return;
-    try {
-      await onUpdatePackage(editingPkgId, {
-        code: editPkgCode,
-        name: editPkgName,
-        amount: editPkgAmount,
-        inclusions: editPkgInclusionsArray,
-        freebies: editPkgFreebies,
-        photo_selection_limit: editPkgPhotoLimit,
-        requires_mua: editPkgRequiresMua,
-        client_kind: editPkgKind,
-        revenue_category: editPkgRevenue,
-      });
-      toast.success(`Package "${editPkgName}" updated successfully`);
-      setEditingPkgId(null);
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update package');
-    }
-  };
 
   const startEditAddon = (add: AddOn) => {
     setEditingAddonId(add.id);
@@ -193,22 +137,6 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     }
   };
 
-  const promptDeletePackage = (pkg: Package) => {
-    setConfirmModalState({
-      isOpen: true,
-      title: `Delete Package: ${pkg.code}`,
-      message: `Are you sure you want to permanently delete package "${pkg.name}" (${pkg.code})? Any historical registrations using this package will retain their recorded amounts, but it will no longer be available for new registrations.`,
-      action: async () => {
-        try {
-          await onDeletePackage(pkg.id);
-          toast.success(`Package ${pkg.code} deleted`);
-        } catch (err: unknown) {
-          toast.error(err instanceof Error ? err.message : 'Failed to delete package');
-        }
-      },
-    });
-  };
-
   const promptDeleteAddOn = (add: AddOn) => {
     setConfirmModalState({
       isOpen: true,
@@ -225,294 +153,165 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     });
   };
 
-  const newPkgInclusionsList = newPkgInclusions
-    ? newPkgInclusions.split('\n').filter(Boolean)
-    : [];
+  const promptDeletePackage = (pkg: Package) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: `Delete Package: ${pkg.code}`,
+      message: `Are you sure you want to permanently delete package "${pkg.name}" (${pkg.code})? Job orders already sold keep their recorded package; it will no longer be offered for new registrations.`,
+      action: async () => {
+        try {
+          await onDeletePackage(pkg.id);
+          toast.success(`Package ${pkg.code} deleted`);
+        } catch (err: unknown) {
+          toast.error(err instanceof Error ? err.message : 'Failed to delete package');
+        }
+      },
+    });
+  };
+
+  // Price list: single items, packages (and what is in them) and add-ons, as a file.
+  const [exporting, setExporting] = useState<'xlsx' | 'csv' | 'docx' | null>(null);
+  const exportPriceList = async (format: 'xlsx' | 'csv' | 'docx') => {
+    setExporting(format);
+    try {
+      const { downloadPriceList } = await import('../priceListExport');
+      await downloadPriceList({ items: catalogItems, packages, addOns, poses: itemPackages }, format);
+      toast.success('Price list downloaded.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'The price list could not be made.');
+    } finally {
+      setExporting(null);
+    }
+  };
 
   return (
-    <div className="space-y-8 animate-enter font-mono text-xs">
-      {/* SECTION 1: PACKAGES MANAGEMENT (T020) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
-        {/* Create Package Card */}
-        <div className="bg-panel border-2 border-line shadow-lux p-6">
-          <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink pb-3 border-b-2 border-line mb-4">
-            Create Portrait Package
-          </h3>
-          <form onSubmit={onAddPackage} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-black uppercase mb-1">
-                  Package Code <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="PKG-D"
-                  value={newPkgCode}
-                  onChange={(e) => onNewPkgCodeChange(e.target.value)}
-                  className="w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-canvas focus:bg-panel uppercase font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-black uppercase mb-1">
-                  Amount (₱) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  required
-                  min="0"
-                  value={newPkgAmount}
-                  onChange={(e) => onNewPkgAmountChange(Number(e.target.value))}
-                  className="w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-canvas focus:bg-panel font-black"
-                />
-              </div>
-            </div>
+    <div className="space-y-6 animate-enter font-mono text-xs">
+      <div role="tablist" aria-label="Packages and add-ons" className="grid grid-cols-2 md:grid-cols-4 gap-1.5 p-1.5 bg-panel border-2 border-line">
+        {TABS.map((tab) => (
+          <button key={tab.id} type="button" role="tab" aria-selected={view === tab.id} onClick={() => setView(tab.id)}
+            className={`btn-tactile min-h-[42px] flex items-center justify-center gap-2 border text-[11px] font-black uppercase tracking-wider cursor-pointer ${
+              view === tab.id ? 'bg-obsidian text-gold border-line' : 'bg-canvas text-neutral-600 border-neutral-300 hover:border-line'
+            }`}>
+            <tab.icon className="w-4 h-4" /> {tab.label}
+          </button>
+        ))}
+      </div>
 
-            <div>
-              <label className="block text-[11px] font-black uppercase mb-1">
-                Package Title / Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Executive Graduation Package"
-                value={newPkgName}
-                onChange={(e) => onNewPkgNameChange(e.target.value)}
-                className="w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-canvas focus:bg-panel font-semibold"
-              />
-            </div>
-
-            <PackageKindInput value={newPkgKind} onChange={onNewPkgKindChange} />
-            <RevenueInput value={newPkgRevenue} onChange={(value) => {
-              onNewPkgRevenueChange(value || 'studio');
-              if (value !== 'mua') onNewPkgRequiresMuaChange(false);
-            }} />
-            <PhotoLimitInput value={newPkgPhotoLimit} onChange={onNewPkgPhotoLimitChange} />
-            <MuaRequirementInput checked={newPkgRequiresMua} onChange={onNewPkgRequiresMuaChange}
-              revenue={newPkgRevenue} amount={newPkgAmount} />
-
-            {/* Dynamic Form List for Inclusions */}
-            <PackageInclusionsEditor
-              inclusions={newPkgInclusionsList}
-              onChange={(items) => onNewPkgInclusionsChange(items.join('\n'))}
-              label="Package Inclusions (Repeatable List)"
-            />
-
-            <PackageInclusionsEditor
-              inclusions={newPkgFreebies}
-              onChange={onNewPkgFreebiesChange}
-              label="Freebies"
-              presets={COMMON_FREEBIE_PRESETS}
-              itemName="freebie"
-            />
-
-            <button
-              type="submit"
-              className="btn-tactile w-full min-h-[44px] py-2.5 bg-obsidian text-gold border border-line font-black uppercase tracking-widest cursor-pointer"
-            >
-              Save Package to Catalog
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-panel border border-line">
+        <span className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-ink">
+          <FileDown className="w-4 h-4 text-gold" /> Export price list
+          <span className="font-sans normal-case font-normal text-neutral-500 tracking-normal">Single items, packages with their contents, and add-ons. Each file is also a backup: Import from File restores the catalog from it.</span>
+        </span>
+        <span className="flex flex-wrap gap-1.5">
+          {([['xlsx', 'Excel', FileSpreadsheet], ['csv', 'CSV', FileText], ['docx', 'Word', FileText]] as const).map(([format, label, Icon]) => (
+            <button key={format} type="button" disabled={!!exporting} onClick={() => void exportPriceList(format)}
+              className="btn-tactile min-h-[34px] px-3 flex items-center gap-1.5 border border-gold text-gold-soft text-[10px] font-black uppercase cursor-pointer hover:bg-gold-wash disabled:opacity-50">
+              {exporting === format ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Icon className="w-3.5 h-3.5" />} {label}
             </button>
-          </form>
-        </div>
+          ))}
+        </span>
+      </div>
 
-        {/* Manage Existing Packages Card */}
-        <div className="bg-panel border-2 border-line shadow-lux p-6 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b-2 border-line mb-4">
-              <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink">
-                Package Catalog
-              </h3>
-              <span className="font-mono text-[10px] bg-obsidian text-gold px-2 py-0.5 font-bold">
-                {packages.length} Packages
-              </span>
+      {view === 'packages' && (
+        <div className="space-y-4">
+          {building ? (
+            <PackageBuilder key={building === 'new' ? 'new' : building.id} items={catalogItems} sets={itemPackages} packages={packages}
+              pkg={building === 'new' ? null : building} onSave={onSavePackage} onSaveItem={onSaveCatalogItem} onSavePose={onSaveItemPackage}
+              onClose={() => setBuilding(null)} />
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-panel border-2 border-line shadow-lux">
+              <p className="font-sans text-xs text-neutral-600 max-w-2xl">
+                Build a package from <b>poses</b> (each with its own sizes and quantities), the frame, unlimited shots, exchanges and freebies.
+                Start from a <b>saved pose</b> or <b>copy another package</b> and change what differs.
+              </p>
+              <button type="button" onClick={() => setBuilding('new')}
+                className="btn-tactile flex items-center gap-1.5 px-4 py-2.5 bg-obsidian text-gold border border-line font-black uppercase tracking-widest cursor-pointer">
+                <Plus className="w-4 h-4" /> Create package
+              </button>
             </div>
+          )}
 
-            <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
-              {packages.map((pkg) => (
-                <div
-                  key={pkg.id}
-                  className={`p-3.5 border-2 transition-colors ${
-                    pkg.is_active !== false
-                      ? 'bg-panel border-line'
-                      : 'bg-neutral-100 border-neutral-300 opacity-60'
-                  }`}
-                >
-                  {editingPkgId === pkg.id ? (
-                    <div className="space-y-3 bg-canvas p-3 border border-line">
-                      <div className="text-[11px] font-black uppercase text-gold-soft border-b pb-1">
-                        Editing Package // {pkg.code}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-neutral-600 mb-0.5">
-                            Package Code
-                          </label>
-                          <input
-                            type="text"
-                            value={editPkgCode}
-                            onChange={(e) => setEditPkgCode(e.target.value)}
-                            className="w-full p-1.5 border border-line uppercase font-bold bg-panel"
-                          />
+          <div className="bg-panel border-2 border-line shadow-lux p-5 space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b-2 border-line">
+              <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink">Package Catalog</h3>
+              <span className="font-mono text-[10px] bg-obsidian text-gold px-2 py-0.5 font-bold">{packages.length} Packages</span>
+            </div>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              {packages.map((pkg) => {
+                const freebies = parsePackageInclusions(pkg.freebies);
+                const [cover] = packagePhotoUrls(pkg, 'card');
+                return (
+                  <div key={pkg.id} className={`p-3.5 border-2 space-y-2 ${pkg.is_active !== false ? 'bg-panel border-line' : 'bg-neutral-100 border-neutral-300 opacity-60'} ${
+                    building !== 'new' && building?.id === pkg.id ? 'ring-2 ring-gold' : ''}`}>
+                    <div className="flex justify-between items-start gap-2">
+                      {cover
+                        ? <img src={cover} alt="" loading="lazy" className="w-16 h-12 shrink-0 object-cover border border-line" />
+                        : <span className="w-16 h-12 shrink-0 flex items-center justify-center border border-dashed border-neutral-400 text-[8px] font-black uppercase text-neutral-500 text-center leading-tight">No photo</span>}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-black bg-obsidian text-gold px-1.5 py-0.5 uppercase">{pkg.code}</span>
+                          <span className="font-bold text-sm text-ink uppercase">{pkg.name}</span>
                         </div>
-                        <div>
-                          <label className="block text-[10px] font-black uppercase text-neutral-600 mb-0.5">
-                            Amount (₱)
-                          </label>
-                          <input
-                            type="number"
-                            value={editPkgAmount}
-                            onChange={(e) => setEditPkgAmount(Number(e.target.value))}
-                            className="w-full p-1.5 border border-line font-bold bg-panel"
-                          />
-                        </div>
+                        <div className="font-mono text-sm font-black text-gold-soft mt-1">{formatCurrency(pkg.amount)}</div>
                       </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black uppercase text-neutral-600 mb-0.5">
-                          Package Title / Name
-                        </label>
-                        <input
-                          type="text"
-                          value={editPkgName}
-                          onChange={(e) => setEditPkgName(e.target.value)}
-                          className="w-full p-1.5 border border-line bg-panel font-semibold"
-                        />
-                      </div>
-
-                      <PhotoLimitInput value={editPkgPhotoLimit} onChange={setEditPkgPhotoLimit} />
-                      <PackageKindInput value={editPkgKind} onChange={setEditPkgKind} />
-                      <RevenueInput value={editPkgRevenue} onChange={(value) => {
-                        setEditPkgRevenue(value);
-                        if (value !== 'mua') setEditPkgRequiresMua(false);
-                      }} />
-                      <MuaRequirementInput checked={editPkgRequiresMua} onChange={setEditPkgRequiresMua}
-                        revenue={editPkgRevenue} amount={editPkgAmount} />
-
-                      {/* Repeatable Inclusions Editor in Edit Mode */}
-                      <PackageInclusionsEditor
-                        inclusions={editPkgInclusionsArray}
-                        onChange={setEditPkgInclusionsArray}
-                        label="Edit Inclusions List"
-                      />
-                      <PackageInclusionsEditor
-                        inclusions={editPkgFreebies}
-                        onChange={setEditPkgFreebies}
-                        label="Edit Freebies"
-                        presets={COMMON_FREEBIE_PRESETS}
-                        itemName="freebie"
-                      />
-
-                      <div className="flex gap-2 justify-end pt-2 border-t border-neutral-300">
-                        <button
-                          type="button"
-                          onClick={() => setEditingPkgId(null)}
-                          className="btn-tactile px-3 py-1.5 bg-panel border border-line font-bold uppercase cursor-pointer"
-                        >
-                          Cancel
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button type="button" onClick={() => onTogglePackageActive(pkg.id, pkg.is_active !== false)}
+                          className={`px-2 py-0.5 text-[10px] font-bold uppercase border cursor-pointer ${pkg.is_active !== false
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-400' : 'bg-neutral-200 text-neutral-600 border-neutral-400'}`}>
+                          {pkg.is_active !== false ? 'Active' : 'Archived'}
                         </button>
-                        <button
-                          type="button"
-                          onClick={handleSavePkgEdit}
-                          className="btn-tactile px-4 py-1.5 bg-obsidian text-gold font-black uppercase border border-line cursor-pointer"
-                        >
-                          ✓ Save Changes
-                        </button>
+                        <button type="button" title="Edit package" onClick={() => { setBuilding(pkg); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                          className="p-1 hover:bg-neutral-200 border border-neutral-300 cursor-pointer"><Edit3 className="w-3.5 h-3.5" /></button>
+                        <button type="button" title="Delete package" onClick={() => promptDeletePackage(pkg)}
+                          className="p-1 text-red-600 hover:bg-red-50 border border-neutral-300 hover:border-red-600 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
                       </div>
                     </div>
-                  ) : (
-                    <div>
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs font-black bg-obsidian text-gold px-1.5 py-0.5 uppercase">
-                              {pkg.code}
-                            </span>
-                            <span className="font-bold text-sm text-ink uppercase">
-                              {pkg.name}
-                            </span>
-                          </div>
-                          <div className="font-mono text-sm font-black text-gold-soft mt-1">
-                            {formatCurrency(pkg.amount)}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => onTogglePackageActive(pkg.id, pkg.is_active !== false)}
-                            className={`px-2 py-0.5 text-[10px] font-bold uppercase border cursor-pointer ${
-                              pkg.is_active !== false
-                                ? 'bg-emerald-100 text-emerald-800 border-emerald-400'
-                                : 'bg-neutral-200 text-neutral-600 border-neutral-400'
-                            }`}
-                          >
-                            {pkg.is_active !== false ? 'Active' : 'Archived'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => startEditPkg(pkg)}
-                            className="p-1 hover:bg-neutral-200 border border-neutral-300 cursor-pointer"
-                            title="Edit Package"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => promptDeletePackage(pkg)}
-                            className="p-1 text-red-600 hover:bg-red-50 border border-neutral-300 hover:border-red-600 cursor-pointer"
-                            title="Delete Package"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Inclusions Chips */}
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[(pkg.client_kind || 'school') as PackageKind]}</span>
-                        <MuaRequirementBadge required={pkg.requires_mua} revenue={pkg.revenue_category} />
-                        <span className="text-[10px] font-bold uppercase">{revenueLabels[pkg.revenue_category || '']}</span>
-                        {!!pkg.photo_selection_limit && (
-                          <span className="px-2 py-0.5 text-[10px] bg-gold-wash border border-neutral-300">Up to {pkg.photo_selection_limit} selected photos</span>
-                        )}
-                        {parsePackageInclusions(pkg.inclusions).map((inc, i) => (
-                          <span
-                            key={i}
-                            className="px-2 py-0.5 text-[10px] bg-gold-wash border border-neutral-300 text-neutral-700"
-                          >
-                            {inc}
-                          </span>
-                        ))}
-                      </div>
-                      {parsePackageInclusions(pkg.freebies).length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                          <span className="flex items-center gap-1 text-[10px] font-black uppercase text-gold-soft">
-                            <Gift className="w-3 h-3" /> Freebies:
-                          </span>
-                          {parsePackageInclusions(pkg.freebies).map((item, i) => (
-                            <span key={i} className="px-2 py-0.5 text-[10px] border border-gold text-gold-soft">{item}</span>
-                          ))}
-                        </div>
-                      )}
+                    <div className="flex flex-wrap gap-1">
+                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[(pkg.client_kind || 'school') as PackageKind]}</span>
+                      <MuaRequirementBadge required={pkg.requires_mua} revenue={pkg.revenue_category} />
+                      <span className="text-[10px] font-bold uppercase">{revenueLabels[pkg.revenue_category || '']}</span>
+                      {!pkg.structure && <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-amber-500 text-amber-800">Not built yet: open to build</span>}
                     </div>
-                  )}
-                </div>
-              ))}
+                    <InclusionTreeView inclusions={parseInclusionTree(pkg.inclusions)} variant="compact" />
+                    {optionGroups(pkg).map((g) => (
+                      <div key={g.id} className="flex flex-wrap items-center gap-1 text-[10px]">
+                        <ListChecks className="w-3 h-3 text-gold" />
+                        <b className="uppercase">{g.name}:</b>
+                        {g.replaces && <span>keep {g.replaces}{g.replaces_for && g.replaces_for !== 'all' ? ` (${g.replaces_for} only)` : ''} or</span>}
+                        {g.choices.map((c) => <span key={c.id} className="px-1.5 border border-neutral-400">{c.label}{c.for !== 'all' ? ` · ${c.for}` : ''}</span>)}
+                      </div>
+                    ))}
+                    {freebies.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="flex items-center gap-1 text-[10px] font-black uppercase text-gold-soft"><Gift className="w-3 h-3" /> Freebies:</span>
+                        {freebies.map((item, i) => <span key={i} className="px-2 py-0.5 text-[10px] border border-gold text-gold-soft">{item}</span>)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* SECTION 2: ADD-ONS MANAGEMENT */}
-      <div className="bg-panel border-2 border-line shadow-lux p-6 space-y-4">
+      {view === 'sets' && (
+        <ItemPackagesPanel items={catalogItems} sets={itemPackages} onSave={onSaveItemPackage} onDelete={onDeleteItemPackage} onSaveItem={onSaveCatalogItem} />
+      )}
+
+      {view === 'items' && (
+        <CatalogItemsPanel items={catalogItems} onSave={onSaveCatalogItem} onDelete={onDeleteCatalogItem} />
+      )}
+
+      {view === 'addons' && (
+            <div className="bg-panel border-2 border-line shadow-lux p-6 space-y-4">
         <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink pb-3 border-b-2 border-line flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-gold" />
             <span>Add-Ons &amp; Upgrades</span>
           </div>
           <span className="font-mono text-[10px] bg-obsidian text-gold px-2 py-0.5 font-bold">
-            {addOns.length} Items
+            {addOns.filter((add) => !add.catalog_item).length} Items
           </span>
         </h3>
 
@@ -589,7 +388,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
 
         {/* Add-on List Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {addOns.map((add) => (
+          {addOns.filter((add) => !add.catalog_item).map((add) => (
             <div
               key={add.id}
               className={`p-3 border-2 flex justify-between items-center ${
@@ -718,6 +517,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
           ))}
         </div>
       </div>
+      )}
 
       {/* Reusable Confirm Modal */}
       <ConfirmModal
@@ -732,100 +532,3 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
     </div>
   );
 };
-
-function PhotoLimitInput({ value, onChange }: { value: number; onChange: (value: number) => void }) {
-  return (
-    <label className="block text-[11px] font-black uppercase">
-      Photo selection limit <span className="font-normal normal-case">(0 for unlimited)</span>
-      <input type="number" min="0" step="1" value={value} onChange={(event) => onChange(Number(event.target.value))}
-        className="mt-1 w-full min-h-[42px] px-3 py-2 border border-neutral-400 bg-panel font-bold" />
-    </label>
-  );
-}
-
-const revenueLabels = { studio: 'Studio revenue', mua: 'Other Payment — MUA', '': 'Revenue review needed' };
-
-function RevenueInput({ value, onChange }: { value: RevenueCategory | ''; onChange: (value: RevenueCategory | '') => void }) {
-  return <label className="block text-xs font-bold">
-    Revenue classification
-    <select className="mt-1 block min-h-10 w-full border border-line bg-panel px-2"
-      value={value} onChange={(event) => onChange(event.target.value as RevenueCategory | '')}>
-      {!value && <option value="" disabled>{revenueLabels['']}</option>}
-      <option value="studio">{revenueLabels.studio}</option>
-      <option value="mua">{revenueLabels.mua}</option>
-    </select>
-  </label>;
-}
-
-function MuaRequirementInput({ checked, onChange, revenue, amount }: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  revenue: RevenueCategory | '';
-  amount: number;
-}) {
-  if (revenue !== 'mua' && !checked) return null;
-  return (
-    <fieldset className="border border-neutral-400 bg-panel px-3 py-2">
-      <legend className="px-1 text-[10px] font-black uppercase">MUA service</legend>
-      <label className="flex items-center gap-2 text-[11px] font-bold uppercase">
-        <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)}
-          className="size-4 accent-gold" />
-        {revenue === 'mua' ? 'This is an MUA Service' : 'Keep existing Makeup / Grooming queue requirement'}
-      </label>
-      {revenue === 'mua' ? (
-        <div className="mt-1 space-y-1 text-xs text-neutral-600">
-          {checked && <p className="font-bold text-gold-soft">{formatCurrency(amount, { exact: true })} per completion before discounts</p>}
-          <p>Use this for standalone MUA charges. For portrait bundles, price the MUA service as a separate add-on.</p>
-        </div>
-      ) : <p className="mt-1 text-xs text-neutral-600">This item keeps its queue requirement. Artist earnings need a verified MUA allocation.</p>}
-    </fieldset>
-  );
-}
-
-function MuaRequirementBadge({ required, revenue }: { required?: boolean; revenue?: RevenueCategory | '' }) {
-  return (
-    <span className={`inline-block px-2 py-0.5 text-[10px] font-bold uppercase border ${
-      required ? 'bg-gold-wash border-gold text-gold-soft' : 'bg-panel border-neutral-300 text-neutral-700'
-    }`}>
-      {required ? (revenue === 'mua' ? 'MUA Service' : 'MUA Queue Only') : 'No MUA Required'}
-    </span>
-  );
-}
-
-function DefaultAddOnInput({ checked, onChange, disabled }: {
-  checked: boolean; onChange: (checked: boolean) => void; disabled: boolean;
-}) {
-  return (
-    <fieldset className="mt-2 border border-neutral-400 bg-panel px-3 py-2" disabled={disabled}>
-      <legend className="px-1 text-[10px] font-black uppercase">Default addon rule</legend>
-      <label className="flex items-center gap-2 text-[11px] font-bold">
-        <input type="checkbox" className="size-4 shrink-0 accent-gold" checked={checked}
-          onChange={(event) => onChange(event.target.checked)} />
-        Automatically apply if the client has no Makeup / Grooming service
-      </label>
-      {disabled ? <p className="mt-1 text-[10px] text-neutral-600">Available only for Other Payment — MUA add-ons.</p>
-        : <p className="mt-1 text-[10px] text-neutral-600">Automatically adds this service when no Makeup / Grooming is selected. The client must still receive MUA confirmation before entering the photography queue.</p>}
-    </fieldset>
-  );
-}
-
-const PACKAGE_KIND_LABELS: Record<PackageKind, string> = { school: 'For school', walkin: 'For walk-in', both: 'School & walk-in' };
-/** An add-on's client type; empty (older records) means both. */
-const addOnKind = (add: AddOn): PackageKind => (add.client_kind || 'both') as PackageKind;
-
-/** Which kiosk form offers the package. */
-const PackageKindInput: React.FC<{ value: PackageKind; onChange: (value: PackageKind) => void }> = ({ value, onChange }) => (
-  <fieldset>
-    <legend className="block text-[11px] font-black uppercase mb-1">Offered To</legend>
-    <div className="grid grid-cols-3 gap-1.5">
-      {(['school', 'walkin', 'both'] as const).map((kind) => (
-        <button key={kind} type="button" aria-pressed={value === kind} onClick={() => onChange(kind)}
-          className={`btn-tactile min-h-[38px] px-2 border text-[10px] font-black uppercase cursor-pointer ${
-            value === kind ? 'bg-obsidian text-gold border-line' : 'bg-canvas text-neutral-600 border-neutral-300'
-          }`}>
-          {kind === 'school' ? 'School' : kind === 'walkin' ? 'Walk-in' : 'Both'}
-        </button>
-      ))}
-    </div>
-  </fieldset>
-);

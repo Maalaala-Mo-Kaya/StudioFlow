@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Info, ArrowRight, Check, Gift } from 'lucide-react';
-import type { Package, AddOn } from '../../../types';
-import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
+import { Info, ArrowRight, Check, Gift, ListChecks, Printer, Camera, Frame, Images, Columns3 } from 'lucide-react';
+import { type OptionPicks } from '../../../utils/packageOptions';
+import { parseInclusionTree, topLevelLabels } from '../../../utils/inclusions';
+import type { Package, AddOn, Gender } from '../../../types';
+import { formatCurrency } from '../../../utils/formatters';
+import { packageSummary } from '../../../utils/packageSummary';
 import { PackageDetailsModal } from './PackageDetailsModal';
+import { PackageCompareModal } from './PackageCompareModal';
 import { validationProps, type RegistrationErrors } from '../registrationValidation';
 import { RegistrationFieldError } from './RegistrationFieldError';
 
@@ -20,6 +24,10 @@ interface PackageSelectionSectionProps {
   errors: RegistrationErrors;
   /** Shown instead of the package list when it is empty. */
   emptyMessage?: string;
+  /** The client's gender and option picks, so the package popup can take the picks too. */
+  gender?: Gender | '';
+  optionPicks?: OptionPicks;
+  onOptionPicksChange?: (picks: OptionPicks) => void;
 }
 
 export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = ({
@@ -35,8 +43,12 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   totalAmount,
   errors,
   emptyMessage,
+  gender,
+  optionPicks,
+  onOptionPicksChange,
 }) => {
   const [detailsId, setDetailsId] = useState<string | null>(null);
+  const [comparing, setComparing] = useState(false);
   const [viewedIndex, setViewedIndex] = useState(0);
   const trackRef = useRef<HTMLDivElement>(null);
   const viewingPackage = packages.find((pkg) => pkg.id === detailsId) ?? null;
@@ -80,6 +92,12 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
         {packages.length > 0 && (
           <div className="shrink-0 flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2 font-mono">
             {packages.length > 1 && (
+              <button type="button" onClick={() => setComparing(true)}
+                className="btn-tactile flex items-center gap-1.5 px-2.5 py-1.5 border border-gold text-gold-soft text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-gold-wash">
+                <Columns3 className="w-3.5 h-3.5" /> Compare
+              </button>
+            )}
+            {packages.length > 1 && (
               <span className="text-[10px] text-neutral-500 uppercase flex items-center gap-1">
                 Swipe or Scroll
                 <ArrowRight className="w-3 h-3 text-gold-soft" aria-hidden="true" />
@@ -111,10 +129,23 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       >
         {packages.map((pkg) => {
           const isSelected = selectedPackageId === pkg.id;
-          const inclusionsArray = parsePackageInclusions(pkg.inclusions);
-          const topInclusions = inclusionsArray.slice(0, 3);
-          const remainingCount = inclusionsArray.length - topInclusions.length;
-          const freebieCount = parsePackageInclusions(pkg.freebies).length;
+          // The flyer's headline: frame, prints, shots, freebies; then what the poses are.
+          const summary = packageSummary(pkg);
+          // Photos are shown only in the full package view; the card just says they are there.
+          const photoCount = (pkg.photos ?? []).filter(Boolean).length;
+          const freebieCount = summary.freebies.length;
+          const choiceGroups = summary.options;
+          const highlights = [
+            ...summary.printPoses.map((pose) => pose.title),
+            ...summary.poses,
+          ].filter((label, i, all) => all.indexOf(label) === i);
+          // Older packages written as text: their top-level lines.
+          const fallback = summary.prints || summary.frame ? [] : topLevelLabels(parseInclusionTree(pkg.inclusions));
+          const listed = (highlights.length ? highlights : fallback).slice(0, 4);
+          const remainingCount = (highlights.length ? highlights : fallback).length - listed.length;
+          const chip = `flex items-center gap-1 px-1.5 py-0.5 border text-[10px] font-black uppercase ${
+            isSelected ? 'border-gold/60 text-gold' : 'border-gold/50 text-gold-soft bg-gold-wash'
+          }`;
 
           return (
             <div
@@ -126,7 +157,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
               }`}
             >
               {isSelected && (
-                <span className="absolute top-3 right-3 bg-gold text-on-gold px-2 py-0.5 font-mono text-[9px] font-black uppercase tracking-widest">
+                <span className="absolute z-10 top-3 right-3 bg-gold text-on-gold px-2 py-0.5 font-mono text-[9px] font-black uppercase tracking-widest">
                   SELECTED
                 </span>
               )}
@@ -149,12 +180,24 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                 </h3>
 
                 <div
-                  className={`font-mono text-2xl font-black mb-3 ${
+                  className={`font-mono text-2xl font-black ${summary.tagline ? 'mb-0.5' : 'mb-3'} ${
                     isSelected ? 'text-gold' : 'text-ink'
                   }`}
                 >
                   {formatCurrency(pkg.amount)}
                 </div>
+                {summary.tagline && (
+                  <p className={`mb-3 text-xs font-bold line-clamp-1 ${isSelected ? 'text-neutral-200' : 'text-neutral-700'}`}>{summary.tagline}</p>
+                )}
+
+                {(summary.frame || summary.prints > 0 || summary.shots || freebieCount > 0) && (
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {summary.frame && <span className={chip}><Frame className="w-3 h-3" /> Frame</span>}
+                    {summary.prints > 0 && <span className={chip}><Printer className="w-3 h-3" /> {summary.prints} prints</span>}
+                    {summary.shots && <span className={chip}><Camera className="w-3 h-3" /> {summary.pick ? `Pick ${summary.pick} shots` : 'Unlimited shots'}</span>}
+                    {freebieCount > 0 && <span className={chip}><Gift className="w-3 h-3" /> {freebieCount} free</span>}
+                  </div>
+                )}
 
                 {pkg.description && (
                   <p
@@ -166,32 +209,30 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                   </p>
                 )}
 
-                {/* Compact Inclusions Summary (Max 3 Items) */}
-                {topInclusions.length > 0 && (
+                {listed.length > 0 && (
                   <div className={`border-t pt-3 mb-4 ${isSelected ? 'border-neutral-800' : 'border-neutral-200'}`}>
                     <ul className={`text-[11px] space-y-1.5 ${isSelected ? 'text-neutral-300' : 'text-neutral-600'}`}>
-                      {topInclusions.map((inc, i) => (
+                      {listed.map((inc, i) => (
                         <li key={i} className="flex items-start gap-2">
                           <Check className="w-3.5 h-3.5 text-gold shrink-0 mt-0.5" />
                           <span className="line-clamp-1">{inc}</span>
                         </li>
                       ))}
                     </ul>
-
                     {remainingCount > 0 && (
                       <div className="mt-2">
                         <span className="text-[10px] font-mono font-bold text-gold bg-gold/10 px-1.5 py-0.5 border border-gold/30">
-                          +{remainingCount} more inclusions
+                          +{remainingCount} more
                         </span>
                       </div>
                     )}
                   </div>
                 )}
 
-                {freebieCount > 0 && (
-                  <div className={`flex items-center gap-1.5 mb-3 text-[11px] font-black uppercase ${isSelected ? 'text-gold' : 'text-gold-soft'}`}>
-                    <Gift className="w-3.5 h-3.5 shrink-0" />
-                    <span>+ {freebieCount} free {freebieCount === 1 ? 'item' : 'items'}</span>
+                {choiceGroups.length > 0 && (
+                  <div className={`flex items-start gap-1.5 mb-2 text-[11px] font-black uppercase ${isSelected ? 'text-white' : 'text-ink'}`}>
+                    <ListChecks className="w-3.5 h-3.5 shrink-0 text-gold" />
+                    <span>Choose your {choiceGroups.map((group) => group.name.toLowerCase()).join(' & ')}</span>
                   </div>
                 )}
               </div>
@@ -207,7 +248,10 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                   }`}
                 >
                   <Info className="w-3.5 h-3.5" />
-                  <span>{freebieCount > 0 ? `View Inclusions & Freebies (${inclusionsArray.length + freebieCount})` : `View All Inclusions (${inclusionsArray.length})`}</span>
+                  <span>View full package</span>
+                  {photoCount > 0 && (
+                    <span className="flex items-center gap-1 no-underline">· <Images className="w-3.5 h-3.5" /> {photoCount} photo{photoCount === 1 ? '' : 's'}</span>
+                  )}
                 </button>
 
                 <button
@@ -233,14 +277,17 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
         </p>
       )}
 
-      {/* Optional Add-ons */}
-      {addOnsList.length > 0 && (
-        <div className="mt-6 pt-5 border-t border-neutral-200">
+      {/* Optional add-ons, then single items sold on their own (switched on by the admin) */}
+      {([
+        ['ADDONS (Optional)', addOnsList.filter((addon) => !addon.catalog_item)],
+        ['EXTRA PRINTS & ITEMS (Optional, price each)', addOnsList.filter((addon) => addon.catalog_item)],
+      ] as const).map(([title, list]) => list.length > 0 && (
+        <div key={title} className="mt-6 pt-5 border-t border-neutral-200">
           <h4 className="font-mono text-[11px] font-black text-ink uppercase tracking-widest mb-3">
-            ADDONS (Optional)
+            {title}
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {addOnsList.map((addon) => {
+            {list.map((addon) => {
               const isChecked = selectedAddOns.includes(addon.id);
               return (
                 <button
@@ -273,7 +320,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
             })}
           </div>
         </div>
-      )}
+      ))}
 
       {defaultAddOn && (
         <div className="mt-4 border border-gold bg-gold-wash p-3.5" aria-live="polite">
@@ -336,7 +383,15 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
         isSelected={viewingPackage?.id === selectedPackageId}
         onSelect={onSelectPackage}
         onClose={() => setDetailsId(null)}
+        gender={gender}
+        picks={optionPicks}
+        onPicksChange={onOptionPicksChange}
+        onCompare={packages.length > 1 ? () => { setDetailsId(null); setComparing(true); } : undefined}
       />
+      {comparing && (
+        <PackageCompareModal packages={packages} selectedId={selectedPackageId} onSelect={onSelectPackage}
+          onDetails={(id) => { setComparing(false); setDetailsId(id); }} onClose={() => setComparing(false)} />
+      )}
     </section>
   );
 };

@@ -1,4 +1,5 @@
-import type { Registration } from '../types';
+import type { PackageInclusion, Registration } from '../types';
+import { inclusionLines, orderInclusionTree, parseInclusionTree } from './inclusions';
 
 export interface FormatCurrencyOptions {
   exact?: boolean;
@@ -80,31 +81,23 @@ export function formatShortDate(dateValue?: string | number | Date): string {
 }
 
 /**
- * Safely parses package `inclusions` which may be stored as a JSON string or array.
+ * A saved list (freebies, or inclusions as plain lines) which may be stored as a JSON string or
+ * array. Inclusion sections come out as lines too (title, then its items), so text never shows
+ * as "[object Object]"; use parseInclusionTree (utils/inclusions) to keep the sections.
  */
-export function parsePackageInclusions(inclusions: string[] | string | undefined | null): string[] {
-  if (!inclusions) return [];
-  if (Array.isArray(inclusions)) return inclusions;
-  if (typeof inclusions === 'string') {
-    try {
-      const parsed = JSON.parse(inclusions);
-      return Array.isArray(parsed) ? parsed : [inclusions];
-    } catch {
-      return [inclusions];
-    }
-  }
-  return [];
+export function parsePackageInclusions(inclusions: PackageInclusion[] | string | undefined | null): string[] {
+  return inclusionLines(parseInclusionTree(inclusions));
 }
 
 /**
- * The inclusions the client bought: frozen on the job order, or (older orders) the package's current list.
+ * The inclusions the client bought, as lines: frozen on the job order, or (older orders) the
+ * package's current list.
  */
 export function orderInclusions(reg: {
-  package_snapshot?: { inclusions?: string[] } | null;
-  expand?: { package?: { inclusions?: string[] | string } };
+  package_snapshot?: { inclusions?: PackageInclusion[] } | null;
+  expand?: { package?: { inclusions?: PackageInclusion[] | string } };
 }): string[] {
-  const sold = reg.package_snapshot?.inclusions;
-  return Array.isArray(sold) ? sold : parsePackageInclusions(reg.expand?.package?.inclusions);
+  return inclusionLines(orderInclusionTree(reg));
 }
 
 /**

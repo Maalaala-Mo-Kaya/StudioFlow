@@ -18,8 +18,14 @@ import { isWalkIn } from '../../../utils/clientInfo';
 import { useStudioSettings } from '../../../hooks/useStudioSettings';
 import { MAKEUP_LOOKS, MAKEUP_LOOK_NOTE_MAX } from '../../../constants/makeupLook';
 import { discountCents, revenueTerms } from '../../../utils/revenue';
+import { PackageOptionsPicker } from '../../../components/common/PackageOptionsPicker';
+import {
+  chosenOptionLines, keepValidPicks, missingPicks, optionGroups, picksFromSaved, picksPayload, type OptionPicks,
+} from '../../../utils/packageOptions';
 
-export type RegistrationEdits = Omit<Partial<Registration>, 'add_ons'> & {
+export type RegistrationEdits = Omit<Partial<Registration>, 'add_ons' | 'package_options'> & {
+  /** The client's picks by id; the server checks them and saves the labels. */
+  package_options?: { group: string; choices: string[] }[];
   mua_correction?: 'required' | 'waived';
   review_mua_amount?: number;
   review_revenue_reason?: string;
@@ -59,6 +65,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [organizationId, setOrganizationId] = useState(reg.organization || '');
   const [courseId, setCourseId] = useState(reg.course || '');
   const [packageId, setPackageId] = useState(reg.package || '');
+  const [optionPicks, setOptionPicks] = useState<OptionPicks>(() => picksFromSaved(reg.package_options));
+  const [optionsTouched, setOptionsTouched] = useState(false);
   const [pictorialDate, setPictorialDate] = useState(reg.pictorial_date?.slice(0, 10) ?? '');
   const [status, setStatus] = useState<RegistrationStatus>(reg.status);
   const [framingStatus, setFramingStatus] = useState<FramingStatus>(
@@ -117,6 +125,13 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
     || (pkg.is_active && [clientKind, 'both'].includes(pkg.client_kind || 'school')));
   const selectedPkg = packages.find((p) => p.id === packageId);
   const packageChanged = Boolean(selectedPkg) && packageId !== reg.package;
+  // Package options: sent only when changed (or with a new package); otherwise the picks saved at
+  // sale stay as they are, even if the package's options were edited since.
+  const groups = optionGroups(selectedPkg);
+  const validPicks = keepValidPicks(groups, gender, optionPicks);
+  const sendOptions = packageChanged || optionsTouched;
+  const optionsProblem = sendOptions && gender ? missingPicks(groups, gender, validPicks) : null;
+  const savedOptionLines = chosenOptionLines(reg.package_options);
 
   // Same rule as the server: when the package or add-ons change, the automatic add-on for clients
   // without makeup is added (order no longer brings makeup) or dropped (it does).
@@ -153,6 +168,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (optionsProblem) return;
     setIsSubmitting(true);
     try {
       await onSave(reg.id, {
@@ -174,6 +190,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
           course: courseId,
         }),
         package: packageId,
+        ...(sendOptions ? { package_options: picksPayload(validPicks) } : {}),
         ...(!itemsChanged && reviewAmount !== '' ? { review_mua_amount: Number(reviewAmount), review_revenue_reason: reviewReason.trim() } : {}),
         ...(canEditAddOns && discountChanged ? { order_discount: { studio: studioDiscount, mua: muaDiscount, reason: discountReason.trim() } } : {}),
         ...(addOnsChanged ? { add_ons: addOns.map((item) => (item.id ? { id: item.id } : { code: item.code, name: item.name })) } : {}),
@@ -451,6 +468,24 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 </span>
               </div>
             </div>
+            {(groups.length > 0 || savedOptionLines.length > 0) && (
+              <div className="space-y-2 border-t border-neutral-200 pt-2">
+                <h4 className="font-black uppercase">Package options</h4>
+                {!packageChanged && savedOptionLines.length > 0 && (
+                  <p className="text-neutral-600">Chosen: {savedOptionLines.join(' · ')}</p>
+                )}
+                {packageChanged && groups.length > 0 && (
+                  <p className="text-amber-800 font-bold">New package: choose its options for the client.</p>
+                )}
+                {!gender ? (
+                  <p className="text-neutral-600">Set the client's gender to choose options.</p>
+                ) : (
+                  <PackageOptionsPicker groups={groups} gender={gender} picks={validPicks} disabled={!canEditAddOns}
+                    onChange={(picks) => { setOptionPicks(picks); setOptionsTouched(true); }}
+                    error={optionsProblem ?? undefined} />
+                )}
+              </div>
+            )}
             {refundDue > 0 && (
               <div role="alert" className="p-3 border-2 border-red-600 bg-red-50 text-red-900 leading-relaxed">
                 <strong>The client already paid {formatCurrency(reg.paid_amount, { exact: true })}</strong>, more than the new total of {formatCurrency(currentTotal, { exact: true })}.
@@ -671,7 +706,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !!optionsProblem}
               className="flex-1 py-2.5 font-bold uppercase tracking-wider bg-obsidian text-gold border-2 border-line shadow-lux hover:bg-neutral-800 disabled:opacity-50 transition-all btn-tactile cursor-pointer"
             >
               {isSubmitting ? 'Saving Changes...' : 'Save Student Record'}

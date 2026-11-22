@@ -152,10 +152,43 @@ const checkCatalogPrice = (e) => {
   const table = e.record.collection().name;
   // A package's freebies are saved as a clean list of text items.
   if (table === "packages") {
+    // The kiosk line under the price ("with 10x12 PREMIUM frame"); empty shows the frame.
+    e.record.set("tagline", e.record.getString("tagline").trim().replace(/\s+/g, " "));
+    // The builder sends `structure` (the package's poses and single items); a package written
+    // as text (Import from File, older screens) is converted to one. Either way the shown
+    // inclusions, freebies and options are rendered from it (studio_catalog.js).
+    const catalog = require(__hooks + "/studio_catalog.js");
+    const body = e.requestInfo().body || {};
+    let structure = null;
+    if (Object.hasOwn(body, "structure")) {
+      const checked = catalog.validate(e.app, e.record.getString("structure"));
+      if (checked.problem) throw new BadRequestError(checked.problem);
+      structure = checked.structure;
+    } else if (["inclusions", "freebies", "option_groups"].some((field) => Object.hasOwn(body, field))) {
+      structure = catalog.convertLegacy(e.app, e.record.getString("inclusions"), e.record.getString("freebies"),
+        e.record.getString("option_groups"), e.record.getInt("photo_selection_limit"));
+    } else if (Object.hasOwn(body, "photo_selection_limit") && e.record.getString("structure")) {
+      structure = catalog.readJson(e.record.getString("structure"));
+    }
+    if (structure) {
+      const out = catalog.render(e.app, structure, e.record.getInt("photo_selection_limit"));
+      e.record.set("structure", structure);
+      e.record.set("inclusions", out.inclusions);
+      e.record.set("freebies", out.freebies);
+      e.record.set("option_groups", out.option_groups);
+    }
     const pricing = require(__hooks + "/studio_pricing.js");
     const freebies = pricing.packageInclusions(e.record, "freebies").map((item) => item.trim()).filter(Boolean);
     if (freebies.some((item) => item.length > 200)) throw new BadRequestError("Keep each freebie under 200 characters.");
     e.record.set("freebies", freebies);
+    // Inclusions: plain items and titled sections (two levels), cleaned and saved as a list.
+    const inclusions = pricing.cleanInclusions(pricing.readList(e.record.getString("inclusions")));
+    if (inclusions.problem) throw new BadRequestError(inclusions.problem);
+    e.record.set("inclusions", inclusions.items);
+    // Option groups the client chooses from (studio_package_options.js), cleaned and given ids.
+    const options = require(__hooks + "/studio_package_options.js").normalizeGroups(e.record.getString("option_groups"));
+    if (options.problem) throw new BadRequestError(options.problem);
+    e.record.set("option_groups", options.groups);
   }
   // Codes are unique per collection, ignoring case (idx_packages_code / idx_add_ons_code are the
   // backstop when two saves race). Checked here first for a clear message.
@@ -209,6 +242,8 @@ onRecordDeleteRequest((e) => {
   return e.next();
 }, "packages");
 onRecordDeleteRequest((e) => {
+  // A single item's add-on is refused by studio_catalog.pb.js with its own message.
+  if (e.record.getString("catalog_item")) return e.next();
   const used = new DynamicModel({ n: 0 });
   e.app.db().newQuery(`SELECT COUNT(*) AS n FROM registrations
     WHERE json_valid(add_ons) AND json_type(add_ons) = 'array'

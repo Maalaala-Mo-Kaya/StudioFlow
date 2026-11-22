@@ -12,6 +12,8 @@ import { RegistrationStepProgress } from './components/RegistrationStepProgress'
 import { ClientKindPicker } from './components/ClientKindPicker';
 import { WalkInDetailsSection } from './components/WalkInDetailsSection';
 import { MakeupLookSection } from './components/MakeupLookSection';
+import { PackageOptionsSection } from './components/PackageOptionsSection';
+import { availableChoices, chosenOptionLines } from '../../utils/packageOptions';
 
 export const RegisterPage: React.FC = () => {
   const form = useRegistrationForm();
@@ -147,8 +149,20 @@ export const RegisterPage: React.FC = () => {
               onPaymentTypeChange={form.setPaymentType}
               totalAmount={form.totalAmount}
               errors={form.errors}
+              gender={form.gender === 'male' || form.gender === 'female' ? form.gender : ''}
+              optionPicks={form.optionPicks}
+              onOptionPicksChange={form.setOptionPicks}
               emptyMessage={form.catalogError || (form.catalogLoading ? 'Loading packages and add-ons…'
                 : form.clientKind ? undefined : 'Choose the type of client above to see the packages.')}
+            />
+
+            <PackageOptionsSection
+              packageName={form.packages.find((pkg) => pkg.id === form.selectedPackageId)?.name ?? 'the package'}
+              groups={form.packageOptionGroups}
+              gender={form.gender === 'male' || form.gender === 'female' ? form.gender : ''}
+              picks={form.optionPicks}
+              onChange={form.setOptionPicks}
+              errors={form.errors}
             />
 
             {form.asksLook && (
@@ -207,6 +221,11 @@ export const RegisterPage: React.FC = () => {
             termsAccepted={form.termsAccepted}
             hasSignature={form.hasSignature}
             isSubmitting={form.isSubmitting}
+            optionLines={chosenOptionLines(form.packageOptionGroups.map((group) => ({
+              group_id: group.id, group: group.name, replaces: group.replaces,
+              choices: availableChoices(group, form.gender === 'male' || form.gender === 'female' ? form.gender : '')
+                .filter((choice) => (form.optionPicks[group.id] || []).includes(choice.id)),
+            })))}
             profileLine={form.isWalkIn
               ? [form.clientOrg.trim() || 'Walk-in', form.selectedSession?.name || 'Session not selected'].join(' • ')
               : form.clientKind ? undefined : 'Choose the type of client'}
