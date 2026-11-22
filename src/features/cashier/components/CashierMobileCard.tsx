@@ -1,5 +1,5 @@
 import React from 'react';
-import { CreditCard, Banknote, Printer, PackageCheck, MessageSquare } from 'lucide-react';
+import { CreditCard, Banknote, Printer, PackageCheck, MessageSquare, Plus } from 'lucide-react';
 import { PickupNoticeInfo } from './PickupNoticeInfo';
 import type { Registration } from '../../../types';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
@@ -15,6 +15,7 @@ interface CashierMobileCardProps {
   onOpenDelete?: (reg: Registration) => void;
   onOpenPrint: (reg: Registration) => void;
   onOpenRelease: (reg: Registration) => void;
+  onOpenAddOn?: (reg: Registration) => void;
   /** Ready for Pickup tab: show the pickup notice and a Notify button. */
   onOpenNotify?: (reg: Registration) => void;
 }
@@ -25,6 +26,7 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
   onOpenDelete,
   onOpenPrint,
   onOpenRelease,
+  onOpenAddOn,
   onOpenNotify,
 }) => {
   return (
@@ -125,6 +127,16 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
           </button>
         ) : null}
 
+{onOpenAddOn && !['released', 'cancelled'].includes(reg.status) && (
+          <button
+            type="button"
+            onClick={() => onOpenAddOn(reg)}
+            title="Add an add-on the client asks for"
+            className="btn-tactile min-h-[44px] px-3 text-xs border border-gold text-gold-soft bg-canvas font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer hover:bg-gold-wash"
+          >
+            <Plus className="w-4 h-4" /> Add-on
+          </button>
+        )}
         {reg.job_order_no && <button
           type="button"
           onClick={() => onOpenPrint(reg)}

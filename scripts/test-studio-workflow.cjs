@@ -810,6 +810,30 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.equal(notice.pickup_notify_count, 1);
   assert.ok(notice.pickup_notified_at && notice.pickup_notified_by);
   await registrations(pickup, admin, { pickup_notify_count: 5 }, 403);
+  // Fully paid and ready, then the client adds something at the counter: the cashier may add (not
+  // remove) add-ons; the order owes the difference, goes back to In production (leaving Ready for
+  // Pickup) and the change is logged for the next receipt.
+  const pickupFrame = await create('add_ons', { code: 'PICK-FRAME', name: 'Pickup frame', amount: 250, is_active: true, revenue_category: 'studio' });
+  const counterAdd = (await registrations(pickup, cashier, { add_ons: [{ id: pickupFrame.id }] })).payload;
+  assert.deepEqual([counterAdd.balance, counterAdd.payment_status, counterAdd.status, counterAdd.framing_status, counterAdd.ready_at],
+    [250, 'downpayment', 'done_shooting', 'in_production', '']);
+  const lastChange = counterAdd.order_changes.at(-1);
+  assert.deepEqual([lastChange.added, lastChange.removed, lastChange.total_before, lastChange.total_after],
+    [[{ name: 'Pickup frame', amount: 250 }], [], 1000, 1250]);
+  await registrations(pickup, cashier, { add_ons: [] }, 403);
+  await registrations(pickup, cashier, { other_fees: 50 }, 403);
+  // The history is server-written: a request can't replace it.
+  assert.equal((await registrations(pickup, admin, { order_changes: [] })).payload.order_changes.length, counterAdd.order_changes.length);
+  await registrations(pickup, cashier, release, 400);
+  await pay(pickup, 250, 'additional');
+  await production({ ids: [pickup.id], status: 'ready_for_pickup' });
+  ready = (await send(records('registrations', pickup.id), { token: cashier })).payload;
+  assert.deepEqual([ready.status, ready.balance, ready.pickup_notify_count], ['ready_for_pickup', 0, 0], 'a new ready period starts a new pickup notice');
+  // Only an administrator removes or changes what is on the order.
+  await registrations(pickup, admin, { add_ons: [] }, 200);
+  const readded = (await registrations(pickup, admin, { add_ons: [{ id: pickupFrame.id }] }, 200)).payload;
+  assert.deepEqual([readded.balance, readded.framing_status, readded.order_changes.length], [0, 'in_production', counterAdd.order_changes.length + 2]);
+  await production({ ids: [pickup.id], status: 'ready_for_pickup' });
   // Every release goes through the cashier's Release step with a claimant.
   await registrations(pickup, admin, { framing_status: 'released' }, 400);
   await registrations(pickup, cashier, { ...release, claimed_by: ' ' }, 400);
@@ -994,11 +1018,16 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const feeRow = (await send(api + '/student-excel', { token: admin })).payload.rows.find((row) => row.jobOrder === withFees.job_order_no);
   assert.deepEqual([feeRow.due, feeRow.otherFees, feeRow.packageAmount], [115000, 15000, 100000], 'the export splits the total into package and other fees');
 
-  // Add-ons after registration: admin only, catalog-priced, and the total follows.
+  // Add-ons after registration: catalog-priced, and the total follows. The cashier may add at the
+  // counter; removing or changing one stays with an administrator.
   const frame = await create('add_ons', { code: 'FRAME', name: 'Frame upgrade', amount: 400, is_active: true, revenue_category: 'studio' });
   const addOnClient = await register(standard);
   await pay(addOnClient, 500, 'initial');
-  await registrations(addOnClient, cashier, { add_ons: [{ id: frame.id }] }, 403);
+  const counter = (await registrations(addOnClient, cashier, { add_ons: [{ id: frame.id, amount: 1 }] })).payload;
+  assert.deepEqual([counter.add_ons[0].amount, counter.total_amount, counter.balance], [400, 1400, 900], 'the cashier adds at the catalog price');
+  await registrations(addOnClient, cashier, { add_ons: [] }, 403);
+  await registrations(addOnClient, cashier, { add_ons: [{ id: frame.id }], family_name: 'Changed' }, 403);
+  await registrations(addOnClient, admin, { add_ons: [] });
   await registrations(addOnClient, admin, { add_ons: [{ id: 'notarealaddon00', name: 'Free stuff', amount: 9999 }] }, 400);
   await registrations(addOnClient, admin, { add_ons: [{ id: frame.id }, { id: frame.id }] }, 400);
   let priced = (await registrations(addOnClient, admin, { add_ons: [{ id: frame.id, amount: 1 }] })).payload;
@@ -1172,6 +1201,14 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true, watch: null, ws: false },
   });
   t.after(() => vite.close());
+  await t.test('items added after a payment show on the next receipt', async () => {
+    const { paymentAdditions } = await vite.ssrLoadModule('/src/features/receipts/receiptData.ts');
+    const order = (await registrations(pickup)).payload;
+    const payments = (await send(records('payments') + '?sort=created&filter=' + encodeURIComponent(`registration="${pickup.id}"`), { token: admin })).payload.items;
+    const data = { registration: order, payments, refunds: [], terms: [] };
+    assert.deepEqual(payments.map((payment) => paymentAdditions(data, payment)),
+      [[], ['Pickup frame ₱250.00']]);
+  });
   await t.test('revenue allocation and managed MUA queue', async () => {
     const { buildAudit } = await vite.ssrLoadModule('/src/features/admin/auditData.ts');
     const { buildAuditWorkbook } = await vite.ssrLoadModule('/src/features/admin/auditWorkbook.ts');

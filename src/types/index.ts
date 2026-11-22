@@ -330,6 +330,18 @@ export interface MasterListItem {
   section?: string;
 }
 
+/** One edit of a job order's items: add-ons added / removed, package or other fees changed (pesos). */
+export interface OrderChange {
+  at: string;
+  by: string;
+  added: { name: string; amount: number }[];
+  removed: { name: string; amount: number }[];
+  package?: { from: string; to: string; amount: number };
+  fees?: { from: number; to: number };
+  total_before: number;
+  total_after: number;
+}
+
 export interface Registration {
   id: string;
   job_order_no: string | null;
@@ -367,6 +379,8 @@ export interface Registration {
   revenue_review?: { mua: number; reason: string; by: string; at: string } | null;
   /** Discount credit (centavos). `fixed`: given as a peso amount, not a percentage. */
   revenue_discount?: { studio: number; mua: number; percentage?: number; fixed?: boolean; reason: string; by: string; byId?: string; at: string } | null;
+  /** Server-written history of items added / removed after the order was made (registration_billing.pb.js). */
+  order_changes?: OrderChange[] | null;
   total_amount: number;
   paid_amount: number;
   balance: number;

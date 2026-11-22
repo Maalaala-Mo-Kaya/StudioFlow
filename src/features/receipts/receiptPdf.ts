@@ -6,7 +6,7 @@ import { pb } from '../../db/pocketbase';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import {
   orderDiscount, orderExtras, receiptRevenueLine,
-  isCounted, isComplimentarySettlement, jobOrderMarks, paymentDiscount, soldPackagePrice, loadReceiptData, loadRefundSignature, methodLabel, paymentTypeLabel, peso, receiptDate, receiptLabel, refundAcknowledgment, refundFigures, signatureUrl, statusLabel,
+  isCounted, isComplimentarySettlement, jobOrderMarks, paymentAdditions, paymentDiscount, soldPackagePrice, loadReceiptData, loadRefundSignature, methodLabel, paymentTypeLabel, peso, receiptDate, receiptLabel, refundAcknowledgment, refundFigures, signatureUrl, statusLabel,
   visiblePayments, profileCells, profileLine,
   type ReceiptData, type ReceiptPaper, type RefundSlipData,
 } from './receiptData';
@@ -369,6 +369,15 @@ function drawReceiptSlip(doc: jsPDF, data: ReceiptData, payment: PaymentRecord, 
   };
   y += 0.58;
   row('PAYMENT FOR', paymentTypeLabel(payment), y);
+  // Items added since the previous payment (at most two lines, as on the printed sheet).
+  const additions = paymentAdditions(data, payment, false);
+  if (additions.length) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    const lines: string[] = doc.splitTextToSize(`Added · ${additions.join(', ')}`, w);
+    if (lines.length > 2) lines.splice(2, lines.length, lines[1].replace(/.{0,3}$/, '…'));
+    for (const line of lines) put(doc, line, x, y += 6 * PT + 0.01, { size: 6, color: GREY });
+  }
   row('METHOD', methodLabel(payment.payment_method) + (payment.remarks ? ` · ${payment.remarks}` : ''), y += 0.14);
   row('PREVIOUS BALANCE', php(payment.balance_before), y += 0.14);
   const discount = paymentDiscount(payment);

@@ -693,6 +693,15 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
             />
           </div>
 
+          {/* Something new to make on an order already marked ready: the server moves it back to In production. */}
+          {(packageChanged || addOns.some((item) => !savedAddOns.some((saved) => (saved.id ?? saved.name) === (item.id ?? item.name))))
+            && (['completed', 'ready_for_pickup'].includes(reg.status) || ['framed', 'ready_for_pickup'].includes(reg.framing_status ?? '')) && (
+            <p role="status" className="p-2.5 border-2 border-amber-500 bg-amber-50 text-amber-900 font-sans text-[11px]">
+              <b>This order is marked ready for pickup.</b> Saving moves it back to <b>In production</b> so the new item gets made:
+              it leaves the cashier&apos;s Ready for Pickup list (and the pickup notice resets) until you mark it ready again in Production &amp; Pickup.
+            </p>
+          )}
+
           {/* Action Buttons */}
           <div className="flex gap-3 pt-3 border-t-2 border-line">
             <button

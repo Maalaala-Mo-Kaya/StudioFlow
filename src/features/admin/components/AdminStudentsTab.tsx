@@ -5,6 +5,8 @@ import type { AddOn, Registration, Organization, Level, Course, Package } from '
 import { formatCurrency, formatClientName } from '../../../utils/formatters';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
 import { EditStudentModal, type RegistrationEdits } from './EditStudentModal';
+import { UpdatedJobOrderPrompt } from '../../receipts/UpdatedJobOrderPrompt';
+import { addedAddOnNames, hasPrintedJobOrder } from '../../receipts/receiptData';
 import { getRegistrationAddOns } from '../../../utils/registrationAddOns';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
@@ -71,7 +73,8 @@ interface AdminStudentsTabProps {
   packages: Package[];
   /** The add-on catalog, for adding add-ons to a job order after registration. */
   addOns: AddOn[];
-  onUpdateRegistration: (id: string, data: RegistrationEdits) => Promise<void>;
+  /** Resolves with the saved order (to offer reprinting its job order when items were added). */
+  onUpdateRegistration: (id: string, data: RegistrationEdits) => Promise<Registration>;
   onCancelRegistration: (id: string, reason: string) => Promise<void>;
   onRestoreRegistration: (id: string) => Promise<void>;
 }
@@ -133,6 +136,8 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
   const [filters, setFilters] = useState<StudentFilters>(emptyFilters);
   const [visibleColumnIds, setVisibleColumnIds] = useState(readColumnPreferences);
   const [editingStudent, setEditingStudent] = useState<Registration | null>(null);
+  // After items were added to a numbered job order: offer to print the updated one.
+  const [reprint, setReprint] = useState<{ id: string; added: string[] } | null>(null);
 
   useEffect(() => {
     try {
@@ -432,14 +437,27 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
           onClose={() => setEditingStudent(null)}
           onSave={async (id, data) => {
             try {
-              await onUpdateRegistration(id, data);
+              const before = editingStudent;
+              const saved = await onUpdateRegistration(id, data);
               toast.success('Student record updated');
               setEditingStudent(null);
+              const added = addedAddOnNames(before.add_ons, saved.add_ons);
+              const packageChanged = saved.package !== before.package;
+              if (hasPrintedJobOrder(saved) && (added.length || packageChanged)) {
+                if (saved.framing_status === 'in_production' && before.framing_status !== 'in_production') {
+                  toast.warning(`JO ${saved.job_order_no} moved back to In production for the new item. Mark it ready again in Production & Pickup.`);
+                }
+                setReprint({ id: saved.id, added: [...added, ...(packageChanged ? [`Package: ${saved.package_snapshot?.name ?? 'changed'}`] : [])] });
+              }
             } catch (err: unknown) {
               toast.error(err instanceof Error ? err.message : 'Failed to update student');
             }
           }}
         />
+      )}
+
+      {reprint && (
+        <UpdatedJobOrderPrompt registrationId={reprint.id} added={reprint.added} cashierName="Administrator" onClose={() => setReprint(null)} />
       )}
 
       {/* Confirmation Modal */}

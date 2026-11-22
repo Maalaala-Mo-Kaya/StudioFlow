@@ -132,6 +132,39 @@ export function paymentDiscount(payment: PaymentRecord) {
   return { amount, percentage: snapshot.percentage, rate: discountRate(snapshot), reason: snapshot.reason };
 }
 
+/** An order with a job order number already has a printed claim stub (worth reprinting after a change). */
+export const hasPrintedJobOrder = (reg: Registration) => Boolean(reg.job_order_no) && reg.status !== 'cancelled';
+
+/** Names of add-ons in `after` that were not in `before` (matched by id, else name). */
+export function addedAddOnNames(before: unknown, after: unknown): string[] {
+  const key = (item: { id?: string; name: string }) => item.id ?? item.name;
+  const had = new Set(getRegistrationAddOns(before).map(key));
+  return getRegistrationAddOns(after).filter((item) => !had.has(key(item))).map((item) => item.name);
+}
+
+const timeOf = (value: string) => Date.parse(value.includes('T') ? value : value.replace(' ', 'T'));
+
+/**
+ * What was added to the order since the previous counted payment, up to this one ("Extra 8R Frame ₱350",
+ * "Package → Premium B"), so the receipt says what the extra payment is for. Empty when nothing was added.
+ */
+export function paymentAdditions(data: ReceiptData, payment: PaymentRecord, currency = true): string[] {
+  const changes = data.registration.order_changes;
+  if (!Array.isArray(changes) || !changes.length) return [];
+  const end = timeOf(payment.created);
+  const earlier = data.payments.filter((p) => p.id !== payment.id && isCounted(p) && timeOf(p.created) < end);
+  const start = earlier.length ? Math.max(...earlier.map((p) => timeOf(p.created))) : -Infinity;
+  const lines: string[] = [];
+  for (const change of changes) {
+    const at = timeOf(change.at);
+    if (!(at > start && at <= end)) continue;
+    for (const item of change.added ?? []) lines.push(`${item.name} ${peso(item.amount, currency)}`);
+    if (change.package?.to) lines.push(`Package → ${change.package.to}`);
+    if (change.fees && change.fees.to > change.fees.from) lines.push(`Other fees ${peso(change.fees.to - change.fees.from, currency)}`);
+  }
+  return lines;
+}
+
 export function receiptRevenueLine(data: ReceiptData, payment?: PaymentRecord, currency = true) {
   const reg = data.registration;
   const split = payment

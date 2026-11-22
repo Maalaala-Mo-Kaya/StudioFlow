@@ -659,9 +659,10 @@ export function useAdminData() {
   const refreshDocuments = (registrationId: string) => refreshClientDocuments(registrationId, toast.warning);
 
   const handleUpdateRegistration = async (id: string, data: RegistrationEdits) => {
-    await pb.collection('registrations').update(id, data);
+    const saved = await pb.collection('registrations').update<Registration>(id, data);
     refreshDocuments(id);
     loadAllData();
+    return saved;
   };
 
   // Cancelling keeps the job order and its payment records for the ledger and receipt trail.
