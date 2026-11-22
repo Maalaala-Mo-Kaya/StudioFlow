@@ -41,8 +41,10 @@ export const AdminPage: React.FC = () => {
         {/* Tab Content Panel */}
         <main className="flex-1 min-w-0 w-full">
           {/* TAB 1: OPERATIONS METRICS & RECONCILIATION */}
-          {admin.activeTab === 'metrics' && (
+          {(admin.activeTab === 'metrics' || admin.activeTab === 'ledger') && (
             <AdminAnalyticsTab
+              view={admin.activeTab === 'ledger' ? 'ledger' : 'overview'}
+              onOpenLedger={() => admin.setActiveTab('ledger')}
               metrics={admin.metrics}
               organizations={admin.organizations}
               registrations={admin.registrations}

@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   PhilippinePeso,
   Users,
@@ -11,6 +12,9 @@ import {
   Printer,
   Ban,
   Undo2,
+  BookOpenCheck,
+  ArrowRight,
+  X,
 } from 'lucide-react';
 import type { Organization, Registration, Package, PaymentRecord, RefundRecord } from '../../../types';
 import type { RefundRequest } from '../useAdminData';
@@ -40,6 +44,10 @@ type Period = 'today' | 'month' | 'all';
 const PERIOD_LABELS: Record<Period, string> = { today: 'Today', month: 'This Month', all: 'All Time' };
 
 interface AdminAnalyticsTabProps {
+  /** Analytics & Overview, or its Settlement & Ledger sub-tab. */
+  view?: 'overview' | 'ledger';
+  /** Opens the Settlement & Ledger sub-tab (from the overview). */
+  onOpenLedger?: () => void;
   /** All-time figures. */
   metrics: OverviewMetrics;
   organizations: Organization[];
@@ -52,6 +60,8 @@ interface AdminAnalyticsTabProps {
 }
 
 export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
+  view = 'overview',
+  onOpenLedger,
   metrics,
   organizations,
   registrations,
@@ -77,6 +87,16 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   const [voidTarget, setVoidTarget] = useState<{ registration: Registration; payment: PaymentRecord } | null>(null);
   const [refundTarget, setRefundTarget] = useState<{ registration: Registration; refundable: number } | null>(null);
   const [slipTarget, setSlipTarget] = useState<{ registration: Registration; refund: RefundRecord; justRecorded?: boolean } | null>(null);
+  // The ledger account open in the popup (by id, so it shows the latest payments and refunds).
+  const [openAccountId, setOpenAccountId] = useState<string | null>(null);
+  const actionOpen = Boolean(receiptTarget || voidTarget || refundTarget || slipTarget);
+  useEffect(() => {
+    if (!openAccountId) return;
+    // Escape closes the account popup, unless a receipt / void / refund popup is open on top of it.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !actionOpen) setOpenAccountId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [openAccountId, actionOpen]);
   const refundsByRegistration = useMemo(() => {
     const grouped = new Map<string, RefundRecord[]>();
     for (const refund of refunds) grouped.set(refund.registration, [...(grouped.get(refund.registration) ?? []), refund]);
@@ -329,8 +349,13 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
     );
   }
 
+  const openAccount = openAccountId ? ledgerRows.find((row) => row.registration.id === openAccountId) : undefined;
+  // Summary figures for the popup: the ledger's own columns, minus the identity ones in its header.
+  const summaryColumns = ledgerColumns.filter((c) => !['job', 'name', 'school', 'package'].includes(c.id));
+
   return (
     <div className="space-y-6 animate-enter">
+      {view === 'overview' && (<>
       {/* Period switch for the cards (dates in Philippine time). */}
       <div className="flex flex-wrap items-center gap-3">
         <div role="group" aria-label="Period" className="inline-flex border-2 border-line bg-panel shadow-lux font-mono text-xs font-black uppercase">
@@ -544,8 +569,24 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
 
       <MuaPerformancePanel />
 
-      {/* Financial Ledger & Audit Trail */}
-      <DataTable
+      {/* The ledger has its own sub-tab. */}
+      <button type="button" onClick={onOpenLedger}
+        className="btn-tactile w-full flex flex-wrap items-center justify-between gap-3 p-4 bg-panel border-2 border-line shadow-lux text-left cursor-pointer hover:border-gold">
+        <span className="flex items-center gap-3">
+          <BookOpenCheck className="w-5 h-5 text-gold shrink-0" />
+          <span>
+            <span className="block font-black text-xs uppercase tracking-wider text-ink">Financial Settlement &amp; Ledger</span>
+            <span className="block font-mono text-[11px] text-neutral-500">
+              Every client's billing, payments, balance and refunds · {registrations.length} account{registrations.length === 1 ? '' : 's'}
+            </span>
+          </span>
+        </span>
+        <span className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase text-gold-soft">Open <ArrowRight className="w-4 h-4" /></span>
+      </button>
+      </>)}
+
+      {/* Financial Ledger & Audit Trail: click a client to open their account. */}
+      {view === 'ledger' && <DataTable
         label="Financial Settlement & Ledger"
         rows={filteredLedger}
         columns={ledgerColumns}
@@ -556,7 +597,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         filtered={Boolean(searchQuery.trim()) || filterSchool !== 'all' || filterPaymentStatus !== 'all'}
         emptyMessage="No participant accounts yet."
         filteredEmptyMessage="No records match the selected ledger filters."
-        renderExpanded={renderHistory}
+        onRowClick={(row) => setOpenAccountId(row.registration.id)}
         toolbar={(
           <div className="flex flex-wrap items-center justify-between gap-3 p-5">
             <div>
@@ -564,7 +605,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                 Financial Settlement &amp; Ledger
               </h3>
               <p className="font-mono text-[11px] text-neutral-500">
-                Showing {filteredLedger.length} of {registrations.length} participant accounts
+                Showing {filteredLedger.length} of {registrations.length} participant accounts · click a client to see payments, refunds and receipts
               </p>
             </div>
 
@@ -602,7 +643,46 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             </div>
           </div>
         )}
-      />
+      />}
+
+      {openAccount && createPortal(
+        <div role="dialog" aria-modal="true" aria-labelledby="ledger-account-title"
+          onClick={(e) => { if (e.target === e.currentTarget && !actionOpen) setOpenAccountId(null); }}
+          className="no-print fixed inset-0 z-40 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 backdrop-blur-xs animate-modal">
+          <div className="w-full sm:max-w-6xl h-full sm:h-auto sm:max-h-[92vh] flex flex-col bg-panel sm:border-2 border-line shadow-lux-gold font-mono text-xs">
+            <div className="p-4 sm:px-6 border-b-2 border-line flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="bg-obsidian text-gold px-2 py-0.5 text-[10px] font-black uppercase tracking-widest">JO № {openAccount.registration.job_order_no || '—'}</span>
+                  {(() => { const { label, tone } = settlementOf(openAccount); return <span className={`px-2 py-0.5 text-[9px] font-black uppercase ${tone}`}>{label}</span>; })()}
+                </div>
+                <h3 id="ledger-account-title" className="mt-1 text-base sm:text-lg font-black uppercase tracking-wider text-ink">{formatClientName(openAccount.registration)}</h3>
+                <p className="text-[11px] text-neutral-600">
+                  {clientSummary(openAccount.registration, true) || 'No school / client'} · Package {openAccount.registration.package_snapshot?.code || openAccount.registration.expand?.package?.code || '—'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setOpenAccountId(null)} aria-label="Close"
+                className="w-9 h-9 shrink-0 flex items-center justify-center border border-line bg-canvas hover:bg-gold hover:text-on-gold cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+              <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                {summaryColumns.map((column) => (
+                  <div key={column.id} className="p-2 border border-line bg-canvas">
+                    <dt className="text-[9px] font-black uppercase tracking-wider text-neutral-600">{column.header}</dt>
+                    <dd className={`mt-0.5 text-sm font-black ${column.cellClassName ?? ''}`}>
+                      {column.cell ? column.cell(openAccount) : String(column.accessor?.(openAccount) ?? '')}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <div>{renderHistory(openAccount)}</div>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
       {receiptTarget && (
         <PrintReceiptModal
           registration={receiptTarget.registration}
