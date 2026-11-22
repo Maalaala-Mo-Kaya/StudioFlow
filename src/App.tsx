@@ -30,14 +30,14 @@ export default function App() {
 
           {/* Cashier Role Protected Route */}
           {currentTab === 'cashier' && (
-            <RoleLoginGate allowedRoles={['cashier', 'admin']}>
+            <RoleLoginGate allowedRoles={['cashier', 'admin']} targetStationName="the Cashier">
               <CashierPage />
             </RoleLoginGate>
           )}
 
           {/* Photographer Role Protected Route */}
           {currentTab === 'photographer' && (
-            <RoleLoginGate allowedRoles={['photographer', 'admin']}>
+            <RoleLoginGate allowedRoles={['photographer', 'admin']} targetStationName="the Photo Set">
               <PhotographerPage />
             </RoleLoginGate>
           )}
@@ -56,7 +56,7 @@ export default function App() {
 
           {/* Studio Admin Protected Route */}
           {currentTab === 'admin' && (
-            <RoleLoginGate allowedRoles={['admin']}>
+            <RoleLoginGate allowedRoles={['admin']} targetStationName="Admin">
               <AdminPage />
             </RoleLoginGate>
           )}

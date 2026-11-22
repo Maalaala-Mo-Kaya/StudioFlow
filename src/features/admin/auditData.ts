@@ -65,10 +65,31 @@ export interface AuditGroup {
   /** Active job orders made in the period. */
   count: number;
   billed: number;
-  /** Payments received minus refunds given in the period, for this group's job orders. */
+  /** Studio revenue: Studio cash received minus refunds in the period (as in the Studio revenue figure). */
   collected: number;
-  /** Still unpaid on this group's job orders made in the period. */
+  /** Studio discount credits granted in the period. Billed − discount − collected − balance = 0 for each group. */
+  discount: number;
+  /** Studio charges on this group's job orders (made in the period) that no cash has been counted toward yet. */
   balance: number;
+  /**
+   * Cash received in the period not yet counted as Studio or MUA: downpayments on orders that mix
+   * Studio and MUA charges (split when the order is fully paid), or charges with no revenue type.
+   */
+  held: number;
+}
+
+/** A discount credit counted in the period (granted then, on an active order), for the Discounts sheet. */
+export interface AuditDiscount {
+  registration: Registration;
+  /** The credit counted (in pesos): the discount, up to what was still unpaid when it was given. */
+  credit: number;
+  percentage: number;
+  /** Given as a peso amount (the percentage is worked out). */
+  fixed: boolean;
+  reason: string;
+  by: string;
+  at: string;
+  earlierOrder: boolean;
 }
 
 export interface AuditData {
@@ -76,6 +97,7 @@ export interface AuditData {
   orders: AuditOrder[];
   payments: AuditPayment[];
   refunds: AuditRefund[];
+  discounts: AuditDiscount[];
   totals: {
     gross: number;
     paidOnOrders: number;
@@ -201,11 +223,11 @@ export function buildAudit(
   const packageOf = (reg?: Registration) => reg?.package_snapshot?.id || reg?.package || UNKNOWN_PACKAGE;
   const schools = new Map<string, AuditGroup>();
   for (const org of catalog.organizations ?? []) {
-    schools.set(org.id, { key: org.id, code: org.code || 'ORG', name: org.name, count: 0, billed: 0, collected: 0, balance: 0 });
+    schools.set(org.id, { key: org.id, code: org.code || 'ORG', name: org.name, count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
   }
   const packagesByKey = new Map<string, AuditGroup>();
   for (const pkg of catalog.packages ?? []) {
-    packagesByKey.set(pkg.id, { key: pkg.id, code: pkg.code || 'PKG', name: pkg.name, count: 0, billed: 0, collected: 0, balance: 0 });
+    packagesByKey.set(pkg.id, { key: pkg.id, code: pkg.code || 'PKG', name: pkg.name, count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
   }
   const schoolGroup = (reg?: Registration) => {
     const key = groupOf(reg);
@@ -213,8 +235,8 @@ export function buildAudit(
     if (!group) {
       const org = reg?.expand?.organization;
       group = key === WALKIN_KEY
-        ? { key, code: 'WALK-IN', name: 'Walk-in clients', count: 0, billed: 0, collected: 0, balance: 0 }
-        : { key, code: org?.code || 'ORG', name: org?.name || 'Removed school', count: 0, billed: 0, collected: 0, balance: 0 };
+        ? { key, code: 'WALK-IN', name: 'Walk-in clients', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 }
+        : { key, code: org?.code || 'ORG', name: org?.name || 'Removed school', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 };
       schools.set(key, group);
     }
     return group;
@@ -224,7 +246,7 @@ export function buildAudit(
     let group = packagesByKey.get(key);
     if (!group) {
       const pkg = reg?.package_snapshot || reg?.expand?.package;
-      group = { key, code: pkg?.code || '—', name: pkg?.name || 'No package / removed package', count: 0, billed: 0, collected: 0, balance: 0 };
+      group = { key, code: pkg?.code || '—', name: pkg?.name || 'No package / removed package', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 };
       packagesByKey.set(key, group);
     }
     return group;
@@ -240,6 +262,7 @@ export function buildAudit(
   const revenue = emptyRevenue();
   let discountCredits = 0;
   const orderCredits = new Map<string, number>();
+  const discountRows: Omit<AuditDiscount, 'credit'>[] = [];
   for (const reg of registrations) {
     const discount = reg.revenue_discount;
     if (!discount || reg.status === 'cancelled' || !inPeriod(discount.at, since)) continue;
@@ -249,21 +272,29 @@ export function buildAudit(
     const credit = studioCredit + Math.min(discount.mua, unpaid - studioCredit);
     orderCredits.set(reg.id, credit);
     discountCredits += credit;
-    schoolGroup(reg).collected += studioCredit;
-    packageGroup(reg).collected += studioCredit;
+    const full = cents(reg.total_amount) + discount.studio + discount.mua;
+    discountRows.push({
+      registration: reg, percentage: Number((discount.percentage ?? (full ? (discount.studio + discount.mua) * 100 / full : 0)).toFixed(2)),
+      fixed: Boolean(discount.fixed), reason: discount.reason || '', by: discount.by || '', at: discount.at || '',
+      earlierOrder: Boolean(since) && !periodOrderIds.has(reg.id),
+    });
+    schoolGroup(reg).discount += studioCredit;
+    packageGroup(reg).discount += studioCredit;
   }
   for (const row of [...countedPayments, ...refundRows]) {
-    schoolGroup(row.registration).collected += row.revenue.studio;
-    packageGroup(row.registration).collected += row.revenue.studio;
+    for (const group of [schoolGroup(row.registration), packageGroup(row.registration)]) {
+      group.collected += row.revenue.studio;
+      group.held += row.revenue.unallocated;
+    }
     for (const key of revenueKeys) revenue[key] += row.revenue[key];
   }
   const toPesos = (group: AuditGroup): AuditGroup => ({
-    ...group, billed: pesos(group.billed), collected: pesos(group.collected), balance: pesos(group.balance),
+    ...group, billed: pesos(group.billed), collected: pesos(group.collected), discount: pesos(group.discount), balance: pesos(group.balance), held: pesos(group.held),
   });
   // Walk-ins last; groups with nothing in the period after the active ones.
   const ordered = (groups: Iterable<AuditGroup>) => [...groups]
     .sort((a, b) => Number(a.key === WALKIN_KEY) - Number(b.key === WALKIN_KEY)
-      || Number(!a.count && !a.collected) - Number(!b.count && !b.collected) || a.code.localeCompare(b.code))
+      || Number(!a.count && !a.collected && !a.discount) - Number(!b.count && !b.collected && !b.discount) || a.code.localeCompare(b.code))
     .map(toPesos);
 
   const netOnOrders = paidOnOrders - refundedOnOrders;
@@ -278,6 +309,9 @@ export function buildAudit(
     })),
     payments: paymentRows.map((row) => ({ ...row, revenue: revenuePesos(row.revenue) })),
     refunds: refundRows.map((row) => ({ ...row, revenue: revenuePesos(row.revenue) })),
+    discounts: discountRows
+      .map((row) => ({ ...row, credit: pesos(orderCredits.get(row.registration.id) ?? 0) }))
+      .sort((a, b) => a.at.localeCompare(b.at)),
     totals: {
       gross: pesos(gross),
       paidOnOrders: pesos(paidOnOrders),

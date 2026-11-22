@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Aperture, FolderSearch, Pencil, Plus, Save } from 'lucide-react';
+import { Modal } from '../../components/common/Modal';
 import { RecordActionButton, recordActionGroup } from '../../components/common/RecordActionButton';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
@@ -20,32 +21,36 @@ export const CameraSettings: React.FC = () => {
   const { toast } = useToast();
   const { data: stations, refresh } = useWorkflowData<CameraStatus[]>('/camera');
   const [form, setForm] = useState<CameraConfig>(blank);
+  // Editing has its own copy (in a popup), so the "Add Camera" form stays ready.
+  const [editForm, setEditForm] = useState<CameraConfig>(blank);
   const [editingId, setEditingId] = useState('');
   const [saving, setSaving] = useState(false);
-  const [picking, setPicking] = useState(false);
+  // Which form the folder picker fills.
+  const [picking, setPicking] = useState<'add' | 'edit' | null>(null);
   const [deleting, setDeleting] = useState<CameraStatus | null>(null);
   const isAdmin = user?.role === 'admin';
 
   const set = <K extends keyof CameraConfig>(key: K, value: CameraConfig[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const setEdit = <K extends keyof CameraConfig>(key: K, value: CameraConfig[K]) => setEditForm((current) => ({ ...current, [key]: value }));
 
   const edit = (station: CameraStatus) => {
     setEditingId(station.id);
-    setForm({
+    setEditForm({
       name: station.name, watch_folder: station.watchFolder, enabled: station.enabled,
       include_subfolders: station.includeSubfolders, import_raw: station.importRaw,
     });
   };
-  const reset = () => { setEditingId(''); setForm(blank); };
+  const closeEdit = () => setEditingId('');
 
-  const save = async (event: React.FormEvent) => {
+  const save = async (event: React.FormEvent, id = '') => {
     event.preventDefault();
     setSaving(true);
     try {
       const cameras = pb.collection('camera_stations');
-      if (editingId) await cameras.update(editingId, form);
+      if (id) await cameras.update(id, editForm);
       else await cameras.create(form);
-      toast.success(editingId ? 'Camera settings saved.' : `Camera "${form.name.trim()}" added.`);
-      reset();
+      toast.success(id ? 'Camera settings saved.' : `Camera "${form.name.trim()}" added.`);
+      if (id) closeEdit(); else setForm(blank);
       refresh();
     } catch (err) {
       toast.error(workflowError(err));
@@ -59,7 +64,7 @@ export const CameraSettings: React.FC = () => {
     try {
       await pb.collection('camera_stations').delete(deleting.id);
       toast.success(`Camera "${deleting.name}" removed.`);
-      if (editingId === deleting.id) reset();
+      if (editingId === deleting.id) closeEdit();
       refresh();
     } catch (err) {
       toast.error(workflowError(err));
@@ -67,64 +72,66 @@ export const CameraSettings: React.FC = () => {
     }
   };
 
+  /** The camera fields, shared by the Add form and the Edit popup. */
+  const fields = (values: CameraConfig, update: typeof set, prefix: string) => (
+    <>
+            <div>
+              <label htmlFor={`${prefix}-name`} className={label}>Camera Name <span className="text-red-600">*</span></label>
+              <input id={`${prefix}-name`} required maxLength={60} placeholder="Booth 1 — Canon R6" value={values.name}
+                onChange={(event) => update('name', event.target.value)} className={`${input} font-semibold`} />
+            </div>
+
+            <div>
+              <label htmlFor={`${prefix}-folder`} className={label}>Camera Output Folder (on the server PC) <span className="text-red-600">*</span></label>
+              <div className="flex gap-2">
+                <input id={`${prefix}-folder`} required placeholder="C:\StudioFlow_Incoming\Camera1" value={values.watch_folder}
+                  onChange={(event) => update('watch_folder', event.target.value)} className={`${input} font-mono`} />
+                <button type="button" onClick={() => setPicking(prefix === 'camera' ? 'add' : 'edit')}
+                  className="btn-tactile shrink-0 inline-flex items-center gap-1.5 px-3.5 bg-obsidian text-gold text-[11px] font-black uppercase tracking-wider cursor-pointer">
+                  <FolderSearch className="w-4 h-4" /> Browse
+                </button>
+              </div>
+              <p className="mt-1.5 text-[11px] text-neutral-500">
+                Set this same folder as the save/output folder in the camera's tethering or transfer software.
+              </p>
+            </div>
+
+            <fieldset className="space-y-2.5">
+              <legend className={label}>Options</legend>
+              <Toggle checked={values.enabled} onChange={(value) => update('enabled', value)}
+                title="Camera is on" hint="Turn off to pause importing from this folder." />
+              <Toggle checked={values.include_subfolders} onChange={(value) => update('include_subfolders', value)}
+                title="Look inside subfolders" hint="For software that saves into dated folders (e.g. EOS Utility, card readers)." />
+              <Toggle checked={values.import_raw} onChange={(value) => update('import_raw', value)}
+                title="Also import RAW files" hint="CR2, CR3, NEF, ARW, RAF, DNG… go to the client's RAW folder. The chooser only shows JPEG/PNG." />
+            </fieldset>
+    </>
+  );
+  const editing = editingId ? stations?.find((station) => station.id === editingId) : undefined;
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 animate-enter">
       <div className="space-y-6">
         <form onSubmit={save} className="bg-panel border-2 border-line shadow-lux p-6 space-y-4">
           <div className="flex items-center gap-3 pb-3 border-b-2 border-line">
             <div className="w-8 h-8 bg-obsidian text-gold flex items-center justify-center shrink-0">
-              {editingId ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              <Plus className="w-4 h-4" />
             </div>
             <div>
               <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink m-0">
-                {editingId ? 'Edit Camera' : 'Add Camera'}
+                Add Camera
               </h3>
               <p className="text-[11px] text-neutral-500">The folder the system watches for new photos.</p>
             </div>
           </div>
 
-          <div>
-            <label htmlFor="camera-name" className={label}>Camera Name <span className="text-red-600">*</span></label>
-            <input id="camera-name" required maxLength={60} placeholder="Booth 1 — Canon R6" value={form.name}
-              onChange={(event) => set('name', event.target.value)} className={`${input} font-semibold`} />
-          </div>
-
-          <div>
-            <label htmlFor="camera-folder" className={label}>Camera Output Folder (on the server PC) <span className="text-red-600">*</span></label>
-            <div className="flex gap-2">
-              <input id="camera-folder" required placeholder="C:\StudioFlow_Incoming\Camera1" value={form.watch_folder}
-                onChange={(event) => set('watch_folder', event.target.value)} className={`${input} font-mono`} />
-              <button type="button" onClick={() => setPicking(true)}
-                className="btn-tactile shrink-0 inline-flex items-center gap-1.5 px-3.5 bg-obsidian text-gold text-[11px] font-black uppercase tracking-wider cursor-pointer">
-                <FolderSearch className="w-4 h-4" /> Browse
-              </button>
-            </div>
-            <p className="mt-1.5 text-[11px] text-neutral-500">
-              Set this same folder as the save/output folder in the camera's tethering or transfer software.
-            </p>
-          </div>
-
-          <fieldset className="space-y-2.5">
-            <legend className={label}>Options</legend>
-            <Toggle checked={form.enabled} onChange={(value) => set('enabled', value)}
-              title="Camera is on" hint="Turn off to pause importing from this folder." />
-            <Toggle checked={form.include_subfolders} onChange={(value) => set('include_subfolders', value)}
-              title="Look inside subfolders" hint="For software that saves into dated folders (e.g. EOS Utility, card readers)." />
-            <Toggle checked={form.import_raw} onChange={(value) => set('import_raw', value)}
-              title="Also import RAW files" hint="CR2, CR3, NEF, ARW, RAF, DNG… go to the client's RAW folder. The chooser only shows JPEG/PNG." />
-          </fieldset>
+          {fields(form, set, 'camera')}
 
           <div className="flex gap-2 pt-2">
             <button type="submit" disabled={saving}
               className="btn-tactile flex-1 min-h-[46px] inline-flex items-center justify-center gap-2 bg-gold text-on-gold text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50">
-              <Save className="w-4 h-4" /> {saving ? 'Saving…' : editingId ? 'Save Changes' : 'Add Camera'}
+              <Plus className="w-4 h-4" /> {saving && !editingId ? 'Saving…' : 'Add Camera'}
             </button>
-            {editingId && (
-              <button type="button" onClick={reset}
-                className="btn-tactile min-h-[46px] px-4 border border-neutral-400 text-ink text-xs font-black uppercase tracking-wider cursor-pointer">
-                Cancel
-              </button>
-            )}
           </div>
         </form>
 
@@ -193,11 +200,28 @@ export const CameraSettings: React.FC = () => {
         )}
       </div>
 
+      {editingId && (
+        <Modal title="Edit camera" subtitle={editing?.name ?? editForm.name} icon={Pencil} size="md" busy={saving} onClose={closeEdit}>
+          <form onSubmit={(event) => void save(event, editingId)} className="space-y-4">
+            {fields(editForm, setEdit, 'edit-camera')}
+            <div className="flex justify-end gap-2 pt-3 border-t border-line">
+              <button type="button" disabled={saving} onClick={closeEdit}
+                className="btn-tactile min-h-[46px] px-4 border border-neutral-400 text-ink text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={saving}
+                className="btn-tactile min-h-[46px] px-5 inline-flex items-center justify-center gap-2 bg-gold text-on-gold text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50">
+                <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
       {picking && (
         <FolderPickerModal
-          initialPath={form.watch_folder}
-          onClose={() => setPicking(false)}
-          onPick={(path) => { set('watch_folder', path); setPicking(false); }}
+          initialPath={picking === 'edit' ? editForm.watch_folder : form.watch_folder}
+          onClose={() => setPicking(null)}
+          onPick={(path) => { (picking === 'edit' ? setEdit : set)('watch_folder', path); setPicking(null); }}
         />
       )}
       <ConfirmModal

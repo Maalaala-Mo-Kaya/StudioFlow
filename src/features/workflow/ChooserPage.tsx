@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ImageOff, Maximize2, X } from 'lucide-react';
+import { Check, ImageOff, Images, Maximize2, X } from 'lucide-react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
 import { studioDate } from '../../utils/studioDay';
+import { clampDay, useStudioCalendar } from '../../hooks/useStudioCalendar';
 import { DataTable, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
 import { TablePagination } from '../../components/common/TablePagination';
-import { defaultTableExpansion, type TableExpansion } from '../../components/common/dataTableModel';
+import { Modal } from '../../components/common/Modal';
 import { StationTabs } from './StationTabs';
 import { stationButton, stationCard, StationLayout, StationStudentDetails, type StationStudent } from './StationLayout';
 
@@ -66,13 +67,15 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
   const [filter, setFilter] = useState('');
   // Opens on the clients still to choose: the ones the chooser works through.
   const [done, setDone] = useState<Done>('not_selected');
-  const [expansions, setExpansions] = useState<Partial<Record<Done, TableExpansion>>>({});
+  // The client whose details are open in a popup (by id, so it shows the latest status).
+  const [openId, setOpenId] = useState<string | null>(null);
   const page = pages[done] ?? 1;
   const [school, setSchool] = useState('');
   const [course, setCourse] = useState('');
   // Date created (studio day, Manila): all, today, yesterday or a picked date.
   const [dayMode, setDayMode] = useState<'' | 'today' | 'yesterday' | 'pick'>('');
   const [pickedDay, setPickedDay] = useState(() => studioDate());
+  const { start: firstDay } = useStudioCalendar();
   const day = dayMode === 'today' ? studioDate() : dayMode === 'yesterday' ? studioDate(1) : dayMode === 'pick' ? pickedDay : '';
   const [opening, setOpening] = useState(false);
   const [gallery, setGallery] = useState<Gallery>();
@@ -126,7 +129,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
   return (
     <StationLayout title="Photo Chooser" badge="Photo Selection" liveLabel="Live Status"
       description="Manage client photo selections and completed selections." refresh={refresh} embedded={embedded}>
-      {gallery ? <PhotoGallery key={gallery.student.id} initial={gallery} close={() => { setGallery(undefined); refresh(); }} /> : (
+      {gallery ? <PhotoGallery key={gallery.student.id} initial={gallery} close={() => { setGallery(undefined); setOpenId(null); refresh(); }} /> : (
         <StationTabs label="Photo selection views" active={done} onChange={setDone} tabs={[
           { id: 'not_selected', label: 'Not Yet Selected', count: data?.counts?.notSelected },
           { id: 'selected', label: 'Already Selected', count: data?.counts?.selected },
@@ -140,22 +143,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
             emptyMessage={done === 'not_selected' ? 'No photographed clients are waiting for photo selection.'
               : done === 'selected' ? 'No completed photo selections.' : 'No photographed clients found.'}
             headerClassName="uppercase tracking-wide" tableClassName="min-w-[720px]"
-            expansion={{ value: expansions[done] ?? defaultTableExpansion,
-              onChange: (next) => setExpansions((current) => ({ ...current, [done]: next })) }}
-            renderExpanded={(student) => (
-              <div className="space-y-3 text-sm">
-                <StationStudentDetails student={student} />
-                <dl className="grid gap-2 sm:grid-cols-2">
-                  <div><dt className="font-bold">Photography</dt><dd>{student.photographyComplete ? 'Completed' : 'Pending'}</dd></div>
-                  <div><dt className="font-bold">Photo selection</dt><dd>{selectionStates[student.selectionState]}</dd></div>
-                  <div><dt className="font-bold">Client repository</dt><dd>{availability[student.availability]}</dd></div>
-                  {(student.availability === 'available' || student.availability === 'empty') && (
-                    <div><dt className="font-bold">Selection progress</dt><dd>{student.selectedCount} selected · {student.unselectedCount} unselected</dd></div>
-                  )}
-                </dl>
-                {selectionAction(student)}
-              </div>
-            )}
+            onRowClick={(student) => setOpenId(student.id)}
             toolbar={
               <div className="space-y-2 p-2">
                 {/* Search + school / course (advanced filter) */}
@@ -194,8 +182,8 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
                         <option value="pick">Pick a date…</option>
                       </select>
                       {dayMode === 'pick' && (
-                        <input type="date" aria-label="Date created" value={pickedDay} max={studioDate()}
-                          onChange={(event) => { if (event.target.value) change(setPickedDay)(event.target.value); }}
+                        <input type="date" aria-label="Date created" value={pickedDay} min={firstDay || undefined} max={studioDate()}
+                          onChange={(event) => { if (event.target.value) change(setPickedDay)(clampDay(event.target.value, firstDay, studioDate())); }}
                           className={tableFilterControl} />
                       )}
                     </div>
@@ -222,8 +210,28 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             }
           />
+            {(() => {
+            const student = openId ? data?.items?.find((item) => item.id === openId) : undefined;
+            return student && (
+              <Modal title={student.name || 'Client'} subtitle={<>Photo selection · {selectionStates[student.selectionState]}</>}
+                icon={Images} onClose={() => setOpenId(null)}>
+                <div className="space-y-3 text-sm">
+                <StationStudentDetails student={student} />
+                <dl className="grid gap-2 sm:grid-cols-2">
+                  <div><dt className="font-bold">Photography</dt><dd>{student.photographyComplete ? 'Completed' : 'Pending'}</dd></div>
+                  <div><dt className="font-bold">Photo selection</dt><dd>{selectionStates[student.selectionState]}</dd></div>
+                  <div><dt className="font-bold">Client repository</dt><dd>{availability[student.availability]}</dd></div>
+                  {(student.availability === 'available' || student.availability === 'empty') && (
+                    <div><dt className="font-bold">Selection progress</dt><dd>{student.selectedCount} selected · {student.unselectedCount} unselected</dd></div>
+                  )}
+                </dl>
+                {selectionAction(student)}
+              </div>
+              </Modal>
+            );
+          })()}
           {(page > 1 || data?.hasMore) && (
-            <TablePagination label="Photo Chooser pagination" pageLabel={`Page ${page}`}
+          <TablePagination label="Photo Chooser pagination" pageLabel={`Page ${page}`}
               previous={page > 1 ? () => setPages({ ...pages, [done]: page - 1 }) : undefined}
               next={data?.hasMore ? () => setPages({ ...pages, [done]: page + 1 }) : undefined} />
           )}

@@ -67,6 +67,8 @@ function changes(e, original, subtotal, itemsChanged, record = e.record, body = 
     const { studio, mua } = values;
     discount = studio || mua ? {
       studio: cents(studio), mua: cents(mua), percentage: percentage ?? (subtotal ? (cents(studio) + cents(mua)) * 100 / subtotal : 0),
+      // A peso amount (not a rate): prints and exports say "Fixed amount" instead of a worked-out percentage.
+      ...(percentage === undefined ? { fixed: true } : {}),
       reason: readReason(values.reason), by: actor(), byId: e.auth?.id || "", at: new Date().toISOString(),
     } : null;
   }

@@ -13,7 +13,7 @@ onRecordCreateRequest((e) => {
     photo_edit_until: 0, photo_revision: 0,
     photo_selection: null, photo_pending: null, photo_last_request: null,
     refunded_amount: 0, cancelled_at: "", cancelled_by: "", cancel_reason: "", status_before_cancel: "",
-    restored_at: "", restored_by: "", deleted_by_id: "", had_discount_credit: false,
+    restored_at: "", restored_by: "", deleted_by_id: "", had_discount_credit: false, order_changes: null,
   })) e.record.set(field, value);
   // Other fees change the price: only an admin sets them (the kiosk is public, so it can't).
   if (!e.hasSuperuserAuth() && e.auth?.getString("role") !== "admin") e.record.set("other_fees", 0);
@@ -91,12 +91,17 @@ onRecordUpdateRequest((e) => {
     throw new BadRequestError("Use the Cancel or Restore button so the reason and the person are recorded.");
   }
   if (role === "photographer" || role === "cashier") {
+    // The cashier may also add add-ons at the counter (registration_billing.pb.js: additions only).
+    // registration_billing.pb.js's hook has already run by now and re-priced the order, so the fields it
+    // computes (never taken from the request) and its production reset (status) are expected then.
+    const addsAtCounter = role === "cashier" && Object.hasOwn(body, "add_ons");
     const permitted = role === "photographer" ? ["status", "photo_status"]
-      : ["status", "framing_status", "claimed_by", "released_at"];
+      : ["status", "framing_status", "claimed_by", "released_at", "add_ons",
+        ...(addsAtCounter ? ["total_amount", "balance", "payment_status", "revenue_terms", "revenue_review", "revenue_discount", "order_changes"] : [])];
     if (e.record.collection().fields.fieldNames().some((field) => !permitted.includes(field) && changed(field))) {
       throw new ForbiddenError("This station cannot edit registration details.");
     }
-    if (changed("status")) {
+    if (changed("status") && !(addsAtCounter && !Object.hasOwn(body, "status"))) {
       const current = before.getString("status");
       const next = e.record.getString("status");
       if (role === "photographer" && !((current === "paid" && ["shooting", "done_shooting"].includes(next))

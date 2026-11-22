@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Building, GraduationCap } from 'lucide-react';
+import { BookOpen, Building, GraduationCap } from 'lucide-react';
 import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
+import { Modal } from '../../../components/common/Modal';
 import type { Organization, Level, Course, SchoolCourse, AssignSchoolCourse } from '../../../types';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
@@ -321,9 +322,52 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                       : 'bg-neutral-100 border-neutral-300 opacity-60'
                   }`}
                 >
-                  {editingOrgId === o.id ? (
-                    <div className="space-y-2 bg-canvas p-2.5 border border-line text-ink">
-                      <div className="text-[10px] font-black uppercase text-gold-soft">Editing School</div>
+                    <div className="flex flex-wrap justify-between items-center gap-2">
+                      <button
+                        type="button"
+                        aria-pressed={selectedSchool?.id === o.id}
+                        onClick={() => {
+                          if (o.id === selectedSchool?.id) return;
+                          setSelectedSchoolId(o.id);
+                          setPreferredLevelId('');
+                          setEditingCourseId(null);
+                        }}
+                        className="min-w-0 text-left cursor-pointer before:absolute before:inset-0"
+                      >
+                        <span className="font-bold uppercase block text-sm wrap-break-word">{o.name}</span>
+                        <span className={`font-mono text-[10px] px-1.5 py-0.5 uppercase inline-block mt-1 ${
+                          selectedSchool?.id === o.id ? 'bg-gold text-on-gold' : 'bg-obsidian text-gold'
+                        }`}>
+                          {o.code || 'ORG'}
+                        </span>
+                        {o.makeup_look_off && (
+                          <span className="ml-1.5 font-mono text-[9px] px-1.5 py-0.5 uppercase inline-block border border-neutral-400 text-neutral-500"
+                            title="The kiosk does not ask this school's students for a preferred makeup look">
+                            No look
+                          </span>
+                        )}
+                      </button>
+                      <div className="relative ml-auto flex flex-wrap items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onToggleOrgActive(o.id, o.is_active !== false)}
+                          className={`px-2 py-0.5 text-[10px] font-bold uppercase border cursor-pointer ${
+                            o.is_active !== false
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-400'
+                              : 'bg-neutral-200 text-neutral-600 border-neutral-400'
+                          }`}
+                        >
+                          {o.is_active !== false ? 'Active' : 'Archived'}
+                        </button>
+                        <span className={recordActionGroup}>
+                          <RecordActionButton variant="edit" recordName={o.name} onClick={() => startEditOrg(o)} />
+                          <RecordActionButton variant="delete" recordName={o.name} onClick={() => promptDeleteOrg(o)} />
+                        </span>
+                      </div>
+                    </div>
+                  {editingOrgId === o.id && (
+                    <Modal title="Edit school" subtitle={o.name} icon={Building} size="md" onClose={() => setEditingOrgId(null)}>
+                    <div className="space-y-3 text-ink">
                       <div>
                         <label className="block text-[9px] font-black uppercase text-neutral-600 mb-0.5">
                           School Name <span className="text-red-500">*</span>
@@ -377,50 +421,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                         </button>
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex flex-wrap justify-between items-center gap-2">
-                      <button
-                        type="button"
-                        aria-pressed={selectedSchool?.id === o.id}
-                        onClick={() => {
-                          if (o.id === selectedSchool?.id) return;
-                          setSelectedSchoolId(o.id);
-                          setPreferredLevelId('');
-                          setEditingCourseId(null);
-                        }}
-                        className="min-w-0 text-left cursor-pointer before:absolute before:inset-0"
-                      >
-                        <span className="font-bold uppercase block text-sm wrap-break-word">{o.name}</span>
-                        <span className={`font-mono text-[10px] px-1.5 py-0.5 uppercase inline-block mt-1 ${
-                          selectedSchool?.id === o.id ? 'bg-gold text-on-gold' : 'bg-obsidian text-gold'
-                        }`}>
-                          {o.code || 'ORG'}
-                        </span>
-                        {o.makeup_look_off && (
-                          <span className="ml-1.5 font-mono text-[9px] px-1.5 py-0.5 uppercase inline-block border border-neutral-400 text-neutral-500"
-                            title="The kiosk does not ask this school's students for a preferred makeup look">
-                            No look
-                          </span>
-                        )}
-                      </button>
-                      <div className="relative ml-auto flex flex-wrap items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onToggleOrgActive(o.id, o.is_active !== false)}
-                          className={`px-2 py-0.5 text-[10px] font-bold uppercase border cursor-pointer ${
-                            o.is_active !== false
-                              ? 'bg-emerald-100 text-emerald-800 border-emerald-400'
-                              : 'bg-neutral-200 text-neutral-600 border-neutral-400'
-                          }`}
-                        >
-                          {o.is_active !== false ? 'Active' : 'Archived'}
-                        </button>
-                        <span className={recordActionGroup}>
-                          <RecordActionButton variant="edit" recordName={o.name} onClick={() => startEditOrg(o)} />
-                          <RecordActionButton variant="delete" recordName={o.name} onClick={() => promptDeleteOrg(o)} />
-                        </span>
-                      </div>
-                    </div>
+                    </Modal>
                   )}
                 </div>
               ))}
@@ -576,9 +577,24 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                             key={c.id}
                             className="p-2 bg-panel border border-neutral-300 flex flex-wrap justify-between items-center gap-2"
                           >
-                            {editingCourseId === c.id ? (
-                              <div className="w-full space-y-2 p-1 bg-canvas border border-line">
-                                <div className="text-[10px] font-black uppercase text-gold-soft">Editing Course</div>
+                              <>
+                                <div>
+                                  <span className="font-bold text-ink uppercase">{c.name}</span>
+                                  {c.code && (
+                                    <span className="font-mono font-black text-gold-soft ml-2 text-[10px]">
+                                      ({c.code})
+                                    </span>
+                                  )}
+                                </div>
+                                <div className={`${recordActionGroup} ml-auto`}>
+                                  <RecordActionButton variant="edit" recordName={c.name} onClick={() => startEditCourse(c)} />
+                                  <RecordActionButton variant="delete" recordName={`${c.name} from this school`}
+                                    onClick={() => promptRemoveCourse(c, assignment.id)} />
+                                </div>
+                              </>
+                            {editingCourseId === c.id && (
+                              <Modal title="Edit course" subtitle={c.name} icon={BookOpen} size="md" onClose={() => setEditingCourseId(null)}>
+                              <div className="w-full space-y-3">
                                 <p className="text-[10px] text-neutral-600">Changes update the shared course for every school that uses it.</p>
                                 <div>
                                   <label className="block text-[9px] font-black uppercase text-neutral-600 mb-0.5">
@@ -619,22 +635,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                                   </button>
                                 </div>
                               </div>
-                            ) : (
-                              <>
-                                <div>
-                                  <span className="font-bold text-ink uppercase">{c.name}</span>
-                                  {c.code && (
-                                    <span className="font-mono font-black text-gold-soft ml-2 text-[10px]">
-                                      ({c.code})
-                                    </span>
-                                  )}
-                                </div>
-                                <div className={`${recordActionGroup} ml-auto`}>
-                                  <RecordActionButton variant="edit" recordName={c.name} onClick={() => startEditCourse(c)} />
-                                  <RecordActionButton variant="delete" recordName={`${c.name} from this school`}
-                                    onClick={() => promptRemoveCourse(c, assignment.id)} />
-                                </div>
-                              </>
+                              </Modal>
                             )}
                           </div>
                         ))}

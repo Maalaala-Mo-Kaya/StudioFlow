@@ -4,7 +4,7 @@ import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import type {
   Organization, Level, Course, SchoolCourse, AssignSchoolCourse, Package, AddOn,
-  Registration, MasterListItem, StaffUser, StaffRole, RevenueCategory,
+  Registration, MasterListItem, CatalogItem, CatalogItemInput, ItemPackage, PackageStructure, StaffUser, StaffRole, RevenueCategory,
   ProductionStatus, ProductionUpdateResult, PhotoStatus, PaymentRecord, RefundRecord,
 } from '../../types';
 import { parseRosterCsv, exportRegistrationsToCsv } from '../../utils/csv';
@@ -14,9 +14,27 @@ import { refreshClientDocuments } from '../receipts/clientDocuments';
 import type { DateRange, OverallScope, StudentExcelData } from './studentExcel';
 import type { RegistrationEdits } from './components/EditStudentModal';
 import type { DraftAddOn, DraftPackage } from './catalogImport/catalogParser';
+import type { PhotoDraft } from '../../utils/packagePhotos';
+import type { CatalogBackup } from './catalogBackup';
 import { saveCatalogDrafts } from './catalogImport/saveCatalog';
 
 export type PackageKind = 'school' | 'walkin' | 'both';
+
+/** What the package builder (③) saves. */
+export interface PackageBuilderData {
+  code: string;
+  name: string;
+  amount: number;
+  photo_selection_limit: number;
+  requires_mua: boolean;
+  client_kind: PackageKind;
+  revenue_category: RevenueCategory | '';
+  /** The kiosk line under the price; empty shows "with <frame>". */
+  tagline: string;
+  structure: PackageStructure;
+  /** Photos in the order to show them (the first is the cover); new ones are uploaded on save. */
+  photos: PhotoDraft[];
+}
 
 /** Body of POST /api/studioflow/refunds. clientKey makes a retried request return the same refund. */
 export interface RefundRequest {
@@ -27,7 +45,7 @@ export interface RefundRequest {
   clientKey: string;
 }
 
-export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students' | 'workflow' | 'camera' | 'clients' | 'catalog-import';
+export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students' | 'workflow' | 'camera' | 'clients' | 'catalog-import' | 'ledger';
 
 const excelUnavailable = 'The connected PocketBase server did not return an Excel report. Restart it with the latest StudioFlow hooks and migrations, then try again.';
 
@@ -55,15 +73,9 @@ export function useAdminData() {
   const [newOrgName, setNewOrgName] = useState('');
   const [newOrgCode, setNewOrgCode] = useState('');
 
-  const [newPkgCode, setNewPkgCode] = useState('');
-  const [newPkgName, setNewPkgName] = useState('');
-  const [newPkgAmount, setNewPkgAmount] = useState<number>(1000);
-  const [newPkgPhotoLimit, setNewPkgPhotoLimit] = useState(0);
-  const [newPkgRequiresMua, setNewPkgRequiresMua] = useState(false);
-  const [newPkgKind, setNewPkgKind] = useState<PackageKind>('school');
-  const [newPkgRevenue, setNewPkgRevenue] = useState<RevenueCategory>('studio');
-  const [newPkgInclusions, setNewPkgInclusions] = useState('');
-  const [newPkgFreebies, setNewPkgFreebies] = useState<string[]>([]);
+  // The package builder: ① single items and ② saved poses (item_packages; admin only).
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [itemPackages, setItemPackages] = useState<ItemPackage[]>([]);
 
   // Roster CSV Upload State
   const [csvText, setCsvText] = useState('');
@@ -107,6 +119,12 @@ export function useAdminData() {
       setCourseCatalogStatus('ready');
       setPackages(pkgsRes);
       setAddOns(addonsRes);
+      const [itemsRes, setsRes] = await Promise.all([
+        pb.collection('catalog_items').getFullList<CatalogItem>({ sort: 'name', requestKey: null }).catch(() => []),
+        pb.collection('item_packages').getFullList<ItemPackage>({ sort: 'name', requestKey: null }).catch(() => []),
+      ]);
+      setCatalogItems(itemsRes);
+      setItemPackages(setsRes);
       setMasterList(rosterRes);
       setStaffAccounts(usersRes);
       setPayments(paymentsRes);
@@ -171,43 +189,98 @@ export function useAdminData() {
     }
   };
 
-  // Add Package
-  const handleAddPackage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPkgName.trim() || !newPkgCode.trim()) return;
+  /** ③ Saves a package from the builder: its details plus the structure the server renders. */
+  const handleSavePackage = async (id: string | null, data: PackageBuilderData) => {
+    const body = {
+      code: data.code.trim().toUpperCase(),
+      name: data.name.trim(),
+      amount: Number(data.amount),
+      photo_selection_limit: Math.max(0, Math.floor(data.photo_selection_limit || 0)),
+      requires_mua: data.requires_mua,
+      client_kind: data.client_kind,
+      revenue_category: data.revenue_category,
+      tagline: data.tagline.trim(),
+      structure: data.structure,
+    };
+    const kept = data.photos.flatMap((photo) => (photo.kind === 'saved' ? [photo.name] : []));
+    // Removed and reordered saved photos go with the details (an update keeps only the names sent).
+    let saved = id
+      ? await pb.collection('packages').update<Package>(id, { ...body, photos: kept })
+      : await pb.collection('packages').create<Package>({ ...body, is_active: true });
     try {
-      const inclusions = newPkgInclusions
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      await pb.collection('packages').create({
-        code: newPkgCode.trim().toUpperCase(),
-        name: newPkgName.trim(),
-        amount: Number(newPkgAmount),
-        photo_selection_limit: newPkgPhotoLimit,
-        requires_mua: newPkgRequiresMua,
-        client_kind: newPkgKind,
-        revenue_category: newPkgRevenue,
-        inclusions: JSON.stringify(inclusions),
-        freebies: newPkgFreebies.map((item) => item.trim()).filter(Boolean),
-        is_active: true,
-      });
-
-      setNewPkgCode('');
-      setNewPkgName('');
-      setNewPkgInclusions('');
-      setNewPkgFreebies([]);
-      setNewPkgPhotoLimit(0);
-      setNewPkgRequiresMua(false);
-      setNewPkgRevenue('studio');
-      toast.success('Package created.');
-      loadAllData();
+      const added = data.photos.flatMap((photo) => (photo.kind === 'new' ? [photo] : []));
+      if (added.length) {
+        const form = new FormData();
+        for (const photo of added) form.append('photos+', photo.file);
+        const before = new Set(saved.photos ?? []);
+        saved = await pb.collection('packages').update<Package>(saved.id, form);
+        // New files are appended in upload order; put every photo where the admin placed it.
+        const uploaded = (saved.photos ?? []).filter((name) => !before.has(name));
+        let next = 0;
+        const order = data.photos.map((photo) => (photo.kind === 'saved' ? photo.name : uploaded[next++])).filter(Boolean);
+        if (order.join('|') !== (saved.photos ?? []).join('|')) {
+          await pb.collection('packages').update(saved.id, { photos: order });
+        }
+      }
     } catch (err) {
-      console.error('Failed to add package:', err);
-      // The server explains refusals, such as a package code that is already used.
-      toast.error(err instanceof Error && err.message ? err.message : 'Failed to create the package.');
+      await loadAllData();
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      throw new Error(`The package was saved, but its photos could not be uploaded (${reason}). Open it again and add them.`);
     }
+    await loadAllData();
+  };
+
+  /** ① Single items. */
+  /**
+   * Saves a single item, then reads it back from the database and checks that what was sent is
+   * what is stored (name, kind, price, client type, kiosk switch). An item sold at the kiosk is
+   * sold through its linked add-on, so that add-on's price and switch are checked too. Throws a
+   * clear error when anything differs; returns the item as stored.
+   */
+  const handleSaveCatalogItem = async (id: string | null, data: CatalogItemInput) => {
+    const written = id
+      ? await pb.collection('catalog_items').update<CatalogItem>(id, data)
+      : await pb.collection('catalog_items').create<CatalogItem>({ amount: 0, is_active: false, ...data });
+    try {
+      const stored = await pb.collection('catalog_items').getOne<CatalogItem>(written.id, { requestKey: null });
+      const cents = (value: unknown) => Math.round(Number(value || 0) * 100);
+      const peso = (value: unknown) => `₱${(cents(value) / 100).toFixed(2)}`;
+      const problems: string[] = [];
+      if (data.name !== undefined && stored.name !== data.name.trim().replace(/\s+/g, ' ')) problems.push(`the name is "${stored.name}"`);
+      if (data.category !== undefined && stored.category !== data.category) problems.push(`the kind is ${stored.category}`);
+      if (data.amount !== undefined && cents(stored.amount) !== cents(data.amount)) problems.push(`the price is ${peso(stored.amount)}, not ${peso(data.amount)}`);
+      if (data.client_kind !== undefined && (stored.client_kind || 'both') !== data.client_kind) problems.push(`it is offered to ${stored.client_kind || 'both'}`);
+      if (data.is_active !== undefined && !!stored.is_active !== data.is_active) problems.push(stored.is_active ? 'it is still sold at the kiosk' : 'it is not sold at the kiosk');
+      // The kiosk sells it as its linked add-on: that is the price clients are charged.
+      const linked = await pb.collection('add_ons').getFirstListItem<AddOn>(pb.filter('catalog_item = {:id}', { id: stored.id }), { requestKey: null })
+        .catch(() => null);
+      if (stored.is_active && !linked) problems.push('its kiosk listing is missing');
+      if (linked && cents(linked.amount) !== cents(stored.amount)) problems.push(`the kiosk charges ${peso(linked.amount)} instead of ${peso(stored.amount)}`);
+      if (linked && !!linked.is_active !== !!stored.is_active) problems.push(linked.is_active ? 'the kiosk still lists it' : 'the kiosk does not list it');
+      if (problems.length) {
+        throw new Error(`"${stored.name}" was sent, but the database shows that ${problems.join('; ')}. Reload and check it again.`);
+      }
+      return stored;
+    } finally {
+      await loadAllData();
+    }
+  };
+  const handleDeleteCatalogItem = async (id: string) => {
+    await pb.collection('catalog_items').delete(id);
+    await loadAllData();
+  };
+
+  /** ② Saved poses (templates): single items with quantities. */
+  const handleSaveItemPackage = async (id: string | null, data: { name: string; items: ItemPackage['items'] }) => {
+    const saved = id
+      ? await pb.collection('item_packages').update<ItemPackage>(id, data)
+      : await pb.collection('item_packages').create<ItemPackage>({ ...data, is_active: true });
+    await loadAllData();
+    return saved;
+  };
+  const handleDeleteItemPackage = async (id: string) => {
+    await pb.collection('item_packages').delete(id);
+    await loadAllData();
   };
 
   // Import Roster
@@ -437,28 +510,6 @@ export function useAdminData() {
   };
 
   // --- Package & Add-on Mutations (T020) ---
-  const handleUpdatePackage = async (
-    id: string,
-    data: { name: string; code: string; amount: number; inclusions: string[]; freebies: string[]; photo_selection_limit: number; requires_mua: boolean; client_kind: PackageKind; revenue_category: RevenueCategory | '' }
-  ) => {
-    try {
-      await pb.collection('packages').update(id, {
-        name: data.name.trim(),
-        code: data.code.trim().toUpperCase(),
-        amount: Number(data.amount),
-        inclusions: JSON.stringify(data.inclusions),
-        freebies: data.freebies.map((item) => item.trim()).filter(Boolean),
-        photo_selection_limit: data.photo_selection_limit,
-        requires_mua: data.requires_mua,
-        client_kind: data.client_kind,
-        revenue_category: data.revenue_category,
-      });
-      loadAllData();
-    } catch (err) {
-      console.error('Failed to update package:', err);
-      throw err;
-    }
-  };
 
   const handleTogglePackageActive = async (id: string, current: boolean) => {
     try {
@@ -564,6 +615,16 @@ export function useAdminData() {
     return result;
   };
 
+  /** Restores the catalog copy inside an exported price list (catalogBackup.ts). */
+  const handleRestoreCatalog = async (backup: CatalogBackup, update: boolean, onProgress?: (label: string, fraction: number) => void) => {
+    try {
+      const { restoreCatalog } = await import('./catalogBackup');
+      return await restoreCatalog(pb, backup, update, onProgress);
+    } finally {
+      await loadAllData();
+    }
+  };
+
   // --- Master Roster Mutations (T021, T022) ---
   const handleDeleteMasterListItem = async (id: string) => {
     try {
@@ -598,9 +659,10 @@ export function useAdminData() {
   const refreshDocuments = (registrationId: string) => refreshClientDocuments(registrationId, toast.warning);
 
   const handleUpdateRegistration = async (id: string, data: RegistrationEdits) => {
-    await pb.collection('registrations').update(id, data);
+    const saved = await pb.collection('registrations').update<Registration>(id, data);
     refreshDocuments(id);
     loadAllData();
+    return saved;
   };
 
   // Cancelling keeps the job order and its payment records for the ledger and receipt trail.
@@ -681,25 +743,13 @@ export function useAdminData() {
     setNewOrgCode,
     handleAddOrg,
     // Add Pkg Form
-    newPkgCode,
-    setNewPkgCode,
-    newPkgName,
-    setNewPkgName,
-    newPkgAmount,
-    newPkgPhotoLimit,
-    setNewPkgPhotoLimit,
-    newPkgRequiresMua,
-    newPkgKind,
-    newPkgRevenue,
-    setNewPkgRevenue,
-    setNewPkgKind,
-    setNewPkgRequiresMua,
-    setNewPkgAmount,
-    newPkgInclusions,
-    setNewPkgInclusions,
-    newPkgFreebies,
-    setNewPkgFreebies,
-    handleAddPackage,
+    catalogItems,
+    itemPackages,
+    handleSavePackage,
+    handleSaveCatalogItem,
+    handleDeleteCatalogItem,
+    handleSaveItemPackage,
+    handleDeleteItemPackage,
     // Roster Ingestion
     csvText,
     setCsvText,
@@ -729,7 +779,6 @@ export function useAdminData() {
     handleUpdateCourse,
     handleRemoveCourse,
     // Package & Add-on Mutations
-    handleUpdatePackage,
     handleTogglePackageActive,
     handleDeletePackage,
     handleAddAddOn,
@@ -737,6 +786,7 @@ export function useAdminData() {
     handleToggleAddOnActive,
     handleDeleteAddOn,
     handleImportCatalog,
+    handleRestoreCatalog,
     // Master List Mutations
     handleDeleteMasterListItem,
     handleClearMasterList,

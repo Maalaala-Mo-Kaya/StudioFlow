@@ -3,6 +3,9 @@
 import { ClientResponseError, type default as PocketBase } from 'pocketbase';
 import { lineKey, type DraftAddOn, type DraftPackage } from './catalogParser';
 import { parsePackageInclusions } from '../../../utils/formatters';
+import { cleanOptionGroups, optionGroups } from '../../../utils/packageOptions';
+import { cleanInclusionTree, mergeInclusionTrees, parseInclusionTree } from '../../../utils/inclusions';
+import type { Package, PackageOptionGroup } from '../../../types';
 
 export interface CatalogSaveResult {
   created: number;
@@ -33,6 +36,22 @@ function mergeList(current: string[], extra: string[]): string[] {
 }
 
 /**
+ * The package's option groups plus the draft's: a group with the same name gets the new choices,
+ * a new group is added.
+ */
+function mergeGroups(current: PackageOptionGroup[], extra: PackageOptionGroup[]): PackageOptionGroup[] {
+  const merged = current.map((group) => ({ ...group, choices: [...group.choices] }));
+  for (const group of cleanOptionGroups(extra)) {
+    const same = merged.find((g) => lineKey(g.name) === lineKey(group.name));
+    if (!same) { merged.push(group); continue; }
+    for (const choice of group.choices) {
+      if (!same.choices.some((c) => lineKey(c.label) === lineKey(choice.label))) same.choices.push(choice);
+    }
+  }
+  return merged;
+}
+
+/**
  * Creates each package, then each add-on, one at a time and active, so the kiosk and cashier offer
  * them right away. One item failing does not stop the others; the failures are returned for retry.
  */
@@ -44,10 +63,11 @@ export async function saveCatalogDrafts(pb: PocketBase, packages: DraftPackage[]
     try {
       if (pkg.mergeInto) {
         // Read the package as it is now, so items another admin just added are kept.
-        const current = await pb.collection('packages').getOne(pkg.mergeInto, { requestKey: null });
+        const current = await pb.collection('packages').getOne<Package>(pkg.mergeInto, { requestKey: null });
         await pb.collection('packages').update(pkg.mergeInto, {
-          inclusions: JSON.stringify(mergeList(parsePackageInclusions(current.inclusions), pkg.inclusions)),
+          inclusions: mergeInclusionTrees(parseInclusionTree(current.inclusions), pkg.inclusions),
           freebies: mergeList(parsePackageInclusions(current.freebies), pkg.freebies),
+          option_groups: mergeGroups(optionGroups(current), pkg.optionGroups),
         }, { requestKey: null });
         updated++;
         continue;
@@ -60,8 +80,9 @@ export async function saveCatalogDrafts(pb: PocketBase, packages: DraftPackage[]
         requires_mua: pkg.revenue === 'mua',
         client_kind: pkg.clientKind,
         revenue_category: pkg.revenue,
-        inclusions: JSON.stringify(pkg.inclusions.map((item) => item.trim()).filter(Boolean)),
+        inclusions: cleanInclusionTree(pkg.inclusions),
         freebies: pkg.freebies.map((item) => item.trim()).filter(Boolean),
+        option_groups: cleanOptionGroups(pkg.optionGroups),
         is_active: true,
       }, { requestKey: null });
       created++;

@@ -1,9 +1,21 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import type { StaffRole } from '../../types';
-import { STAFF_PRESETS } from '../../constants/studio';
+import { ROLE_DEFAULT_ROUTE } from '../../constants/studio';
 import { Eye, EyeOff, ArrowRight } from 'lucide-react';
+
+/** What each role's home station is called on screen. */
+const STATION_NAMES: Record<StaffRole, string> = {
+  admin: 'Admin', cashier: 'Cashier', photographer: 'Photo Set', mua: 'Makeup / Grooming', chooser: 'Chooser',
+};
+// The last username signed in on this device, so each station PC opens with its own account filled in.
+const LAST_USERNAME_KEY = 'studioflow-last-username';
+const readLastUsername = () => { try { return localStorage.getItem(LAST_USERNAME_KEY) ?? ''; } catch { return ''; } };
+const saveLastUsername = (name: string) => { try { localStorage.setItem(LAST_USERNAME_KEY, name); } catch { /* private mode */ } };
+
+/** Opens a role's own station (used when the account signed in here is not allowed on this page). */
+const openStation = (role: StaffRole) => { window.location.hash = `#/${ROLE_DEFAULT_ROUTE[role] || 'register'}`; };
 
 interface LoginPageProps {
   onLoginSuccess?: (role: StaffRole) => void;
@@ -19,8 +31,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const { user, login } = useAuth();
   const { toast } = useToast();
 
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(readLastUsername);
   const [password, setPassword] = useState('');
+  const passwordRef = useRef<HTMLInputElement>(null);
+  // With the username remembered, start in the password box.
+  useEffect(() => { if (readLastUsername()) passwordRef.current?.focus(); }, []);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -35,17 +50,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setIsLoading(true);
     try {
       const staffUser = await login(username.trim(), password);
+      saveLastUsername(staffUser.username);
 
+      // Signed in, but this page is for other roles: open the account's own station instead of
+      // leaving it on a sign-in form it can never get past.
       if (
         requiredRoles &&
         staffUser.role !== 'admin' &&
         !requiredRoles.includes(staffUser.role)
       ) {
-        toast.error(
-          `Account "${staffUser.username}" (${staffUser.role.toUpperCase()}) is not authorized for ${
-            targetStationName || 'this station'
-          }.`
+        toast.info(
+          `Signed in as ${staffUser.name}. ${targetStationName || 'This page'} is not for ${staffUser.role} accounts, so here is the ${STATION_NAMES[staffUser.role]} station.`
         );
+        setPassword('');
+        openStation(staffUser.role);
         return;
       }
 
@@ -56,10 +74,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const applyPreset = (u: string) => {
-    setUsername(u);
   };
 
   return (
@@ -89,9 +103,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 Active Session Notice
               </div>
               <p className="mt-1">
-                Signed in as <strong>{user.name}</strong> ({user.role.toUpperCase()}). Sign in with
-                an authorized account below to switch stations.
+                Signed in as <strong>{user.name}</strong> ({user.role.toUpperCase()}), which can't open
+                {' '}{targetStationName || 'this page'}. Go to your own station, or sign in below with an account that can.
               </p>
+              <button type="button" onClick={() => openStation(user.role)}
+                className="btn-tactile mt-2.5 min-h-[38px] px-3 flex items-center gap-1.5 bg-obsidian text-gold border border-line font-mono text-[10px] font-black uppercase tracking-wider cursor-pointer">
+                Go to my station: {STATION_NAMES[user.role]} <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
 
@@ -108,7 +126,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 type="text"
                 required
                 autoComplete="username"
-                placeholder="cashier / photographer / admin"
+                placeholder="Your staff username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full min-h-[48px] text-sm px-4 py-2.5 rounded-none border border-neutral-400 focus:border-line bg-canvas focus:bg-panel font-mono font-semibold transition-colors"
@@ -124,6 +142,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </label>
               <div className="relative">
                 <input
+                  ref={passwordRef}
                   id="login-password"
                   type={showPassword ? 'text' : 'password'}
                   required
@@ -154,30 +173,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </button>
           </form>
 
-          {/* Station Quick-Select Ledger */}
-          <div className="mt-7 pt-5 border-t border-neutral-200">
-            <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-widest text-neutral-500 mb-2.5">
-              <span>Station Quick-Fill</span>
-              <span>Select Account</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {STAFF_PRESETS.map((preset) => (
-                <button
-                  key={preset.username}
-                  type="button"
-                  onClick={() => applyPreset(preset.username)}
-                  className={`btn-tactile py-2 px-2 border text-left transition-colors cursor-pointer ${
-                    username === preset.username
-                      ? 'bg-obsidian text-gold border-line'
-                      : 'bg-canvas hover:bg-panel text-ink border-neutral-300'
-                  }`}
-                >
-                  <span className="text-[10px] font-bold uppercase block">{preset.label}</span>
-                  <span className="text-[9px] font-mono opacity-70 block">@{preset.username}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          {username && (
+            <p className="mt-4 text-[10px] font-mono text-neutral-500">
+              Not you?{' '}
+              <button type="button" onClick={() => { setUsername(''); saveLastUsername(''); }}
+                className="underline underline-offset-2 hover:text-ink cursor-pointer">Clear the username</button>
+            </p>
+          )}
         </div>
       </div>
     </div>

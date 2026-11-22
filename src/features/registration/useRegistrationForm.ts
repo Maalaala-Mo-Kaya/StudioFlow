@@ -16,6 +16,7 @@ import { splitFullName } from '../../utils/formatters';
 import { useStudioSettings } from '../../hooks/useStudioSettings';
 import { useWorkflowData } from '../../hooks/useWorkflowData';
 import { registrationAddOns } from './registrationAddOns';
+import { keepValidPicks, missingPicks, optionGroups, picksPayload, type OptionPicks } from '../../utils/packageOptions';
 import {
   emailPattern, mobilePattern, packageRequiredMessage, registrationFields, validationProps,
   type RegistrationErrors,
@@ -72,6 +73,7 @@ export function useRegistrationForm() {
 
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
+  const [optionPicks, setOptionPicks] = useState<OptionPicks>({});
   const [makeupLookNote, setMakeupLookNote] = useState('');
   const [paymentType, setPaymentType] = useState<'full' | 'downpayment'>('full');
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -222,6 +224,10 @@ export function useRegistrationForm() {
   const selectedPackage = kindPackages.find((pkg) => pkg.id === selectedPackageId);
   const { manualAddOns, selected, defaultAddOn, requiresMua: asksLook, totalAmount } =
     registrationAddOns(selectedPackage, kindAddOns, selectedAddOns);
+  // The package's option groups, and the picks that still apply to this package and gender.
+  const packageOptionGroups = optionGroups(selectedPackage);
+  const clientGender = gender === 'male' || gender === 'female' ? gender : '';
+  const validPicks = keepValidPicks(packageOptionGroups, clientGender, optionPicks);
 
   // Signature Handler
   const handleSignatureChange = (blob: Blob | null, dataUrl?: string | null) => {
@@ -270,6 +276,9 @@ export function useRegistrationForm() {
     else if (!mobilePattern.test(cleanMobile.replace(/[ -]/g, ''))) {
       fieldErrors.mobile_number = 'Enter a valid Philippine mobile number, such as 0917-000-0000.';
     }
+    // Options are checked once the gender is known (some choices are for one gender only).
+    const optionsMissing = selectedPackage && clientGender ? missingPicks(packageOptionGroups, clientGender, validPicks) : null;
+    if (optionsMissing) fieldErrors.package_options = optionsMissing;
     if (!termsAccepted) fieldErrors.terms_accepted = 'Agree to the Terms & Conditions to proceed.';
     if (!selectedPackage || !signatureBlob || Object.keys(fieldErrors).length) {
       if (!selectedPackage) fieldErrors.package = packageRequiredMessage;
@@ -308,6 +317,7 @@ export function useRegistrationForm() {
       formData.append('email', cleanEmail);
       formData.append('package', selectedPackage.id);
       formData.append('add_ons', JSON.stringify(selected.map(({ id }) => ({ id }))));
+      formData.append('package_options', JSON.stringify(picksPayload(validPicks)));
       formData.append('no_mua_default_quote', defaultAddOn
         ? `${defaultAddOn.id}:${Math.round(defaultAddOn.amount * 100)}`
         : 'none');
@@ -379,6 +389,7 @@ export function useRegistrationForm() {
     setEmail('');
     setSelectedPackageId(null);
     setSelectedAddOns([]);
+    setOptionPicks({});
     setMakeupLookNote('');
     setPaymentType('full');
     setTermsAccepted(false);
@@ -393,7 +404,8 @@ export function useRegistrationForm() {
     setChosenKind(kind);
     setSelectedPackageId(null);
     setSelectedAddOns([]);
-    clearErrors('client_kind', 'package');
+    setOptionPicks({});
+    clearErrors('client_kind', 'package', 'package_options');
   };
 
   return {
@@ -455,6 +467,9 @@ export function useRegistrationForm() {
     setSelectedPackageId: changeField('package', (id: string) => setSelectedPackageId(id)),
     selectedAddOns: selected.map(({ id }) => id),
     toggleAddOn,
+    packageOptionGroups,
+    optionPicks: validPicks,
+    setOptionPicks: changeField('package_options', setOptionPicks),
     asksLook,
     makeupLookNote,
     setMakeupLookNote,

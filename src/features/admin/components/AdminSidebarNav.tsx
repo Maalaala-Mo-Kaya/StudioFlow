@@ -15,6 +15,7 @@ import {
   Aperture,
   Shapes,
   ScanText,
+  BookOpenCheck,
 } from 'lucide-react';
 import type { AdminTab } from '../useAdminData';
 
@@ -119,6 +120,13 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
       label: 'Analytics & Overview',
       shortLabel: 'Overview',
       icon: TrendingUp,
+    },
+    {
+      id: 'ledger',
+      label: 'Settlement & Ledger',
+      shortLabel: 'Ledger',
+      icon: BookOpenCheck,
+      parent: 'metrics',
     },
     {
       id: 'students',

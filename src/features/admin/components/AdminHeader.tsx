@@ -4,6 +4,7 @@ import type { Organization, Registration } from '../../../types';
 import type { DateRange, OverallScope } from '../studentExcel';
 import { SearchableSelect } from '../../../components/common/SearchableSelect';
 import { isWalkIn } from '../../../utils/clientInfo';
+import { clampDay, useStudioCalendar } from '../../../hooks/useStudioCalendar';
 
 interface AdminHeaderProps {
   onExportCsv: () => void;
@@ -35,6 +36,8 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportE
   const [schoolId, setSchoolId] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  // Nothing before the studio's first day (pictorial dates may run ahead of today, so no upper cap).
+  const { start } = useStudioCalendar();
   const [busy, setBusy] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -77,7 +80,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportE
     const today = manilaDay.format(new Date());
     if (preset === 'all') { setFrom(''); setTo(''); }
     if (preset === 'today') { setFrom(today); setTo(today); }
-    if (preset === 'month') { setFrom(`${today.slice(0, 8)}01`); setTo(today); }
+    if (preset === 'month') { setFrom(clampDay(`${today.slice(0, 8)}01`, start)); setTo(today); }
   };
 
   const runExport = async () => {
@@ -183,12 +186,12 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportE
               <div className="grid grid-cols-2 gap-2">
                 <label className="block">
                   <span className="block text-[10px] text-neutral-400 mb-0.5">From</span>
-                  <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)}
+                  <input type="date" value={from} min={start || undefined} max={to || undefined} onChange={(e) => setFrom(clampDay(e.target.value, start, to))}
                     className="w-full p-1.5 bg-canvas text-ink border border-line" />
                 </label>
                 <label className="block">
                   <span className="block text-[10px] text-neutral-400 mb-0.5">To</span>
-                  <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)}
+                  <input type="date" value={to} min={from || start || undefined} onChange={(e) => setTo(clampDay(e.target.value, from || start))}
                     className="w-full p-1.5 bg-canvas text-ink border border-line" />
                 </label>
               </div>

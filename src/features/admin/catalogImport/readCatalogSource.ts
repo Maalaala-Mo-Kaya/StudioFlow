@@ -1,9 +1,9 @@
 // Reads an uploaded flyer photo, spreadsheet, Word document or text file into text (and, for
 // spreadsheets with a header row, straight into drafts). Everything runs in the browser with no
 // internet: the OCR engine and its English model are served from /ocr/ (scripts/copy-ocr-assets.cjs).
-import { findPrice, lineKey, parseCatalogRows, parseCatalogText, tidy, type CatalogDraft } from './catalogParser';
+import { findPrice, lineKey, parseCatalogJson, parseCatalogRows, parseCatalogText, tidy, type CatalogDraft } from './catalogParser';
 
-export type SourceKind = 'image' | 'sheet' | 'doc' | 'text';
+export type SourceKind = 'image' | 'sheet' | 'doc' | 'text' | 'json';
 
 export interface ReadResult {
   kind: SourceKind;
@@ -14,7 +14,7 @@ export interface ReadResult {
 
 export type ProgressFn = (label: string, fraction: number) => void;
 
-export const ACCEPTED_FILES = 'image/*,.xlsx,.csv,.docx,.txt';
+export const ACCEPTED_FILES = 'image/*,.xlsx,.csv,.docx,.txt,.json';
 
 export function sourceKind(file: File): SourceKind | null {
   const name = file.name.toLowerCase();
@@ -22,6 +22,7 @@ export function sourceKind(file: File): SourceKind | null {
   if (name.endsWith('.xlsx') || name.endsWith('.csv')) return 'sheet';
   if (name.endsWith('.docx')) return 'doc';
   if (name.endsWith('.txt')) return 'text';
+  if (name.endsWith('.json')) return 'json';
   return null;
 }
 
@@ -31,7 +32,7 @@ export async function readCatalogSource(file: File, onProgress: ProgressFn): Pro
   if (lower.endsWith('.doc') || lower.endsWith('.xls')) {
     throw new Error(`"${file.name}" is an older Office format. Open it and save it as ${lower.endsWith('.doc') ? '.docx' : '.xlsx'} first.`);
   }
-  if (!kind) throw new Error(`"${file.name}" can't be read. Use a photo, an Excel (.xlsx / .csv), a Word (.docx) or a text file.`);
+  if (!kind) throw new Error(`"${file.name}" can't be read. Use a photo, an Excel (.xlsx / .csv), a Word (.docx), a text file or a StudioFlow package file (.json).`);
 
   if (kind === 'image') {
     const text = await readImageText(file, onProgress);
@@ -51,6 +52,7 @@ export async function readCatalogSource(file: File, onProgress: ProgressFn): Pro
     return { kind, text, draft: parseCatalogText(text) };
   }
   const text = await file.text();
+  if (kind === 'json') return { kind, text, draft: parseCatalogJson(text) };
   return { kind, text, draft: parseCatalogText(text) };
 }
 
@@ -103,6 +105,7 @@ export async function downloadCatalogTemplate() {
     { header: 'Price', key: 'price', width: 10 },
     { header: 'Inclusions', key: 'inclusions', width: 60 },
     { header: 'Freebies', key: 'freebies', width: 50 },
+    { header: 'Options', key: 'options', width: 60 },
     { header: 'Offered To', key: 'offered', width: 12 },
     { header: 'Photo Limit', key: 'limit', width: 12 },
   ];
@@ -110,14 +113,17 @@ export async function downloadCatalogTemplate() {
     { type: 'Package', code: 'PKG-BASIC', name: 'Basic Package', price: 1395,
       inclusions: '15 pcs hard printout copy; Colored toga w/out cap; 1 pc - 8R; 2 pcs - wallet size; 4 pcs - 2x2; 8 pcs - 1x1',
       freebies: 'Free 10x12 frame; Free family picture; Free raw copies (unedited pictures)',
+      options: 'Attire (choose 1): Toga w/ cap | Filipiniana (girls) | Glamour shots (girls) | Coat and tie or Barong (boys)',
       offered: 'School', limit: 1 },
     { type: 'Inclusion', name: 'Another inclusion for the package above (optional)' },
     { type: 'Freebie', name: 'Another freebie for the package above (optional)' },
+    { type: 'Option', name: 'Another option for the package above, e.g. Pastel backdrop (optional)' },
     { type: 'Add-on', code: 'ADD-8R', name: 'Extra 8R print', price: 150, offered: 'Both' },
   ]);
   sheet.getRow(1).font = { bold: true };
   sheet.getColumn('inclusions').alignment = { wrapText: true };
   sheet.getColumn('freebies').alignment = { wrapText: true };
+  sheet.getColumn('options').alignment = { wrapText: true };
   const bytes = await workbook.xlsx.writeBuffer();
   const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   const link = document.createElement('a');

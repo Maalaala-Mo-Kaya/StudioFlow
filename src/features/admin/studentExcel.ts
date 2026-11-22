@@ -4,6 +4,8 @@ import { downloadBlob } from '../../utils/downloadBlob';
 import { STUDIO_INFO } from '../../constants/studio';
 import type { RevenueSplit } from '../../types';
 import { allocateRevenue, revenueKeys } from '../../utils/revenue';
+import { addMuaPayoutSheets } from './muaPayoutSheets';
+import type { MuaPayoutLine, MuaSharedLine } from './muaPayouts';
 
 interface CatalogColumn {
   id: string;
@@ -13,6 +15,8 @@ interface CatalogColumn {
 }
 
 interface StudentExcelRow {
+  /** Registration id (links the MUA pages to the orders in this export). */
+  id?: string;
   /** 'college', 'shs', 'walkin', or another level's name in capitals (e.g. 'ELEMENTARY'). */
   level: string;
   /** The level as named by the school (e.g. "College", "Senior High School"). */
@@ -38,6 +42,8 @@ interface StudentExcelRow {
   /** Other fees on the job order, in centavos (part of TOTAL DUE). */
   otherFees?: number;
   discount?: number;
+  /** "10% · reason · by …", shown as a note on the DISCOUNT cell. */
+  discountNote?: string;
   revenueTerms?: RevenueSplit | null;
   /** Job order total, in centavos. */
   due: number;
@@ -49,6 +55,8 @@ export interface StudentExcelData {
   packages: CatalogColumn[];
   addOns: CatalogColumn[];
   rows: StudentExcelRow[];
+  /** MUA pages: what artists earned on these orders, and the shared MUA charges (studio_mua_payouts.js). */
+  mua?: { lines: MuaPayoutLine[]; shared: MuaSharedLine[] };
 }
 
 /** What to export: every level as before, all schools (one sheet each), one school, or walk-ins. */
@@ -237,7 +245,7 @@ function writeCancelledSheet(workbook: Workbook, title: string, orders: StudentE
 }
 
 export function buildStudentWorkbook(
-  { packages, addOns, rows: allRows }: StudentExcelData,
+  { packages, addOns, rows: allRows, mua }: StudentExcelData,
   scope: OverallScope = { kind: 'levels' },
   range: DateRange = {},
   now = new Date(),
@@ -361,6 +369,8 @@ export function buildStudentWorkbook(
           name: student.name, packageCode: student.packageCode,
           ...Object.fromEntries(Object.entries(amountsInRow).map(([column, cents]) => [column, cents / 100])),
         });
+        // Why the discount was given, as a cell note (hover in Excel); no effect on the formulas.
+        if (student.discount && student.discountNote) row.getCell(DISCOUNT).note = student.discountNote;
         const totalCell = row.getCell('total');
         totalCell.value = {
           formula: `ROUND(SUM(${row.getCell('full').address}:${row.getCell('down').address})-${row.getCell('refunded').address},2)`,
@@ -544,6 +554,16 @@ export function buildStudentWorkbook(
     check.getCell('name').font = { bold: true };
     summary.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
     summary.headerFooter.oddFooter = `&L${STUDIO_INFO.name} · Overall Summary · ${period}&RPage &P of &N`;
+  }
+  // MUA pages for the same orders (cancelled ones too: the artist did the work).
+  if (mua) {
+    const ids = new Set(scoped.map((row) => row.id).filter(Boolean));
+    addMuaPayoutSheets(workbook, {
+      lines: mua.lines.filter((line) => ids.has(line.jobId)),
+      shared: mua.shared.filter((line) => ids.has(line.jobId)),
+      period: `${period} · job orders in this export`,
+      name: (wanted) => sheetName(wanted, used),
+    });
   }
   return workbook;
 }

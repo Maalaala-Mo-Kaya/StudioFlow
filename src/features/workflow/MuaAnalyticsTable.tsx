@@ -1,5 +1,7 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { BarChart3 } from 'lucide-react';
 import { DataTable, type DataTableColumn } from '../../components/common/DataTable';
+import { Modal } from '../../components/common/Modal';
 import { formatMuaAmount, muaEarningsTable, muaReportTable, type MuaPerformanceReport } from '../admin/muaPerformance';
 
 export function MuaAnalyticsTable({ report, earnings, renderDetails }: {
@@ -8,6 +10,8 @@ export function MuaAnalyticsTable({ report, earnings, renderDetails }: {
   renderDetails?: (artist: MuaPerformanceReport['rows'][number]) => ReactNode;
 }) {
   const matrix = earnings ? muaEarningsTable(report) : muaReportTable(report);
+  // The artist whose breakdown is open in a popup.
+  const [openId, setOpenId] = useState<string | null>(null);
   const rows = report.rows.map((artist, index) => ({ artist, values: matrix.rows[index].slice(2) }));
   const valueText = (value: string | number) => earnings ? formatMuaAmount(Number(value)) : value;
   const valueIds = [...report.columns.map(({ id }) => 'service:' + id), 'total'];
@@ -20,6 +24,7 @@ export function MuaAnalyticsTable({ report, earnings, renderDetails }: {
   ];
 
   return (
+    <>
     <DataTable label={earnings ? 'Daily MUA earnings' : 'Daily MUA counts'}
       rows={rows} columns={columns} getRowId={({ artist }) => artist.id} pagination={renderDetails ? false : undefined}
       emptyMessage="No completions recorded for this date." tableClassName="whitespace-nowrap" headerClassName="uppercase"
@@ -31,7 +36,14 @@ export function MuaAnalyticsTable({ report, earnings, renderDetails }: {
           ))}
         </tr>
       )}
-      renderExpanded={({ artist }) => renderDetails ? renderDetails(artist) : (
+      onRowClick={({ artist }) => setOpenId(artist.id)}
+    />
+    {(() => {
+      const artist = openId ? report.rows.find((row) => row.id === openId) : undefined;
+      return artist && (
+        <Modal title={artist.name} subtitle={<>{earnings ? 'Earnings' : 'Services completed'} · {report.date}</>} icon={BarChart3}
+          onClose={() => setOpenId(null)}>
+          {renderDetails ? renderDetails(artist) : (
         <section className="space-y-2 whitespace-normal" aria-label={artist.name + ' service breakdown'}>
           <h4 className="font-black">{artist.name} · {report.date}</h4>
           {artist.totalServices ? (
@@ -46,6 +58,9 @@ export function MuaAnalyticsTable({ report, earnings, renderDetails }: {
           ) : <p>No services completed.</p>}
         </section>
       )}
-    />
+        </Modal>
+      );
+    })()}
+    </>
   );
 }

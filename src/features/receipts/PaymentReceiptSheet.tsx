@@ -1,5 +1,5 @@
 import React from 'react';
-import { paymentDiscount, receiptRevenueLine } from './receiptData';
+import { paymentAdditions, paymentDiscount, receiptRevenueLine } from './receiptData';
 import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
@@ -44,6 +44,8 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
   const isCash = payment.payment_method === 'cash' && (payment.cash_tendered ?? 0) > 0;
   const discount = paymentDiscount(payment);
   const method = methodLabel(payment.payment_method) + (payment.remarks ? ` · ${payment.remarks}` : '');
+  // Items added to the order since the previous payment: what this payment is for.
+  const additions = paymentAdditions(data, payment);
 
   return (
     <section
@@ -89,10 +91,13 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
 
       <div className="mt-[6px] space-y-[3px] font-mono">
         <Row label="Payment For" value={paymentTypeLabel(payment)} />
+        {additions.length > 0 && (
+          <p className="line-clamp-2 break-words text-[8px] leading-[9px]">Added · {additions.join(', ')}</p>
+        )}
         <Row label="Method" value={method} />
         <Row label="Previous Balance" value={peso(payment.balance_before)} />
         {discount && <>
-          <Row label={`Discount Credit (${Number(discount.percentage.toFixed(2))}%)`} value={peso(-discount.amount)} />
+          <Row label={`Discount Credit (${discount.rate})`} value={peso(-discount.amount)} />
           <p className="break-words text-[8px] leading-[9px]">Reason · {discount.reason}</p>
         </>}
       </div>

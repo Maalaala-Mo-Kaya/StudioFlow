@@ -1,4 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
+import type { Registration } from '../../types';
+import { CashierAddOnModal } from './components/CashierAddOnModal';
+import { UpdatedJobOrderPrompt } from '../receipts/UpdatedJobOrderPrompt';
+import { useToast } from '../../context/ToastContext';
+import { refreshClientDocuments } from '../receipts/clientDocuments';
 import { useCashierState } from './useCashierState';
 import { CashierHeader } from './components/CashierHeader';
 import { CashierFilterBar } from './components/CashierFilterBar';
@@ -14,6 +19,10 @@ export const CashierPage: React.FC = () => {
   const cashier = useCashierState();
   const { deleteReg } = cashier;
   const { pickupMessage } = useStudioSettings();
+  const { toast } = useToast();
+  // Add-ons the client asks for at the counter, then: print the updated job order or collect now.
+  const [addOnReg, setAddOnReg] = useState<Registration | null>(null);
+  const [afterAdd, setAfterAdd] = useState<{ reg: Registration; added: string[] } | null>(null);
 
   return (
     <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8">
@@ -59,6 +68,7 @@ export const CashierPage: React.FC = () => {
         deletableIds={cashier.deletableIds}
         onOpenPrint={(reg) => cashier.openPrintModal(reg)}
         onOpenRelease={cashier.openReleaseModal}
+        onOpenAddOn={setAddOnReg}
         pickupMode={cashier.activeTab === 'ready'}
         onOpenNotify={cashier.openNotifyModal}
       />
@@ -69,6 +79,27 @@ export const CashierPage: React.FC = () => {
           onClose={cashier.closeDeleteModal}
           onDelete={(reason) => cashier.deleteRegistration(deleteReg, reason)}
         />
+      )}
+
+      {addOnReg && (
+        <CashierAddOnModal registration={addOnReg} onClose={() => setAddOnReg(null)}
+          onSaved={(saved, added) => {
+            setAddOnReg(null);
+            toast.success(`Added ${added.join(', ')}. New balance ₱${saved.balance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`);
+            if (saved.framing_status === 'in_production' && addOnReg.framing_status !== 'in_production') {
+              toast.warning(`JO ${saved.job_order_no} is back in production for the new item. Don't release it until an admin marks it ready.`);
+            }
+            if (saved.job_order_no) refreshClientDocuments(saved.id, toast.warning);
+            void cashier.fetchRegistrations(true);
+            if (saved.job_order_no) setAfterAdd({ reg: saved, added });
+            else if (saved.balance > 0) void cashier.openPaymentModal(saved);
+          }} />
+      )}
+      {afterAdd && (
+        <UpdatedJobOrderPrompt registrationId={afterAdd.reg.id} added={afterAdd.added} cashierName={cashier.cashierName}
+          balance={afterAdd.reg.balance}
+          onCollect={() => { const reg = afterAdd.reg; setAfterAdd(null); void cashier.openPaymentModal(reg); }}
+          onClose={() => setAfterAdd(null)} />
       )}
 
       {/* PAYMENT COLLECTION MODAL */}

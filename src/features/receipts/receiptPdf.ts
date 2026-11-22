@@ -5,8 +5,8 @@ import { STUDIO_INFO } from '../../constants/studio';
 import { pb } from '../../db/pocketbase';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import {
-  orderExtras, receiptRevenueLine,
-  isCounted, isComplimentarySettlement, jobOrderMarks, paymentDiscount, soldPackagePrice, loadReceiptData, loadRefundSignature, methodLabel, paymentTypeLabel, peso, receiptDate, receiptLabel, refundAcknowledgment, refundFigures, signatureUrl, statusLabel,
+  orderDiscount, orderExtras, receiptRevenueLine,
+  isCounted, isComplimentarySettlement, jobOrderMarks, paymentAdditions, paymentDiscount, soldPackagePrice, loadReceiptData, loadRefundSignature, methodLabel, paymentTypeLabel, peso, receiptDate, receiptLabel, refundAcknowledgment, refundFigures, signatureUrl, statusLabel,
   visiblePayments, profileCells, profileLine,
   type ReceiptData, type ReceiptPaper, type RefundSlipData,
 } from './receiptData';
@@ -218,31 +218,37 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   // Totals
   const bx = right - totalsW;
   const cancelled = reg.status === 'cancelled';
-  // A cancelled order has one more line (money held by the studio), so its box is taller.
-  const extra = cancelled ? 0.2 : 0;
-  box(doc, bx, y, totalsW, 0.92 + extra, 1.5);
   const credit = cancelled ? 0 : discountCents(reg) / 100;
   const settled = reg.balance <= 0 && reg.paid_amount + credit > 0;
+  // The lines above the balance, stacked so none overlap (a discounted order with a refund has five).
+  // (Plain "-": the built-in PDF fonts have no minus sign.)
+  const totalRows: [string, string, number, RGB?][] = [['ORIGINAL BILLED', php(reg.total_amount + discountCents(reg) / 100), 8]];
+  if (credit > 0) totalRows.push([`LESS DISCOUNT (${orderDiscount(reg).rate.toUpperCase()})`, '-' + php(credit), 7]);
+  // paid_amount is net of refunds; show the refund on its own line so the figures add up.
+  if ((reg.refunded_amount ?? 0) > 0) {
+    totalRows.push(['LESS REFUNDS', '-' + php(reg.refunded_amount), 7], ['NET PAID', php(reg.paid_amount), 7, GREEN]);
+  } else {
+    totalRows.push(['PAYMENTS RECEIVED', php(reg.paid_amount), 8, GREEN]);
+  }
+  if (credit > 0) totalRows.push(['TOTAL SETTLED', php(reg.paid_amount + credit), 7]);
+  // Two lines keep the original spacing; more are stacked closer, and the box grows if still needed.
+  const step = totalRows.length <= 2 ? 0.15 : 0.095;
+  const balanceY = 0.15 + (totalRows.length - 1) * step + (totalRows.length <= 2 ? 0.18 : 0.125);
+  const grow = Math.max(0, balanceY - 0.48);
+  // A cancelled order has one more line (money held by the studio), so its box is taller.
+  const extra = (cancelled ? 0.2 : 0) + grow;
+  box(doc, bx, y, totalsW, 0.92 + extra, 1.5);
   const line = (label: string, value: string, ly: number, size: number, color: RGB = INK) => {
     put(doc, label, bx + 0.07, ly, { size: 5.5, bold: true, color: [85, 85, 85] });
     put(doc, value, right - 0.07, ly, { size, bold: true, mono: true, color, align: 'right' });
   };
-  line('ORIGINAL BILLED', php(reg.total_amount + discountCents(reg) / 100), y + 0.15, 8);
+  totalRows.forEach(([label, value, size, color], i) => line(label, value, y + 0.15 + i * step, size, color));
   put(doc, receiptRevenueLine(data, undefined, false), x, y - 0.035, { size: 5.5, color: GREY, width: tableW });
-  // paid_amount is net of refunds; show the refund on its own line so the figures add up.
-  // (Plain "-": the built-in PDF fonts have no minus sign.)
-  if ((reg.refunded_amount ?? 0) > 0) {
-    line('LESS REFUNDS', '-' + php(reg.refunded_amount), y + 0.25, 7);
-    line('NET PAID', php(reg.paid_amount), y + 0.345, 7, GREEN);
-  } else {
-    line('PAYMENTS RECEIVED', php(reg.paid_amount), y + 0.3, 8, GREEN);
-  }
-  if (credit > 0) line('TOTAL SETTLED', php(reg.paid_amount + credit), y + 0.40, 7);
-  line('BALANCE', php(reg.balance), y + 0.48, 10, reg.balance > 0 ? RED : INK);
+  line('BALANCE', php(reg.balance), y + balanceY, 10, reg.balance > 0 ? RED : INK);
   // A cancelled order owes nothing; show what the studio still holds (refundable up to this).
   if (cancelled) {
-    put(doc, '(cancelled, not owed)', bx + 0.07, y + 0.555, { size: 5.5, italic: true, color: GREY });
-    line('HELD BY STUDIO', php(Math.max(0, reg.paid_amount)), y + 0.665, 8);
+    put(doc, '(cancelled, not owed)', bx + 0.07, y + 0.555 + grow, { size: 5.5, italic: true, color: GREY });
+    line('HELD BY STUDIO', php(Math.max(0, reg.paid_amount)), y + 0.665 + grow, 8);
   }
   const marks = jobOrderMarks(reg);
   box(doc, bx + 0.07, y + 0.54 + extra, totalsW - 0.14, 0.16, settled || marks.settlement ? 1.5 : 0.75);
@@ -363,11 +369,20 @@ function drawReceiptSlip(doc: jsPDF, data: ReceiptData, payment: PaymentRecord, 
   };
   y += 0.58;
   row('PAYMENT FOR', paymentTypeLabel(payment), y);
+  // Items added since the previous payment (at most two lines, as on the printed sheet).
+  const additions = paymentAdditions(data, payment, false);
+  if (additions.length) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    const lines: string[] = doc.splitTextToSize(`Added · ${additions.join(', ')}`, w);
+    if (lines.length > 2) lines.splice(2, lines.length, lines[1].replace(/.{0,3}$/, '…'));
+    for (const line of lines) put(doc, line, x, y += 6 * PT + 0.01, { size: 6, color: GREY });
+  }
   row('METHOD', methodLabel(payment.payment_method) + (payment.remarks ? ` · ${payment.remarks}` : ''), y += 0.14);
   row('PREVIOUS BALANCE', php(payment.balance_before), y += 0.14);
   const discount = paymentDiscount(payment);
   if (discount) {
-    row(`DISCOUNT CREDIT (${Number(discount.percentage.toFixed(2))}%)`, php(-discount.amount), y += 0.13);
+    row(`DISCOUNT CREDIT (${discount.rate.toUpperCase()})`, php(-discount.amount), y += 0.13);
     doc.setFont('helvetica', 'normal');
     const reason = `Reason · ${discount.reason}`;
     let size = 6;

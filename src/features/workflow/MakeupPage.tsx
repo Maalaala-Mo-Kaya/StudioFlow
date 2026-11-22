@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { studioDate } from '../../utils/studioDay';
+import { clampDay, useStudioCalendar } from '../../hooks/useStudioCalendar';
 import type { MuaTeam } from './muaTeam';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
 import { MakeupClientsView, type MakeupTableView } from './MakeupTables';
@@ -31,6 +32,8 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
   const [selectedClientId, setSelectedClientId] = useState<string>();
   const [views, setViews] = useState<Partial<Record<MakeupTab, MakeupTableView>>>({});
   const [date, setDate] = useState(() => studioDate());
+  // Completion dates from the studio's first day to today.
+  const calendar = useStudioCalendar();
   const teamPath = `/makeup-team?date=${encodeURIComponent(date)}${selection === 'team' ? '&overview=1' : ''}`;
   const { data: team, error: teamError, refresh: refreshTeam } = useWorkflowData<MuaTeam>(teamPath, undefined, true);
   const admin = user?.role === 'admin';
@@ -161,7 +164,8 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
           <label className="flex flex-wrap items-center gap-2 text-xs font-bold">
             Completion date (Philippine time)
             <input type="date" className="min-h-10 border border-line bg-panel px-2" value={date}
-              onChange={(event) => setDate(event.target.value || studioDate())} />
+              min={calendar.start || undefined} max={studioDate()}
+              onChange={(event) => setDate(clampDay(event.target.value || studioDate(), calendar.start, studioDate()))} />
           </label>
         )}
         {activeTab === 'team' ? (

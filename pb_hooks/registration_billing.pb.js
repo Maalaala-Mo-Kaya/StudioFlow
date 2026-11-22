@@ -80,7 +80,16 @@ onRecordUpdateRequest((e) => {
   // Changed = a different set of add-ons or prices (resending the same list is not a change).
   const key = (items) => JSON.stringify(items.map((item) => [item.id ?? item.name, pricing.cents(item.amount)]));
   let addOnsChanged = key(addOns) !== key(previousAddOns);
-  if (addOnsChanged && !isAdmin) throw new ForbiddenError("Only administrators can change add-ons.");
+  // The cashier may add add-ons at the counter (at catalog price), but not remove or reprice
+  // what is already on the order; package, fees and removals stay with administrators.
+  const isCashier = e.auth?.getString("role") === "cashier";
+  const itemKey = (item) => item.id ?? item.name;
+  if (addOnsChanged && isCashier) {
+    const kept = new Map(addOns.map((item) => [itemKey(item), item]));
+    if (previousAddOns.some((item) => !kept.has(itemKey(item)) || cents(kept.get(itemKey(item)).amount) !== cents(item.amount))) {
+      throw new ForbiddenError("The cashier can only add add-ons. Ask an administrator to remove or change one.");
+    }
+  } else if (addOnsChanged && !isAdmin) throw new ForbiddenError("Only administrators can change add-ons.");
 
   // A released order is closed, and a cancelled one owes nothing until it is restored.
   const status = original.getString("status");
@@ -124,6 +133,8 @@ onRecordUpdateRequest((e) => {
   }
   const itemsChanged = packageChanged || addOnsChanged || feesChanged;
   const body = e.requestInfo().body || {};
+  // Server-written history (below): never taken from the request.
+  e.record.set("order_changes", original.get("order_changes"));
   if ("order_discount" in body && !isAdmin) throw new ForbiddenError("Use the cashier discount action.");
   if (itemsChanged || "review_mua_amount" in body || "order_discount" in body) {
     if (("order_discount" in body) && ["cancelled", "released"].includes(original.getString("status"))) {
@@ -137,6 +148,38 @@ onRecordUpdateRequest((e) => {
   } else {
     e.record.set("total_amount", original.getFloat("total_amount"));
     for (const field of ["revenue_terms", "revenue_review", "revenue_discount"]) e.record.set(field, original.get(field));
+  }
+
+  if (itemsChanged) {
+    const workflow = require(__hooks + "/studio_workflow.js");
+    // What changed, for the order's history and the next payment receipt ("Added · Extra 8R Frame ₱350").
+    const priceOf = (item) => cents(item.amount) / 100;
+    const line = (item) => ({ name: item.name, amount: priceOf(item) });
+    const beforeKeys = new Set(previousAddOns.map(itemKey));
+    const afterKeys = new Set(addOns.map(itemKey));
+    const added = addOns.filter((item) => !beforeKeys.has(itemKey(item))).map(line);
+    const removed = previousAddOns.filter((item) => !afterKeys.has(itemKey(item))).map(line);
+    const oldPackage = workflow.json(original, "package_snapshot");
+    const change = {
+      at: new Date().toISOString(),
+      by: e.auth ? require(__hooks + "/studio_ledger.js").actorName(e.auth) : "Superuser",
+      added, removed,
+      ...(pkg ? { package: { from: oldPackage?.name || "", to: pkg.getString("name"), amount: pkg.getFloat("amount") } } : {}),
+      ...(feesChanged ? { fees: { from: original.getFloat("other_fees"), to: fees / 100 } } : {}),
+      total_before: original.getFloat("total_amount"),
+      total_after: e.record.getFloat("total_amount"),
+    };
+    const history = workflow.json(original, "order_changes");
+    e.record.set("order_changes", [...(Array.isArray(history) ? history : []), change]);
+
+    // Something new to make: an order whose production was marked ready goes back to In production,
+    // so it leaves Ready for Pickup (and its pickup notice resets) until an admin marks it ready again.
+    const readyStatus = ["completed", "ready_for_pickup"].includes(status);
+    const readyFraming = ["framed", "ready_for_pickup"].includes(original.getString("framing_status"));
+    if ((pkg || added.length) && (readyStatus || readyFraming)) {
+      e.record.set("framing_status", "in_production");
+      if (readyStatus) e.record.set("status", "done_shooting");
+    }
   }
   return e.next();
 }, "registrations");
@@ -152,10 +195,43 @@ const checkCatalogPrice = (e) => {
   const table = e.record.collection().name;
   // A package's freebies are saved as a clean list of text items.
   if (table === "packages") {
+    // The kiosk line under the price ("with 10x12 PREMIUM frame"); empty shows the frame.
+    e.record.set("tagline", e.record.getString("tagline").trim().replace(/\s+/g, " "));
+    // The builder sends `structure` (the package's poses and single items); a package written
+    // as text (Import from File, older screens) is converted to one. Either way the shown
+    // inclusions, freebies and options are rendered from it (studio_catalog.js).
+    const catalog = require(__hooks + "/studio_catalog.js");
+    const body = e.requestInfo().body || {};
+    let structure = null;
+    if (Object.hasOwn(body, "structure")) {
+      const checked = catalog.validate(e.app, e.record.getString("structure"));
+      if (checked.problem) throw new BadRequestError(checked.problem);
+      structure = checked.structure;
+    } else if (["inclusions", "freebies", "option_groups"].some((field) => Object.hasOwn(body, field))) {
+      structure = catalog.convertLegacy(e.app, e.record.getString("inclusions"), e.record.getString("freebies"),
+        e.record.getString("option_groups"), e.record.getInt("photo_selection_limit"));
+    } else if (Object.hasOwn(body, "photo_selection_limit") && e.record.getString("structure")) {
+      structure = catalog.readJson(e.record.getString("structure"));
+    }
+    if (structure) {
+      const out = catalog.render(e.app, structure, e.record.getInt("photo_selection_limit"));
+      e.record.set("structure", structure);
+      e.record.set("inclusions", out.inclusions);
+      e.record.set("freebies", out.freebies);
+      e.record.set("option_groups", out.option_groups);
+    }
     const pricing = require(__hooks + "/studio_pricing.js");
     const freebies = pricing.packageInclusions(e.record, "freebies").map((item) => item.trim()).filter(Boolean);
     if (freebies.some((item) => item.length > 200)) throw new BadRequestError("Keep each freebie under 200 characters.");
     e.record.set("freebies", freebies);
+    // Inclusions: plain items and titled sections (two levels), cleaned and saved as a list.
+    const inclusions = pricing.cleanInclusions(pricing.readList(e.record.getString("inclusions")));
+    if (inclusions.problem) throw new BadRequestError(inclusions.problem);
+    e.record.set("inclusions", inclusions.items);
+    // Option groups the client chooses from (studio_package_options.js), cleaned and given ids.
+    const options = require(__hooks + "/studio_package_options.js").normalizeGroups(e.record.getString("option_groups"));
+    if (options.problem) throw new BadRequestError(options.problem);
+    e.record.set("option_groups", options.groups);
   }
   // Codes are unique per collection, ignoring case (idx_packages_code / idx_add_ons_code are the
   // backstop when two saves race). Checked here first for a clear message.
@@ -168,6 +244,13 @@ const checkCatalogPrice = (e) => {
     if (found.n) {
       throw new BadRequestError(`Code ${code} is already used by another ${table === "packages" ? "package" : "add-on"}.`);
     }
+  }
+  // Where its money goes. Without it, a sale's cash can't be counted as Studio or MUA revenue
+  // (it stays unallocated even when the order is fully paid). Older records saved before the field
+  // existed must be given one on their next save.
+  // (A single item's linked add-on is always Studio; studio_catalog.pb.js refuses saving it directly with its own message.)
+  if (!e.record.getString("catalog_item") && !["studio", "mua"].includes(e.record.getString("revenue_category"))) {
+    throw new BadRequestError(`Choose where this ${table === "packages" ? "package" : "add-on"}'s money goes: Studio revenue or Other Payment — MUA.`);
   }
   return e.next();
 };
@@ -209,6 +292,8 @@ onRecordDeleteRequest((e) => {
   return e.next();
 }, "packages");
 onRecordDeleteRequest((e) => {
+  // A single item's add-on is refused by studio_catalog.pb.js with its own message.
+  if (e.record.getString("catalog_item")) return e.next();
   const used = new DynamicModel({ n: 0 });
   e.app.db().newQuery(`SELECT COUNT(*) AS n FROM registrations
     WHERE json_valid(add_ons) AND json_type(add_ons) = 'array'

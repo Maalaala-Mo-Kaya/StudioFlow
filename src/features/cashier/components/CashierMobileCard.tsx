@@ -1,10 +1,11 @@
 import React from 'react';
-import { CreditCard, Banknote, Printer, PackageCheck, MessageSquare } from 'lucide-react';
+import { CreditCard, Banknote, Printer, PackageCheck, MessageSquare, Plus } from 'lucide-react';
 import { PickupNoticeInfo } from './PickupNoticeInfo';
 import type { Registration } from '../../../types';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
 import { isReadyForRelease } from '../../../utils/releaseReadiness';
 import { formatClientName, formatCurrency } from '../../../utils/formatters';
+import { discountRate } from '../../../utils/revenue';
 import { clientDetail, clientGroup } from '../../../utils/clientInfo';
 import { RecordActionButton } from '../../../components/common/RecordActionButton';
 
@@ -14,6 +15,7 @@ interface CashierMobileCardProps {
   onOpenDelete?: (reg: Registration) => void;
   onOpenPrint: (reg: Registration) => void;
   onOpenRelease: (reg: Registration) => void;
+  onOpenAddOn?: (reg: Registration) => void;
   /** Ready for Pickup tab: show the pickup notice and a Notify button. */
   onOpenNotify?: (reg: Registration) => void;
 }
@@ -24,6 +26,7 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
   onOpenDelete,
   onOpenPrint,
   onOpenRelease,
+  onOpenAddOn,
   onOpenNotify,
 }) => {
   return (
@@ -83,6 +86,12 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
           >
             {reg.balance > 0 ? formatCurrency(reg.balance) : 'Settled'}
           </span>
+          {/* A discounted order says so at a glance (its reason shows on hover). */}
+          {reg.revenue_discount && reg.status !== 'cancelled' && (
+            <div className="text-amber-700 font-bold text-[10px]" title={reg.revenue_discount.reason ? `Discount reason: ${reg.revenue_discount.reason}` : undefined}>
+              Discount {discountRate(reg.revenue_discount, reg.total_amount)} · −{formatCurrency(((reg.revenue_discount.studio ?? 0) + (reg.revenue_discount.mua ?? 0)) / 100, { exact: true })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -118,6 +127,16 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
           </button>
         ) : null}
 
+{onOpenAddOn && !['released', 'cancelled'].includes(reg.status) && (
+          <button
+            type="button"
+            onClick={() => onOpenAddOn(reg)}
+            title="Add an add-on the client asks for"
+            className="btn-tactile min-h-[44px] px-3 text-xs border border-gold text-gold-soft bg-canvas font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer hover:bg-gold-wash"
+          >
+            <Plus className="w-4 h-4" /> Add-on
+          </button>
+        )}
         {reg.job_order_no && <button
           type="button"
           onClick={() => onOpenPrint(reg)}

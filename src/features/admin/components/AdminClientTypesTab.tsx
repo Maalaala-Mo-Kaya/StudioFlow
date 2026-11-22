@@ -5,6 +5,7 @@ import { pb } from '../../../db/pocketbase';
 import { useToast } from '../../../context/ToastContext';
 import { useStudioSettings } from '../../../hooks/useStudioSettings';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
+import { Modal } from '../../../components/common/Modal';
 import type { SessionType } from '../../../types';
 
 const label = 'block text-[11px] font-black text-ink uppercase tracking-wider mb-1.5';
@@ -22,6 +23,8 @@ export const AdminClientTypesTab: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(blankSession);
   const [editingId, setEditingId] = useState('');
+  // Editing has its own copy, so the "New session" form stays ready while the popup is open.
+  const [editForm, setEditForm] = useState(blankSession);
   const [deleting, setDeleting] = useState<SessionType | null>(null);
   const [terms, setTerms] = useState('');
   const [termsDirty, setTermsDirty] = useState(false);
@@ -64,17 +67,17 @@ export const AdminClientTypesTab: React.FC = () => {
     setTermsDirty(false);
   };
 
-  const saveSession = async (event: React.FormEvent) => {
+  const saveSession = async (event: React.FormEvent, id = '') => {
     event.preventDefault();
-    if (!form.name.trim()) return;
+    const values = id ? editForm : form;
+    if (!values.name.trim()) return;
     setSaving(true);
     try {
-      const data = { ...form, name: form.name.trim(), code: form.code.trim().toUpperCase() };
-      if (editingId) await pb.collection('session_types').update(editingId, data);
+      const data = { ...values, name: values.name.trim(), code: values.code.trim().toUpperCase() };
+      if (id) await pb.collection('session_types').update(id, data);
       else await pb.collection('session_types').create({ ...data, order: sessionTypes.length + 1 });
-      toast.success(editingId ? 'Session type saved.' : `Session type "${data.name}" added.`);
-      setForm(blankSession);
-      setEditingId('');
+      toast.success(id ? 'Session type saved.' : `Session type "${data.name}" added.`);
+      if (id) setEditingId(''); else setForm(blankSession);
       await studio.refresh();
     } catch (err) {
       toast.error(errorText(err));
@@ -170,7 +173,7 @@ export const AdminClientTypesTab: React.FC = () => {
           </h3>
           <form onSubmit={saveSession} className="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end mb-4">
             <div className="sm:col-span-3">
-              <label htmlFor="session-name" className={label}>{editingId ? 'Edit Session' : 'New Session'} <span className="text-red-600">*</span></label>
+              <label htmlFor="session-name" className={label}>New Session <span className="text-red-600">*</span></label>
               <input id="session-name" required maxLength={80} placeholder="Family Portrait" value={form.name}
                 onChange={(event) => setForm({ ...form, name: event.target.value })} className={input} />
             </div>
@@ -187,12 +190,8 @@ export const AdminClientTypesTab: React.FC = () => {
             <div className="sm:col-span-6 flex gap-2">
               <button type="submit" disabled={saving}
                 className="btn-tactile flex-1 min-h-[42px] inline-flex items-center justify-center gap-2 bg-gold text-on-gold text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50">
-                {editingId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />} {editingId ? 'Save Session' : 'Add Session'}
+                <Plus className="w-4 h-4" /> Add Session
               </button>
-              {editingId && (
-                <button type="button" onClick={() => { setEditingId(''); setForm(blankSession); }}
-                  className="btn-tactile min-h-[42px] px-4 border border-neutral-400 text-ink text-xs font-black uppercase cursor-pointer">Cancel</button>
-              )}
             </div>
           </form>
           <ul className="space-y-2">
@@ -239,7 +238,7 @@ export const AdminClientTypesTab: React.FC = () => {
                   <span className={recordActionGroup}>
                     <RecordActionButton variant="edit" recordName={type.name} onClick={() => {
                       setEditingId(type.id);
-                      setForm({ name: type.name, code: type.code || '', on_location: !!type.on_location, is_active: !!type.is_active });
+                      setEditForm({ name: type.name, code: type.code || '', on_location: !!type.on_location, is_active: !!type.is_active });
                     }} />
                     <RecordActionButton variant="delete" recordName={type.name} onClick={() => setDeleting(type)} />
                   </span>
@@ -247,6 +246,36 @@ export const AdminClientTypesTab: React.FC = () => {
               </li>
             ))}
           </ul>
+          {editingId && (
+            <Modal title="Edit session type" subtitle={sessionTypes.find((t) => t.id === editingId)?.name} icon={Camera} size="md"
+              busy={saving} onClose={() => setEditingId('')}>
+              <form onSubmit={(event) => void saveSession(event, editingId)} className="space-y-3">
+                <div>
+                  <label htmlFor="edit-session-name" className={label}>Session name <span className="text-red-600">*</span></label>
+                  <input id="edit-session-name" required maxLength={80} autoFocus value={editForm.name}
+                    onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} className={input} />
+                </div>
+                <div>
+                  <label htmlFor="edit-session-code" className={label}>Code</label>
+                  <input id="edit-session-code" maxLength={20} value={editForm.code}
+                    onChange={(event) => setEditForm({ ...editForm, code: event.target.value })} className={`${input} uppercase`} />
+                </div>
+                <label className="flex items-center gap-2 min-h-[42px] text-[11px] font-bold text-ink cursor-pointer">
+                  <input type="checkbox" checked={editForm.on_location} onChange={(event) => setEditForm({ ...editForm, on_location: event.target.checked })}
+                    className="w-4 h-4 accent-[var(--color-gold)]" />
+                  Outside the studio (asks date &amp; venue)
+                </label>
+                <div className="flex justify-end gap-2 pt-2 border-t border-line">
+                  <button type="button" disabled={saving} onClick={() => setEditingId('')}
+                    className="btn-tactile min-h-[42px] px-4 border border-neutral-400 text-ink text-xs font-black uppercase cursor-pointer disabled:opacity-50">Cancel</button>
+                  <button type="submit" disabled={saving || !editForm.name.trim()}
+                    className="btn-tactile min-h-[42px] px-5 inline-flex items-center gap-2 bg-gold text-on-gold text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50">
+                    <Save className="w-4 h-4" /> Save Session
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          )}
         </div>
 
         {/* Walk-in terms */}

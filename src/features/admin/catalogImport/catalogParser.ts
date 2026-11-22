@@ -1,6 +1,7 @@
 // Turns text read from a flyer, price list or spreadsheet into draft packages and add-ons.
 // Drafts are only suggestions: the admin reviews and edits them before anything is saved.
-import type { RevenueCategory } from '../../../types';
+import type { PackageInclusion, PackageOptionGroup, RevenueCategory } from '../../../types';
+import { inclusionLines, parseInclusionTree } from '../../../utils/inclusions';
 import type { PackageKind } from '../useAdminData';
 
 export interface DraftPackage {
@@ -9,10 +10,13 @@ export interface DraftPackage {
   code: string;
   name: string;
   amount: number;
-  inclusions: string[];
+  /** Plain items and titled sections ("Colored toga w/out cap" › "1 pc - 8R", …). */
+  inclusions: PackageInclusion[];
   freebies: string[];
   /** Set to add this draft's inclusions and freebies to an existing package (its id) instead of creating one. */
   mergeInto?: string;
+  /** Groups the client chooses from ("Options: Toga w/ cap, Filipiniana (girls)…"). */
+  optionGroups: PackageOptionGroup[];
   photoLimit: number;
   clientKind: PackageKind;
   revenue: RevenueCategory;
@@ -40,7 +44,7 @@ const MAKEUP_WORDS = /\b(make[\s-]?up|grooming|hmua|mua|hair\s*(?:and|&)\s*make)
 
 export function newDraftPackage(fields: Partial<DraftPackage> = {}): DraftPackage {
   return {
-    key: nextKey(), include: true, code: '', name: '', amount: 0, inclusions: [], freebies: [], photoLimit: 0,
+    key: nextKey(), include: true, code: '', name: '', amount: 0, inclusions: [], freebies: [], optionGroups: [], photoLimit: 0,
     clientKind: 'school', revenue: 'studio', ...fields,
   };
 }
@@ -245,12 +249,13 @@ export function parseCatalogText(text: string): CatalogDraft {
       ...lines.slice(nameEnds[n] + 1, at),
       ...lines.slice(at + 1, nextStart),
     ].filter((line) => !line.price);
-    const { inclusions, freebies, photoLimit } = inclusionsFrom(body.map((line) => line.text), names[n]);
+    const { inclusions, freebies, optionGroups, photoLimit } = inclusionsFrom(body.map((line) => line.text), names[n]);
     packages.push(newDraftPackage({
       name: finish(names[n]),
       amount: lines[at].price!.amount,
       inclusions,
       freebies,
+      optionGroups,
       photoLimit,
       revenue: MAKEUP_WORDS.test(names[n]) && !inclusions.length ? 'mua' : 'studio',
     }));
@@ -264,8 +269,8 @@ export function parseCatalogText(text: string): CatalogDraft {
     const named = nameAt >= 0 || !(FREEBIE_HEADER.test(lines[0].text) || FREE_ITEM.test(lines[0].text));
     const start = Math.max(0, nameAt);
     const name = named ? finish(lines[start].text) : 'Imported package';
-    const { inclusions, freebies, photoLimit } = inclusionsFrom(lines.slice(named ? start + 1 : 0).map((l) => l.text), name);
-    packages.push(newDraftPackage({ name, inclusions, freebies, photoLimit }));
+    const { inclusions, freebies, optionGroups, photoLimit } = inclusionsFrom(lines.slice(named ? start + 1 : 0).map((l) => l.text), name);
+    packages.push(newDraftPackage({ name, inclusions, freebies, optionGroups, photoLimit }));
   }
 
   return { packages, addOns: dedupeAddOns(addOns) };
@@ -275,7 +280,9 @@ export function parseCatalogText(text: string): CatalogDraft {
  * Cleans a package's body lines into inclusions and freebies (lines under a "Freebies" heading, or
  * starting with "FREE"), and picks up "choose N best poses".
  */
-export function inclusionsFrom(body: string[], packageName = ''): { inclusions: string[]; freebies: string[]; photoLimit: number } {
+export function inclusionsFrom(body: string[], packageName = ''): {
+  inclusions: PackageInclusion[]; freebies: string[]; optionGroups: PackageOptionGroup[]; photoLimit: number;
+} {
   let photoLimit = 0;
   const skip = new Set<number>();
   body.forEach((_, i) => {
@@ -295,11 +302,33 @@ export function inclusionsFrom(body: string[], packageName = ''): { inclusions: 
   const freebies: string[] = [];
   let inFreebies = false;
   let last: string[] | null = null;
+  const optionGroups: PackageOptionGroup[] = [];
+  let options: PackageOptionGroup | null = null;
   body.forEach((line, i) => {
-    if (FREEBIE_HEADER.test(line)) { inFreebies = true; last = null; return; }
-    if (INCLUSION_HEADER.test(line)) { inFreebies = false; last = null; return; }
+    const optionHeader = OPTION_HEADER.exec(line);
+    if (optionHeader) {
+      options = { id: optionId(), name: 'Options', pick: Number(optionHeader[1]) || 1, choices: [] };
+      optionGroups.push(options);
+      inFreebies = false; last = null;
+      return;
+    }
+    // A short line naming freebies starts the freebies, even with OCR noise around it
+    // ("Pe FREEBIES —" for "ADDITIONAL FREEBIES").
+    if (FREEBIE_HEADER.test(line) || (/\bfreebies\b/i.test(line) && line.split(/\s+/).length <= 4)) {
+      inFreebies = true; options = null; last = null; return;
+    }
+    if (INCLUSION_HEADER.test(line)) { inFreebies = false; options = null; last = null; return; }
     const key = lineKey(line);
-    if (skip.has(i) || seen.has(key) || key.length < 2) return;
+    // Quantity lines may repeat across print sets ("4 pcs - 2x2" in two sections): kept here,
+    // and duplicates are removed after grouping (groupQuantitySections).
+    if (skip.has(i) || key.length < 2 || (seen.has(key) && !QUANTITY.test(line))) return;
+    // Prints ("4 pcs - 2x2") and FREE items are never options: they end the options list.
+    if (options && (QUANTITY.test(line) || FREE_ITEM.test(line))) options = null;
+    if (options) {
+      seen.add(key);
+      addOptionChoice(options, line);
+      return;
+    }
     // An item that wraps onto the next line ("…AND FILIPINIANA," / "BARONG AND COAT AND TIE").
     if (last?.length && !FREE_ITEM.test(line) && /(?:[,&+/]|\b(?:and|or|with|of))$/i.test(last[last.length - 1])) {
       last[last.length - 1] = `${last[last.length - 1]} ${line}`;
@@ -310,7 +339,102 @@ export function inclusionsFrom(body: string[], packageName = ''): { inclusions: 
     last = inFreebies || FREE_ITEM.test(line) ? freebies : inclusions;
     last.push(line);
   });
-  return { inclusions: inclusions.map(finish), freebies: freebies.map(finish), photoLimit };
+  return {
+    inclusions: groupQuantitySections(inclusions.map(finish)),
+    freebies: freebies.map(finish),
+    optionGroups: optionGroups.filter((group) => group.choices.length).map((group) => ({ ...group, pick: Math.min(group.pick, group.choices.length) })),
+    photoLimit,
+  };
+}
+
+// ---------- Inclusion sections ----------
+
+/** "1 pc - 8R", "2 pcs - wallet sizes", "4pcs 2x2", "7 copies": a quantity of prints. */
+const QUANTITY = /^\d+\s*(?:pcs?|pieces?|copies|copy|sets?)\b/i;
+
+/**
+ * A heading followed by two or more quantity lines becomes a titled section, like the flyer's
+ * "COLORED TOGA W/OUT CAP" › "1 pc - 8R", "2 pcs - wallet sizes"…  Other lines stay plain items.
+ */
+export function groupQuantitySections(lines: string[]): PackageInclusion[] {
+  const out: PackageInclusion[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let end = i + 1;
+    while (end < lines.length && QUANTITY.test(lines[end])) end++;
+    const heading = !QUANTITY.test(line) && !FREE_ITEM.test(line) && !/\d/.test(line.split(/\s+/)[0] || '')
+      && line.split(/\s+/).length <= 8;
+    if (heading && end - i - 1 >= 2) {
+      const items = [...new Map(lines.slice(i + 1, end).map((item) => [lineKey(item), item])).values()];
+      out.push({ title: line, items });
+      i = end - 1;
+    } else {
+      out.push(line);
+    }
+  }
+  // A loose line repeating an item already listed (photo captions under the prints) is dropped.
+  const inSections = new Set(out.flatMap((e) => (typeof e === 'string' ? [] : e.items.map((item) => lineKey(String(item))))));
+  const loose = new Set<string>();
+  return out.filter((e) => {
+    if (typeof e !== 'string') return true;
+    const k = lineKey(e);
+    if (inSections.has(k) || loose.has(k)) return false;
+    loose.add(k);
+    return true;
+  });
+}
+
+// ---------- Package options ----------
+
+/** "OPTIONS:", "Attire options (choose 2):", "Choices": the client picks from the lines that follow. */
+const OPTION_HEADER = /^(?:(?:attire|package|available|outfit)\s+)?(?:options?|choices?)(?:\s*\(?\s*(?:choose|pick|select)\s*(?:any\s*)?(\d+)\s*\)?)?[\s:]*$/i;
+/** "(girls)", "(for boys)", "- ladies": who an option is for. */
+const OPTION_FOR = /\s*[-–(]\s*(?:for\s+)?(girls?|ladies|female|women|boys?|gents|gentlemen|male|men)\s*\)?\s*$/i;
+
+let optionSeq = 0;
+const optionId = () => `opt${Date.now().toString(36)}${(++optionSeq).toString(36)}`;
+
+/** Reads one option line into a choice: the gender note becomes who it's for. */
+export function optionChoice(text: string): { id: string; label: string; for: 'all' | 'female' | 'male' } {
+  let label = finish(text);
+  let forWhom: 'all' | 'female' | 'male' = 'all';
+  const marked = OPTION_FOR.exec(label);
+  if (marked) {
+    forWhom = /girl|lad|fem|wom/i.test(marked[1]) ? 'female' : 'male';
+    label = label.slice(0, marked.index);
+  }
+  label = finish(label.replace(/^(?:or|and)\s+/i, '').trim());
+  return { id: optionId(), label: label.charAt(0).toUpperCase() + label.slice(1), for: forWhom };
+}
+
+/**
+ * Adds an option line to a group. A line starting with "or" continues the one before it:
+ * "Filipiniana" / "or glamour shots (girls)" are both for girls.
+ */
+function addOptionChoice(group: PackageOptionGroup, line: string) {
+  const choice = optionChoice(line);
+  // The same option read twice, once with junk from nearby text ("Glamour shots (girls) nk: g…"), is skipped.
+  const k = lineKey(choice.label);
+  if (!choice.label || group.choices.some((c) => { const ck = lineKey(c.label); return ck === k || (ck.length >= 6 && k.startsWith(ck)); })) return;
+  const previous = group.choices[group.choices.length - 1];
+  if (/^\s*or\b/i.test(line) && previous && previous.for === 'all' && choice.for !== 'all') previous.for = choice.for;
+  group.choices.push(choice);
+}
+
+/** A spreadsheet "Options" cell: "Attire (choose 1): Toga w/ cap | Filipiniana (girls)", groups split by lines or ";". */
+function optionGroupsFromCell(cell: string): PackageOptionGroup[] {
+  const groups: PackageOptionGroup[] = [];
+  for (const part of cell.split(/\r?\n|;/).map((p) => p.trim()).filter(Boolean)) {
+    const colon = part.indexOf(':');
+    const head = colon > 0 ? part.slice(0, colon) : '';
+    const list = colon > 0 ? part.slice(colon + 1) : part;
+    const pick = Number(/(?:choose|pick|select)\s*(\d+)/i.exec(head)?.[1]) || 1;
+    const name = finish(head.replace(/\(?\s*(?:choose|pick|select)\s*\d+\s*\)?/i, '').trim()) || 'Options';
+    const group: PackageOptionGroup = { id: optionId(), name, pick, choices: [] };
+    for (const item of list.split(list.includes('|') ? '|' : ',').map((s) => s.trim()).filter(Boolean)) addOptionChoice(group, item);
+    if (group.choices.length) groups.push({ ...group, pick: Math.min(pick, group.choices.length) });
+  }
+  return groups;
 }
 
 function dedupeAddOns(list: DraftAddOn[]): DraftAddOn[] {
@@ -332,6 +456,7 @@ const HEADERS = {
   price: /(price|amount|rate|cost|php|₱|peso)/,
   inclusions: /(inclusion|includes|items included|details|contents)/,
   freebies: /(freebie|free items|free)/,
+  options: /^(options?|choices?|attire options?)$/,
   offered: /(offered|client|for|audience|availability)/,
   limit: /(limit|poses|selection|photos? to choose|best shots)/,
 };
@@ -386,17 +511,30 @@ export function parseCatalogRows(rows: string[][]): CatalogDraft | null {
 
     const priceMatch = priceText ? (findPrice(priceText) ?? findPrice(`- ${priceText.replace(/[^\d.,]/g, '')}`)) : null;
     const amount = priceMatch?.amount ?? (Number(priceText.replace(/[^\d.]/g, '')) || 0);
-    const kind = /free/.test(type) ? 'freebie'
+    const kind = /option|choice/.test(type) ? 'option'
+      : /free/.test(type) ? 'freebie'
       : /add|extra|upgrade/.test(type) ? 'addon'
       : /incl/.test(type) ? 'inclusion'
       : /pack|pkg|bundle|promo/.test(type) ? 'package'
       : !priceText && packages.length ? 'inclusion'
       : section ?? 'package';
 
+    if (kind === 'option') {
+      // An "Option" row adds a choice to the last package's first option group ("Options").
+      const last = packages[packages.length - 1];
+      if (last && name) {
+        if (!last.optionGroups.length) last.optionGroups.push({ id: optionId(), name: 'Options', pick: 1, choices: [] });
+        addOptionChoice(last.optionGroups[0], name);
+      }
+      continue;
+    }
     if (kind === 'inclusion' || kind === 'freebie') {
       const last = packages[packages.length - 1];
-      const list = kind === 'freebie' || FREE_ITEM.test(name) ? last?.freebies : last?.inclusions;
-      if (list && name && !list.some((i) => lineKey(i) === lineKey(name))) list.push(name);
+      if (last && name) {
+        const isFree = kind === 'freebie' || FREE_ITEM.test(name);
+        const known = isFree ? last.freebies : inclusionLines(last.inclusions);
+        if (!known.some((i) => lineKey(i) === lineKey(name))) (isFree ? last.freebies : last.inclusions).push(name);
+      }
       continue;
     }
     const code = cell(row, 'code').toUpperCase();
@@ -406,7 +544,7 @@ export function parseCatalogRows(rows: string[][]): CatalogDraft | null {
       continue;
     }
     const split = (text: string) => text.split(/\r?\n|;|\||•|,(?!\d)/).map(tidy).filter(Boolean);
-    const { inclusions, freebies: freeInclusions, photoLimit } = inclusionsFrom(split(cell(row, 'inclusions')), name);
+    const { inclusions, freebies: freeInclusions, optionGroups: listedOptions, photoLimit } = inclusionsFrom(split(cell(row, 'inclusions')), name);
     const freebies = [...freeInclusions];
     for (const item of split(cell(row, 'freebies'))) {
       if (!freebies.some((f) => lineKey(f) === lineKey(item))) freebies.push(item);
@@ -414,10 +552,67 @@ export function parseCatalogRows(rows: string[][]): CatalogDraft | null {
     const limitCell = Number(cell(row, 'limit').replace(/[^\d]/g, ''));
     packages.push(newDraftPackage({
       name, code, amount: Number.isFinite(amount) ? amount : 0, inclusions, freebies,
+      optionGroups: [...listedOptions, ...optionGroupsFromCell(cell(row, 'options'))],
       photoLimit: limitCell || photoLimit,
       clientKind: parseOffered(cell(row, 'offered'), 'school'),
     }));
   }
+  return { packages, addOns };
+}
+
+// ---------- StudioFlow package files (.json) ----------
+
+/**
+ * A StudioFlow package file: { "packages": [...], "add_ons": [...] } with the catalog's own field
+ * names (code, name, amount, inclusions with sections, freebies, option_groups,
+ * photo_selection_limit, client_kind, revenue_category). Everything still goes through review.
+ */
+export function parseCatalogJson(text: string): CatalogDraft {
+  let data: unknown;
+  try { data = JSON.parse(text); } catch {
+    throw new Error('This file is not a StudioFlow package file (it is not valid JSON).');
+  }
+  const root = (Array.isArray(data) ? { packages: data } : data) as { packages?: unknown[]; add_ons?: unknown[] };
+  if (!root || typeof root !== 'object' || (!Array.isArray(root.packages) && !Array.isArray(root.add_ons))) {
+    throw new Error('This file has no "packages" or "add_ons" list.');
+  }
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const kind = (v: unknown, fallback: PackageKind): PackageKind => (['school', 'walkin', 'both'].includes(v as string) ? v as PackageKind : fallback);
+  const revenue = (v: unknown): RevenueCategory => (v === 'mua' ? 'mua' : 'studio');
+  const packages = (root.packages ?? []).flatMap((raw) => {
+    const p = raw as Record<string, unknown>;
+    if (!p || typeof p !== 'object' || !str(p.name)) return [];
+    const groups = (Array.isArray(p.option_groups) ? p.option_groups : []) as PackageOptionGroup[];
+    return [newDraftPackage({
+      code: str(p.code).toUpperCase(),
+      name: str(p.name),
+      amount: num(p.amount),
+      inclusions: parseInclusionTree(p.inclusions),
+      freebies: (Array.isArray(p.freebies) ? p.freebies : []).map(str).filter(Boolean),
+      optionGroups: groups.filter((g) => g && typeof g === 'object').map((g) => ({
+        id: str(g.id) || optionId(),
+        name: str(g.name),
+        pick: Math.max(1, Math.floor(num(g.pick) || 1)),
+        ...(str(g.replaces) ? { replaces: str(g.replaces), replaces_for: (['female', 'male'].includes(g.replaces_for as string) ? g.replaces_for : 'all') as 'all' | 'female' | 'male' } : {}),
+        choices: (Array.isArray(g.choices) ? g.choices : []).map((c) => ({
+          id: str(c?.id) || optionId(),
+          label: str(c?.label),
+          for: (['female', 'male'].includes(c?.for as string) ? c.for : 'all') as 'all' | 'female' | 'male',
+          ...(Array.isArray(c?.items) && c.items.length ? { items: c.items.map(str).filter(Boolean) } : {}),
+        })).filter((c) => c.label),
+      })),
+      photoLimit: Math.max(0, Math.floor(num(p.photo_selection_limit))),
+      clientKind: kind(p.client_kind, 'school'),
+      revenue: revenue(p.revenue_category),
+    })];
+  });
+  const addOns = (root.add_ons ?? []).flatMap((raw) => {
+    const a = raw as Record<string, unknown>;
+    if (!a || typeof a !== 'object' || !str(a.name)) return [];
+    return [newDraftAddOn({ code: str(a.code).toUpperCase(), name: str(a.name), amount: num(a.amount),
+      clientKind: kind(a.client_kind, 'both'), ...(a.revenue_category ? { revenue: revenue(a.revenue_category) } : {}) })];
+  });
   return { packages, addOns };
 }
 

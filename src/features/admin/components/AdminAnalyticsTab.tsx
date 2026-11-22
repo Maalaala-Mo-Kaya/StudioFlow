@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   PhilippinePeso,
   Users,
@@ -11,8 +12,12 @@ import {
   Printer,
   Ban,
   Undo2,
+  BookOpenCheck,
+  ArrowRight,
+  X,
+  TriangleAlert,
 } from 'lucide-react';
-import type { Organization, Registration, Package, PaymentRecord, RefundRecord } from '../../../types';
+import type { AddOn, Organization, Registration, Package, PaymentRecord, RefundRecord } from '../../../types';
 import type { RefundRequest } from '../useAdminData';
 import { RefundModal, VoidPaymentModal } from './LedgerActionModals';
 import { PrintRefundSlipModal } from './PrintRefundSlipModal';
@@ -21,11 +26,12 @@ import { PrintReceiptModal } from '../../cashier/components/PrintReceiptModal';
 import { DataTable, tableFilterControl } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { MuaPerformancePanel } from './MuaPerformancePanel';
+import { MuaPayoutsPanel } from './MuaPayoutsPanel';
 import { clientGroup, clientSummary } from '../../../utils/clientInfo';
 import { overviewMetrics, type OverviewMetrics } from '../overviewMetrics';
 import { buildAudit, isCountedPayment, type AuditGroup } from '../auditData';
 import { RegistrationDeletionHistory } from './RegistrationDeletionHistory';
-import { allocateRevenue, discountCents, revenuePesos, revenueTerms } from '../../../utils/revenue';
+import { allocateRevenue, discountCents, discountRate, revenuePesos, revenueTerms } from '../../../utils/revenue';
 import { studioDayStartUtc, studioMonthStartUtc } from '../../../utils/studioDay';
 
 const transactionDate = new Intl.DateTimeFormat('en-PH', {
@@ -40,11 +46,21 @@ type Period = 'today' | 'month' | 'all';
 const PERIOD_LABELS: Record<Period, string> = { today: 'Today', month: 'This Month', all: 'All Time' };
 
 interface AdminAnalyticsTabProps {
+  /** Analytics & Overview, or its Settlement & Ledger sub-tab. */
+  view?: 'overview' | 'ledger';
+  /** Opens the Settlement & Ledger sub-tab (from the overview). */
+  onOpenLedger?: () => void;
   /** All-time figures. */
   metrics: OverviewMetrics;
   organizations: Organization[];
   registrations: Registration[];
   packages: Package[];
+  /** For the "revenue type missing" warning. */
+  addOns?: AddOn[];
+  /** Opens Packages & Add-ons, where a missing revenue type is chosen. */
+  onOpenCatalog?: () => void;
+  /** Opens Students, where an order's revenue review is set. */
+  onOpenStudents?: () => void;
   payments: PaymentRecord[];
   refunds: RefundRecord[];
   onVoidPayment: (paymentId: string, reason: string) => Promise<void>;
@@ -52,10 +68,15 @@ interface AdminAnalyticsTabProps {
 }
 
 export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
+  view = 'overview',
+  onOpenLedger,
   metrics,
   organizations,
   registrations,
   packages,
+  addOns = [],
+  onOpenCatalog,
+  onOpenStudents,
   payments,
   refunds,
   onVoidPayment,
@@ -77,6 +98,16 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   const [voidTarget, setVoidTarget] = useState<{ registration: Registration; payment: PaymentRecord } | null>(null);
   const [refundTarget, setRefundTarget] = useState<{ registration: Registration; refundable: number } | null>(null);
   const [slipTarget, setSlipTarget] = useState<{ registration: Registration; refund: RefundRecord; justRecorded?: boolean } | null>(null);
+  // The ledger account open in the popup (by id, so it shows the latest payments and refunds).
+  const [openAccountId, setOpenAccountId] = useState<string | null>(null);
+  const actionOpen = Boolean(receiptTarget || voidTarget || refundTarget || slipTarget);
+  useEffect(() => {
+    if (!openAccountId) return;
+    // Escape closes the account popup, unless a receipt / void / refund popup is open on top of it.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !actionOpen) setOpenAccountId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [openAccountId, actionOpen]);
   const refundsByRegistration = useMemo(() => {
     const grouped = new Map<string, RefundRecord[]>();
     for (const refund of refunds) grouped.set(refund.registration, [...(grouped.get(refund.registration) ?? []), refund]);
@@ -131,7 +162,16 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   );
   const isReconciled = audit.ordersBalanced && audit.paymentsBalanced;
   // School and package groups report Studio activity only.
-  const hasActivity = (group: AuditGroup) => Boolean(group.count || group.billed || group.collected || group.balance);
+  const hasActivity = (group: AuditGroup) => Boolean(group.count || group.billed || group.collected || group.discount || group.balance || group.held);
+  // Revenue types that were never chosen: their sales can't be counted as Studio or MUA.
+  const untypedCatalog = [
+    ...packages.filter((pkg) => !pkg.revenue_category).map((pkg) => `${pkg.name} (package)`),
+    ...addOns.filter((add) => !add.revenue_category && !add.catalog_item).map((add) => `${add.name} (add-on)`),
+  ];
+  const untypedOrders = registrations
+    .filter((reg) => reg.status !== 'cancelled' && revenueTerms(reg).unallocated > 0)
+    .map((reg) => reg.job_order_no || reg.id);
+  const list = (names: string[], max: number) => names.slice(0, max).join(', ') + (names.length > max ? ` and ${names.length - max} more` : '');
   const activeSchools = audit.bySchool.filter(hasActivity);
   const hiddenSchools = audit.bySchool.length - activeSchools.length;
   const activePackages = audit.byPackage.filter(hasActivity);
@@ -191,6 +231,21 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       cell: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code || 'PKG' },
     { id: 'billed', header: 'Original billed', sortable: true, accessor: ({ registration }) => registration.total_amount + discountCents(registration) / 100, align: 'right',
       cell: ({ registration }) => formatCurrency(registration.total_amount + discountCents(registration) / 100), cellClassName: 'font-bold' },
+    // The order's discount, with its rate and reason, so it is visible without opening the cashier.
+    { id: 'discount', header: 'Discount', sortable: true, accessor: ({ registration, cancelled }) => (cancelled ? 0 : discountCents(registration)), align: 'right',
+      cell: ({ registration, cancelled }) => {
+        const amount = cancelled ? 0 : discountCents(registration) / 100;
+        if (!amount) return <span className="text-neutral-400">—</span>;
+        const d = registration.revenue_discount;
+        return (
+          <>
+            <div className="text-amber-700">−{formatCurrency(amount, { exact: true })}</div>
+            <div className="text-[9px] font-normal text-neutral-500 whitespace-normal max-w-40">
+              {discountRate(d, registration.total_amount)}{d?.reason ? ` · ${d.reason}` : ''}
+            </div>
+          </>
+        );
+      }, cellClassName: 'font-bold' },
     { id: 'collected', header: 'Collected (payments + credits)', sortable: true, accessor: ({ collected }) => collected, align: 'right',
       cell: ({ collected, refunded, credit, netPayments }) => (
         <>
@@ -329,8 +384,13 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
     );
   }
 
+  const openAccount = openAccountId ? ledgerRows.find((row) => row.registration.id === openAccountId) : undefined;
+  // Summary figures for the popup: the ledger's own columns, minus the identity ones in its header.
+  const summaryColumns = ledgerColumns.filter((c) => !['job', 'name', 'school', 'package'].includes(c.id));
+
   return (
     <div className="space-y-6 animate-enter">
+      {view === 'overview' && (<>
       {/* Period switch for the cards (dates in Philippine time). */}
       <div className="flex flex-wrap items-center gap-3">
         <div role="group" aria-label="Period" className="inline-flex border-2 border-line bg-panel shadow-lux font-mono text-xs font-black uppercase">
@@ -359,10 +419,12 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             <PhilippinePeso className="w-4 h-4" />
           </div>
           <div className="font-mono text-2xl sm:text-3xl font-black text-gold">
-            {formatCurrency(shown.totalCollections)}
+            {formatCurrency(shown.totalReceived - shown.totalRefunds)}
           </div>
           <p className="text-[11px] text-neutral-400 mt-1">
-            {formatCurrency(shown.totalReceived - shown.totalRefunds, { exact: true })} net payments + {formatCurrency(shown.totalDiscountCredits, { exact: true })} discount credits
+            {shown.totalDiscountCredits > 0
+              ? <>Cash, net of refunds · + {formatCurrency(shown.totalDiscountCredits, { exact: true })} discount credits = {formatCurrency(shown.totalCollections, { exact: true })} settled</>
+              : 'Cash received, net of refunds'}
           </p>
         </div>
 
@@ -415,6 +477,53 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           </p>
         </div>
       </div>
+
+      {(untypedCatalog.length > 0 || untypedOrders.length > 0) && (
+        <section role="alert" aria-labelledby="revenue-missing-title"
+          // Fixed red / white (not theme tokens): the alert stays red with white text in Night and Day.
+          className="border-2 border-[#dc2626] bg-red-50 text-red-900 shadow-[0_0_0_3px_rgba(220,38,38,0.25)]">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-[#dc2626] text-[#fff]">
+            <h3 id="revenue-missing-title" className="flex items-center gap-2 text-sm font-black uppercase tracking-wider m-0">
+              <TriangleAlert className="w-5 h-5 shrink-0 motion-safe:animate-pulse" aria-hidden="true" />
+              Action required: revenue type missing
+            </h3>
+            <span className="font-mono text-[10px] font-black uppercase tracking-widest border border-[#fff]/70 px-2 py-0.5">
+              Revenue figures are incomplete
+            </span>
+          </div>
+          <ol className="p-4 space-y-3 text-xs">
+            {untypedCatalog.length > 0 && (
+              <li className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <p className="m-0">
+                  <b className="font-black">1. {untypedCatalog.length} catalog item{untypedCatalog.length === 1 ? '' : 's'}</b> {untypedCatalog.length === 1 ? 'has' : 'have'} no Studio / MUA type: {list(untypedCatalog, 5)}.{' '}
+                  <b>Every new sale of {untypedCatalog.length === 1 ? 'it' : 'them'} goes uncounted</b> until you choose one.
+                </p>
+                {onOpenCatalog && (
+                  <button type="button" onClick={onOpenCatalog}
+                    className="btn-tactile shrink-0 min-h-[40px] px-4 bg-[#dc2626] text-[#fff] border border-[#b91c1c] text-[11px] font-black uppercase tracking-wider cursor-pointer hover:bg-[#b91c1c]">
+                    Fix in Packages &amp; Add-ons
+                  </button>
+                )}
+              </li>
+            )}
+            {untypedOrders.length > 0 && (
+              <li className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-red-300 first:pt-0 first:border-t-0">
+                <p className="m-0">
+                  <b className="font-black">{untypedCatalog.length > 0 ? '2. ' : '1. '}{untypedOrders.length} job order{untypedOrders.length === 1 ? '' : 's'}</b> ({list(untypedOrders, 8)}) {untypedOrders.length === 1 ? 'has' : 'have'} charges with no revenue type.{' '}
+                  <b>Part of {untypedOrders.length === 1 ? 'its' : 'their'} payments stays unallocated even when fully paid.</b>{' '}
+                  Set the MUA amount in the order&apos;s revenue review (Students → Edit).
+                </p>
+                {onOpenStudents && (
+                  <button type="button" onClick={onOpenStudents}
+                    className="btn-tactile shrink-0 min-h-[40px] px-4 bg-[#dc2626] text-[#fff] border border-[#b91c1c] text-[11px] font-black uppercase tracking-wider cursor-pointer hover:bg-[#b91c1c]">
+                    Review in Students
+                  </button>
+                )}
+              </li>
+            )}
+          </ol>
+        </section>
+      )}
 
       {/* Accounting Reconciliation Banner */}
       <div className="grid gap-3 sm:grid-cols-3">
@@ -480,27 +589,17 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                   <span className="font-black text-ink">{s.code}</span>
                   <span className="text-neutral-500 text-[11px] block truncate max-w-[200px]">{s.name}</span>
                 </div>
-                <div className="text-right">
-                  <div className="font-black text-ink">{formatCurrency(s.collected, { exact: true })}</div>
-                  {s.balance > 0 ? (
-                    <span className="text-[10px] text-red-600 font-bold block">
-                      Studio charges not allocated: {formatCurrency(s.balance)}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-emerald-600 font-bold block">{s.count ? 'No balance' : 'Payments only'}</span>
-                  )}
-                </div>
+                <GroupFigures group={s} fallback={s.count ? 'No balance' : 'Payments only'} />
               </div>
             ))}
             {activeSchools.length > 0 && (
               <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
                 <span>TOTAL</span>
-                <div className="text-right">
-                  <div className="text-ink">{formatCurrency(activeSchools.reduce((total, school) => total + school.collected, 0), { exact: true })}</div>
-                </div>
+                <GroupFigures group={sumGroups(activeSchools)} total />
               </div>
             )}
           </div>
+          <GroupFootnote groups={activeSchools} />
           {hiddenSchools > 0 && (
             <p className="mt-2 text-[10px] text-neutral-500">{hiddenSchools} school{hiddenSchools === 1 ? '' : 's'} with nothing {periodWords} not shown.</p>
           )}
@@ -523,29 +622,41 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                   <span className="font-black text-ink">{pkg.code}</span>
                   <span className="text-neutral-500 text-[11px] block truncate max-w-[200px]">{pkg.name}</span>
                 </div>
-                <div className="text-right">
-                  <div className="font-black text-ink">{formatCurrency(pkg.collected, { exact: true })}</div>
-                  <span className="text-[10px] text-neutral-500 block">{pkg.count} order{pkg.count === 1 ? '' : 's'}</span>
-                </div>
+                <GroupFigures group={pkg} fallback={`${pkg.count} order${pkg.count === 1 ? '' : 's'}`} />
               </div>
             ))}
             {activePackages.length > 0 && (
               <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
                 <span>TOTAL</span>
-                <div className="text-right">
-                  <div className="text-ink">{formatCurrency(activePackages.reduce((total, pkg) => total + pkg.collected, 0), { exact: true })}</div>
-                  <span className="text-[10px] text-neutral-500 block">{audit.totals.activeOrders} orders</span>
-                </div>
+                <GroupFigures group={sumGroups(activePackages)} total fallback={`${audit.totals.activeOrders} orders`} />
               </div>
             )}
           </div>
+          <GroupFootnote groups={activePackages} />
         </div>
       </div>
 
       <MuaPerformancePanel />
+      <MuaPayoutsPanel />
 
-      {/* Financial Ledger & Audit Trail */}
-      <DataTable
+      {/* The ledger has its own sub-tab. */}
+      <button type="button" onClick={onOpenLedger}
+        className="btn-tactile w-full flex flex-wrap items-center justify-between gap-3 p-4 bg-panel border-2 border-line shadow-lux text-left cursor-pointer hover:border-gold">
+        <span className="flex items-center gap-3">
+          <BookOpenCheck className="w-5 h-5 text-gold shrink-0" />
+          <span>
+            <span className="block font-black text-xs uppercase tracking-wider text-ink">Financial Settlement &amp; Ledger</span>
+            <span className="block font-mono text-[11px] text-neutral-500">
+              Every client's billing, payments, balance and refunds · {registrations.length} account{registrations.length === 1 ? '' : 's'}
+            </span>
+          </span>
+        </span>
+        <span className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase text-gold-soft">Open <ArrowRight className="w-4 h-4" /></span>
+      </button>
+      </>)}
+
+      {/* Financial Ledger & Audit Trail: click a client to open their account. */}
+      {view === 'ledger' && <DataTable
         label="Financial Settlement & Ledger"
         rows={filteredLedger}
         columns={ledgerColumns}
@@ -556,7 +667,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         filtered={Boolean(searchQuery.trim()) || filterSchool !== 'all' || filterPaymentStatus !== 'all'}
         emptyMessage="No participant accounts yet."
         filteredEmptyMessage="No records match the selected ledger filters."
-        renderExpanded={renderHistory}
+        onRowClick={(row) => setOpenAccountId(row.registration.id)}
         toolbar={(
           <div className="flex flex-wrap items-center justify-between gap-3 p-5">
             <div>
@@ -564,7 +675,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                 Financial Settlement &amp; Ledger
               </h3>
               <p className="font-mono text-[11px] text-neutral-500">
-                Showing {filteredLedger.length} of {registrations.length} participant accounts
+                Showing {filteredLedger.length} of {registrations.length} participant accounts · click a client to see payments, refunds and receipts
               </p>
             </div>
 
@@ -602,7 +713,46 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             </div>
           </div>
         )}
-      />
+      />}
+
+      {openAccount && createPortal(
+        <div role="dialog" aria-modal="true" aria-labelledby="ledger-account-title"
+          onClick={(e) => { if (e.target === e.currentTarget && !actionOpen) setOpenAccountId(null); }}
+          className="no-print fixed inset-0 z-40 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 backdrop-blur-xs animate-modal">
+          <div className="w-full sm:max-w-6xl h-full sm:h-auto sm:max-h-[92vh] flex flex-col bg-panel sm:border-2 border-line shadow-lux-gold font-mono text-xs">
+            <div className="p-4 sm:px-6 border-b-2 border-line flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="bg-obsidian text-gold px-2 py-0.5 text-[10px] font-black uppercase tracking-widest">JO № {openAccount.registration.job_order_no || '—'}</span>
+                  {(() => { const { label, tone } = settlementOf(openAccount); return <span className={`px-2 py-0.5 text-[9px] font-black uppercase ${tone}`}>{label}</span>; })()}
+                </div>
+                <h3 id="ledger-account-title" className="mt-1 text-base sm:text-lg font-black uppercase tracking-wider text-ink">{formatClientName(openAccount.registration)}</h3>
+                <p className="text-[11px] text-neutral-600">
+                  {clientSummary(openAccount.registration, true) || 'No school / client'} · Package {openAccount.registration.package_snapshot?.code || openAccount.registration.expand?.package?.code || '—'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setOpenAccountId(null)} aria-label="Close"
+                className="w-9 h-9 shrink-0 flex items-center justify-center border border-line bg-canvas hover:bg-gold hover:text-on-gold cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+              <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                {summaryColumns.map((column) => (
+                  <div key={column.id} className="p-2 border border-line bg-canvas">
+                    <dt className="text-[9px] font-black uppercase tracking-wider text-neutral-600">{column.header}</dt>
+                    <dd className={`mt-0.5 text-sm font-black ${column.cellClassName ?? ''}`}>
+                      {column.cell ? column.cell(openAccount) : String(column.accessor?.(openAccount) ?? '')}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <div>{renderHistory(openAccount)}</div>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
       {receiptTarget && (
         <PrintReceiptModal
           registration={receiptTarget.registration}
@@ -640,5 +790,47 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         />
       )}
     </div>
+  );
+};
+
+const sumGroups = (groups: AuditGroup[]): AuditGroup => groups.reduce((sum, group) => ({
+  ...sum, count: sum.count + group.count, billed: sum.billed + group.billed, collected: sum.collected + group.collected,
+  discount: sum.discount + group.discount, balance: sum.balance + group.balance, held: sum.held + group.held,
+}), { key: 'total', code: 'TOTAL', name: '', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
+
+/**
+ * A school / package row's figures: Studio revenue counted, cash held until a mixed order is fully
+ * paid (or that has no revenue type), and Studio charges no cash has been counted toward yet.
+ */
+const GroupFigures: React.FC<{ group: AuditGroup; total?: boolean; fallback?: string }> = ({ group, total, fallback }) => (
+  <div className="text-right">
+    <div className={`${total ? '' : 'font-black '}text-ink`}>{formatCurrency(group.collected, { exact: true })}</div>
+    {group.discount > 0 && (
+      <span className="text-[10px] text-neutral-500 font-bold block">Discount given: {formatCurrency(group.discount, { exact: true })}</span>
+    )}
+    {group.held > 0 && (
+      <span className="text-[10px] text-amber-700 font-bold block">Held, not yet split: {formatCurrency(group.held, { exact: true })}</span>
+    )}
+    {group.balance > 0 && (
+      <span className="text-[10px] text-neutral-600 font-bold block">Studio still to settle: {formatCurrency(group.balance, { exact: true })}</span>
+    )}
+    {!group.held && !group.balance && !group.discount && fallback && (
+      <span className={`text-[10px] font-bold block ${total ? 'text-neutral-500' : 'text-emerald-600'}`}>{fallback}</span>
+    )}
+  </div>
+);
+
+/** Explains "held" and "still to settle" under a card, only when one shows. */
+const GroupFootnote: React.FC<{ groups: AuditGroup[] }> = ({ groups }) => {
+  const held = groups.some((group) => group.held > 0);
+  const toSettle = groups.some((group) => group.balance > 0);
+  const discount = groups.some((group) => group.discount > 0);
+  if (!held && !toSettle && !discount) return null;
+  return (
+    <p className="mt-3 pt-2 border-t border-line text-[10px] text-neutral-500 font-sans leading-relaxed">
+      {held && <><b className="text-amber-700">Held, not yet split:</b> payments on orders that mix Studio and MUA charges, counted into each once the order is fully paid (or charges with no revenue type). </>}
+      {toSettle && <><b className="text-neutral-600">Studio still to settle:</b> Studio charges no payment has been counted toward yet. </>}
+      {discount && <><b className="text-neutral-600">Discount given:</b> Studio discount credits; not revenue, so the amounts above are cash and add up to the Studio revenue card.</>}
+    </p>
   );
 };

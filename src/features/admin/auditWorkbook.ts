@@ -3,10 +3,11 @@ import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { clientDetail, clientGroup } from '../../utils/clientInfo';
 import { downloadBlob } from '../../utils/downloadBlob';
+import { discountRate } from '../../utils/revenue';
 import type { AuditData, AuditGroup } from './auditData';
 
 /**
- * Printable audit report (Excel): Summary, Job Orders and Payments sheets.
+ * Printable audit report (Excel): Summary, Job Orders, Payments, Refunds and Discounts sheets.
  * Every total is an Excel formula over the rows below it, so a printed copy can be checked by hand.
  * No solid fills, to save ink.
  */
@@ -89,12 +90,15 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
     { key: 'paid', width: 14, style: { numFmt: PESO } }, { key: 'refunded', width: 14, style: { numFmt: PESO } },
     { key: 'balance', width: 14, style: { numFmt: PESO } }, { key: 'overpaid', width: 14, style: { numFmt: PESO } },
     { key: 'note', width: 34 },
+    // Appended after Note so the formulas above (columns I–M) stay where they are.
+    { key: 'discount', width: 14, style: { numFmt: PESO } }, { key: 'discountWhy', width: 34 },
   ];
   ordersSheet.getCell('A1').value = `${STUDIO_INFO.name} · Job Orders`;
   ordersSheet.getCell('A1').font = { bold: true, size: 14 };
   ordersSheet.getCell('A2').value = isPeriod ? `Job orders made in the period. ${range}` : `All job orders. ${range}`;
   ordersSheet.getRow(4).values = ['JO №', 'Date made', 'Client', 'School / Client', 'Course / Session', 'Package', 'Status',
-    'Job order total', 'Counted in gross', 'Paid', 'Refunded', 'Balance', 'Refund due (overpaid)', 'Note'];
+    'Job order total', 'Counted in gross', 'Paid', 'Refunded', 'Balance', 'Refund due (overpaid)', 'Note',
+    'Discount', 'Discount rate · reason'];
   headerRowStyle(ordersSheet, 4);
   const firstOrder = 5;
   for (const order of audit.orders) {
@@ -108,6 +112,12 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
       detail: clientDetail(reg, true), pkg: reg.package_snapshot?.code || reg.expand?.package?.code || '', status: ORDER_STATUS[reg.status] ?? reg.status,
       total: order.total, billed: order.billed, paid: order.paid, refunded: order.refunded, balance: order.balance,
       overpaid: order.overpaid, note: notes,
+      // The order's discount (all of it, whenever it was given); the Discounts sheet lists the period's credits.
+      ...(reg.revenue_discount && !order.cancelled ? {
+        discount: ((reg.revenue_discount.studio ?? 0) + (reg.revenue_discount.mua ?? 0)) / 100,
+        discountWhy: [discountRate(reg.revenue_discount, reg.total_amount), reg.revenue_discount.reason]
+          .filter(Boolean).join(' · '),
+      } : {}),
     });
   }
   const lastOrder = firstOrder + audit.orders.length - 1;
@@ -198,6 +208,36 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
   totalRowStyle(refundsSheet, refundsTotalRow);
   setupPrint(refundsSheet, 'Refunds', 4);
 
+  // ---- Discounts --------------------------------------------------------------------------
+  const discountsSheet = workbook.addWorksheet('Discounts', { views: [{ state: 'frozen', ySplit: 4 }] });
+  discountsSheet.columns = [
+    { key: 'date', width: 19 }, { key: 'jo', width: 10 }, { key: 'client', width: 28 }, { key: 'group', width: 24 },
+    { key: 'pct', width: 13 }, { key: 'credit', width: 14, style: { numFmt: PESO } }, { key: 'earlier', width: 14 },
+    { key: 'by', width: 18 }, { key: 'reason', width: 40 },
+  ];
+  discountsSheet.getCell('A1').value = `${STUDIO_INFO.name} · Discount Credits`;
+  discountsSheet.getCell('A1').font = { bold: true, size: 14 };
+  discountsSheet.getCell('A2').value = `Discounts granted in the period on active job orders: the credit counts as collected (up to what was unpaid when given). ${range}`;
+  discountsSheet.getRow(4).values = ['Date granted', 'JO №', 'Client', 'School / Client', 'Rate', 'Credit',
+    isPeriod ? 'For earlier job order' : '', 'Granted by', 'Reason'];
+  headerRowStyle(discountsSheet, 4);
+  const firstDiscount = 5;
+  for (const row of audit.discounts) {
+    const reg = row.registration;
+    discountsSheet.addRow({
+      date: row.at ? when(row.at) : '', jo: reg.job_order_no || '', client: clientName(reg), group: clientGroup(reg, true),
+      pct: row.fixed ? 'Fixed amount' : `${row.percentage}%`, credit: row.credit, earlier: isPeriod ? (row.earlierOrder ? 'Yes' : 'No') : '',
+      by: row.by, reason: row.reason,
+    });
+  }
+  const lastDiscount = firstDiscount + audit.discounts.length - 1;
+  const discountsTotalRow = lastDiscount + 2;
+  discountsSheet.getCell(`E${discountsTotalRow}`).value = `TOTAL (${audit.discounts.length})`;
+  discountsSheet.getCell(`F${discountsTotalRow}`).value = audit.discounts.length
+    ? { formula: `SUM(F${firstDiscount}:F${lastDiscount})`, result: audit.totals.discountCredits } : 0;
+  totalRowStyle(discountsSheet, discountsTotalRow);
+  setupPrint(discountsSheet, 'Discounts', 4);
+
   // ---- Summary (first sheet) --------------------------------------------------------------
   const revenueSheet = workbook.addWorksheet('Revenue');
   revenueSheet.columns = [
@@ -233,7 +273,8 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
       'Counted total on the Payments sheet (voided excluded)'],
     ['refunds', 'Refunds given', { formula: `Refunds!G${refundsTotalRow}`, result: audit.totals.refunds },
       'Total on the Refunds sheet (money given back in this period)'],
-    ['discountCredits', 'DISCOUNT CREDITS', { formula: '', result: audit.totals.discountCredits }, 'Active settlement credits granted in this period'],
+    ['discountCredits', 'DISCOUNT CREDITS', { formula: `Discounts!F${discountsTotalRow}`, result: audit.totals.discountCredits },
+      'Total on the Discounts sheet: credits granted in this period on active orders'],
     ['analyticsCollected', 'OPERATIONAL COLLECTED', { formula: '', result: audit.totals.analyticsCollected }, 'Net payments plus discount credits'],
     ['net', 'NET COLLECTIONS (cash to account for)', { formula: '', result: audit.totals.netCollections },
       'Payments received − Refunds given', true],
@@ -303,6 +344,11 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
       ? `${cellOf.net}-(${netOnOrders}+${cellOf.earlierPaid}-${cellOf.earlierRefunded})`
       : `${cellOf.net}-${netOnOrders}`,
     audit.paymentsBalanced],
+    // The discount credits in Operational collected must be exactly the Discounts sheet's rows.
+    ['Operational collected − (Net collections + Discount credits on the Discounts sheet)',
+      `${cellOf.analyticsCollected}-(${cellOf.net}+Discounts!F${discountsTotalRow})`,
+      Math.round((audit.totals.analyticsCollected - audit.totals.netCollections
+        - audit.discounts.reduce((sum, row) => sum + row.credit, 0)) * 100) === 0],
   ];
   for (const [label, formula, ok] of checks) {
     rowNumber += 1;
@@ -320,29 +366,33 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
     summary.getCell(`A${rowNumber}`).value = title;
     summary.getCell(`A${rowNumber}`).font = { bold: true, size: 12 };
     rowNumber += 1;
-    // Separate small table: Name | Orders | Billed | Collected | Balance across columns A-E.
-    summary.getRow(rowNumber).values = ['Name', 'Orders', 'Studio billed', 'Studio revenue', 'Studio not allocated'];
+    // Separate small table: Name | Orders | Billed | Discount | Revenue (cash) | Still to settle | Held, columns A-G.
+    // Studio billed − Discount − Studio revenue − Still to settle = 0 on every row; the revenue total equals Studio revenue above.
+    summary.getRow(rowNumber).values = ['Name', 'Orders', 'Studio billed', 'Discount', 'Studio revenue (cash)', 'Studio still to settle', 'Held, not yet split'];
+    summary.getCell(`G${rowNumber}`).note = 'Cash received but not yet counted as Studio or MUA: downpayments on orders that mix Studio and MUA charges (split when fully paid), or charges with no revenue type. The total equals Unallocated cash above.';
     headerRowStyle(summary, rowNumber);
     const first = rowNumber + 1;
-    for (const group of groups.filter((item) => item.count || item.billed || item.collected || item.balance)) {
+    for (const group of groups.filter((item) => item.count || item.billed || item.collected || item.discount || item.balance || item.held)) {
       rowNumber += 1;
       const row = summary.getRow(rowNumber);
-      row.values = [`${group.code} · ${group.name}`, group.count, group.billed, group.collected, group.balance];
-      [3, 4, 5].forEach((column) => { row.getCell(column).numFmt = PESO; });
+      row.values = [`${group.code} · ${group.name}`, group.count, group.billed, group.discount, group.collected, group.balance, group.held];
+      [3, 4, 5, 6, 7].forEach((column) => { row.getCell(column).numFmt = PESO; });
       row.eachCell((cell) => { cell.border = box; });
     }
     const last = rowNumber;
     rowNumber += 1;
     const total = summary.getRow(rowNumber);
-    const listed = groups.filter((item) => item.count || item.billed || item.collected || item.balance);
+    const listed = groups.filter((item) => item.count || item.billed || item.collected || item.discount || item.balance || item.held);
     const sumOf = (column: string, result: number) => (last >= first ? { formula: `SUM(${column}${first}:${column}${last})`, result } : 0);
     const add = (value: (group: AuditGroup) => number) => Math.round(listed.reduce((sum, group) => sum + value(group), 0) * 100) / 100;
-    total.values = ['TOTAL', sumOf('B', add((g) => g.count)), sumOf('C', add((g) => g.billed)), sumOf('D', add((g) => g.collected)), sumOf('E', add((g) => g.balance))];
-    [3, 4, 5].forEach((column) => { total.getCell(column).numFmt = PESO; });
+    total.values = ['TOTAL', sumOf('B', add((g) => g.count)), sumOf('C', add((g) => g.billed)), sumOf('D', add((g) => g.discount)), sumOf('E', add((g) => g.collected)), sumOf('F', add((g) => g.balance)), sumOf('G', add((g) => g.held))];
+    [3, 4, 5, 6, 7].forEach((column) => { total.getCell(column).numFmt = PESO; });
     totalRowStyle(summary, rowNumber);
   };
   summary.getColumn(4).width = 16;
-  summary.getColumn(5).width = 16;
+  summary.getColumn(5).width = 20;
+  summary.getColumn(6).width = 20;
+  summary.getColumn(7).width = 18;
   breakdown('Studio by School / Client', audit.bySchool);
   breakdown('Studio by Package', audit.byPackage);
 

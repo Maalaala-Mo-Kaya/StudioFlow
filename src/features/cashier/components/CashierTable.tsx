@@ -1,9 +1,10 @@
-import { CreditCard, Banknote, Printer, PackageCheck, MessageSquare } from 'lucide-react';
+import { CreditCard, Banknote, Printer, PackageCheck, MessageSquare, Plus } from 'lucide-react';
 import { PickupNoticeInfo } from './PickupNoticeInfo';
 import type { Registration } from '../../../types';
 import { RegistrationStatusBadge } from '../../../components/RegistrationStatusBadge';
 import { isReadyForRelease, releaseBlocker } from '../../../utils/releaseReadiness';
 import { formatClientName, formatCurrency } from '../../../utils/formatters';
+import { discountRate } from '../../../utils/revenue';
 import { DataTable } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { CashierMobileCard } from './CashierMobileCard';
@@ -19,6 +20,8 @@ interface CashierTableProps {
   deletableIds: ReadonlySet<string>;
   onOpenPrint: (reg: Registration) => void;
   onOpenRelease: (reg: Registration) => void;
+  /** Add add-ons at the counter (open, unreleased orders). */
+  onOpenAddOn?: (reg: Registration) => void;
   /** Ready for Pickup tab: shows when each order became ready and whether the client was told. */
   pickupMode?: boolean;
   onOpenNotify?: (reg: Registration) => void;
@@ -27,7 +30,7 @@ interface CashierTableProps {
 }
 
 export function CashierTable({
-  registrations, loading, filtered, onOpenPayment, onOpenDelete, deletableIds, onOpenPrint, onOpenRelease,
+  registrations, loading, filtered, onOpenPayment, onOpenDelete, deletableIds, onOpenPrint, onOpenRelease, onOpenAddOn,
   pickupMode = false, onOpenNotify, visibleColumns,
 }: CashierTableProps) {
   const columns: DataTableColumn<Registration>[] = [
@@ -92,6 +95,12 @@ export function CashierTable({
               Settled
             </div>
           )}
+          {/* A discounted order says so at a glance (its reason shows on hover). */}
+          {reg.revenue_discount && reg.status !== 'cancelled' && (
+            <div className="text-amber-700 font-bold text-[10px]" title={reg.revenue_discount.reason ? `Discount reason: ${reg.revenue_discount.reason}` : undefined}>
+              Discount {discountRate(reg.revenue_discount, reg.total_amount)} · −{formatCurrency(((reg.revenue_discount.studio ?? 0) + (reg.revenue_discount.mua ?? 0)) / 100, { exact: true })}
+            </div>
+          )}
           {/* paid_amount is net of refunds: say when money was given back, so ₱0 paid isn't mistaken for "never paid". */}
           {(reg.refunded_amount ?? 0) > 0 && (
             <div className="text-neutral-600 font-bold text-[10px]" title="Money given back to the client (recorded by an admin)">
@@ -148,7 +157,17 @@ export function CashierTable({
             <RecordActionButton variant="edit" recordName={`discount for ${formatClientName(reg)}`} onClick={() => onOpenPayment(reg)} />}
           {onOpenDelete && deletableIds.has(reg.id) &&
             <RecordActionButton variant="delete" recordName={`unpaid registration for ${formatClientName(reg)}`} onClick={() => onOpenDelete(reg)} />}
-          {reg.job_order_no && <button
+  {onOpenAddOn && !['released', 'cancelled'].includes(reg.status) && (
+          <button
+            type="button"
+            onClick={() => onOpenAddOn(reg)}
+            title="Add an add-on the client asks for"
+            className="btn-tactile min-h-[36px] px-3 py-1.5 text-[11px] border border-gold text-gold-soft bg-canvas font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer hover:bg-gold-wash"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add-on
+          </button>
+        )}
+        {reg.job_order_no && <button
             type="button"
             onClick={() => onOpenPrint(reg)}
             title="Print Yellow Form / Receipt"
@@ -197,7 +216,7 @@ export function CashierTable({
       rowClassName={() => 'hover:bg-gold-wash/50 transition'}
       renderCompactRow={(reg) => (
         <CashierMobileCard registration={reg} onOpenPayment={onOpenPayment}
-          onOpenPrint={onOpenPrint} onOpenRelease={onOpenRelease}
+          onOpenPrint={onOpenPrint} onOpenRelease={onOpenRelease} onOpenAddOn={onOpenAddOn}
           onOpenDelete={deletableIds.has(reg.id) ? onOpenDelete : undefined}
           onOpenNotify={pickupMode ? onOpenNotify : undefined} />
       )}

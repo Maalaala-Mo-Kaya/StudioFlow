@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Megaphone, CheckCircle2, Folder, Copy, Check, Aperture, Gift, MousePointer2 } from 'lucide-react';
+import { Megaphone, CheckCircle2, Folder, Copy, Check, Aperture, Gift, ListChecks, MousePointer2 } from 'lucide-react';
 import type { Registration } from '../../../types';
+import { chosenOptionLines } from '../../../utils/packageOptions';
 import {
   formatClientName,
   formatJobOrderNo,
@@ -39,6 +40,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
   const inclusionsArray = orderInclusions(reg);
   const alreadyOnSet = reg.status === 'shooting';
   const freebies = orderFreebies(reg);
+  const optionLines = chosenOptionLines(reg.package_options);
 
   const handleCopyFolder = async () => {
     try {
@@ -140,6 +142,17 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
               {inclusionsArray.slice(0, 3).map((inc, i) => (
                 <li key={i} className="truncate flex items-center gap-1.5">
                   <span className="text-gold font-mono font-bold">+</span> {inc}
+                </li>
+              ))}
+            </ul>
+          )}
+          {optionLines.length > 0 && (
+            <ul className={`text-[11px] space-y-1 mt-2 border-t pt-2 font-bold ${
+              selected ? 'border-neutral-800 text-white' : 'border-neutral-200 text-ink'
+            }`}>
+              {optionLines.map((line) => (
+                <li key={line} className="flex items-center gap-1.5">
+                  <ListChecks className="w-3 h-3 shrink-0 text-gold" /> {line}
                 </li>
               ))}
             </ul>

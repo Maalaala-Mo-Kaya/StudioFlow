@@ -8,6 +8,18 @@ export const revenuePesos = ({ studio, mua, unallocated }: RevenueSplit): Revenu
   ({ studio: studio / 100, mua: mua / 100, unallocated: unallocated / 100 });
 export const discountCents = (reg: Registration) => (reg.revenue_discount?.studio ?? 0) + (reg.revenue_discount?.mua ?? 0);
 
+/**
+ * How a discount is described next to its amount: "10%", or "Fixed amount" for one given in pesos
+ * (its worked-out percentage, e.g. 6.68%, would only confuse). '' when there is none.
+ */
+export function discountRate(discount: { percentage?: number; fixed?: boolean; studio?: number; mua?: number } | null | undefined, total?: number): string {
+  if (!discount) return '';
+  if (discount.fixed) return 'Fixed amount';
+  const credit = (discount.studio ?? 0) + (discount.mua ?? 0);
+  const percentage = discount.percentage ?? (credit && total !== undefined ? credit * 100 / (total * 100 + credit) : undefined);
+  return percentage === undefined ? '' : `${Number(percentage.toFixed(2))}%`;
+}
+
 export function revenueTerms(reg?: Registration): RevenueSplit {
   const due = toCentavos(reg?.total_amount);
   const terms = reg?.revenue_terms;

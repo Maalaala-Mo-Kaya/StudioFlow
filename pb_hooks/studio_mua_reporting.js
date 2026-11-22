@@ -100,7 +100,7 @@ function dailyReport(app, date, today, includeAudit = false, roster) {
   }
   if (date === today) {
     for (const [collection, source] of [["packages", "package"], ["add_ons", "add_on"]]) {
-      const eligible = source === "add_on" ? "(requires_mua = true || default_when_no_mua = true)" : "requires_mua = true";
+      const eligible = "requires_mua = true";
       for (const item of app.findRecordsByFilter(collection, "is_active = true && " + eligible, "name", 0, 0)) {
         const service = workflow.serviceRequirement(item, source);
         if (service) columns.set(earnings.serviceKey(service), service.name);

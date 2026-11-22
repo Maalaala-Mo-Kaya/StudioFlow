@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { TableSort } from '../../components/common/dataTableModel';
 import { studioDate } from '../../utils/studioDay';
+import { clampDay, useStudioCalendar } from '../../hooks/useStudioCalendar';
 import { formatMuaAmount, muaEarningsTable } from '../admin/muaPerformance';
 import { MakeupTeamTable } from './MakeupTables';
 import { MuaAnalyticsTable } from './MuaAnalyticsTable';
@@ -26,6 +27,7 @@ export function MuaTeamOverview({ team, date, onDateChange, sort, onSort, failed
   const report = current?.report;
   const workload = current?.workload;
   const today = team?.today ?? studioDate();
+  const { start } = useStudioCalendar();
   const metrics = report && workload ? [
     ['Total MUA artists', current.artists.length],
     ['Pending services', workload.pending],
@@ -38,8 +40,8 @@ export function MuaTeamOverview({ team, date, onDateChange, sort, onSort, failed
     <section aria-label="MUA Team Overview" className="min-w-0 space-y-3">
       <label className="flex flex-wrap items-center gap-2 text-xs font-bold">
         Report date (Asia/Manila)
-        <input type="date" className="min-h-10 border border-line bg-panel px-2" value={date} max={today}
-          onChange={(event) => onDateChange(event.target.value || today)} />
+        <input type="date" className="min-h-10 border border-line bg-panel px-2" value={date} min={start || undefined} max={today}
+          onChange={(event) => onDateChange(clampDay(event.target.value || today, start, today))} />
       </label>
       <StationTabs label="MUA team analytics views" tabs={views} active={view} onChange={setView}>
         {!report && !failed && <p role="status" className="text-sm">Loading team report…</p>}

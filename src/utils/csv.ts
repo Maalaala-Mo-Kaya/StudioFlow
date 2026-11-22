@@ -1,6 +1,7 @@
 import type { PaymentRecord, RefundRecord, Registration } from '../types';
 import { clientDetail, clientGroup } from './clientInfo';
 import { buildAudit } from '../features/admin/auditData';
+import { discountRate } from './revenue';
 
 export interface ParsedRosterRow {
   full_name: string;
@@ -50,7 +51,7 @@ export function buildRegistrationsCsv(registrations: Registration[], payments: P
   const headers = [
     'Job Order No', 'Queue No', 'Family Name', 'Given Name', 'School / Client', 'Course / Session', 'Section', 'Mobile',
     'Package', 'Job Order Total', 'Counted In Gross', 'Paid', 'Refunded', 'Net Paid', 'Balance', 'Status', 'Payment Status', 'Prepared By',
-    'Date Registered (PH time)', 'Note', 'Studio revenue', 'Other Payment - MUA', 'Unallocated cash', 'Discount credit', 'Operational collected',
+    'Date Registered (PH time)', 'Note', 'Discount %', 'Discount reason', 'Studio revenue', 'Other Payment - MUA', 'Unallocated cash', 'Discount credit', 'Operational collected',
   ];
   const rows = audit.orders.map(({ registration: r, total, billed, paid, refunded, net, balance, cancelled, overpaid, revenue, discountCredit, operationalCollected }) => [
     cell(r.job_order_no), cell(r.queue_number || ''), cell(r.family_name), cell(r.given_name),
@@ -58,13 +59,15 @@ export function buildRegistrationsCsv(registrations: Registration[], payments: P
     cell(r.package_snapshot?.code || r.expand?.package?.code), money(total), money(billed), money(paid), money(refunded), money(net), money(balance),
     cell(r.status), cell(r.payment_status), cell(r.prepared_by), cell(when(r.created)),
     cell([cancelled && 'Cancelled: only money still held counts', overpaid > 0 && `Refund due ${money(overpaid)}`].filter(Boolean).join('; ')),
+    // The discount on the order (its credit is in Discount credit below).
+    cell(r.revenue_discount && !cancelled ? discountRate(r.revenue_discount, r.total_amount) : ''), cell(r.revenue_discount && !cancelled ? r.revenue_discount.reason : ''),
     money(revenue.studio), money(revenue.mua), money(revenue.unallocated), money(discountCredit), money(operationalCollected),
   ]);
   const { totals } = audit;
   const totalRow = [
     cell('TOTAL'), '', '', '', '', '', '', '', cell(`${totals.activeOrders} active, ${totals.cancelledOrders} cancelled`),
     '', money(totals.gross), money(totals.paidOnOrders), money(totals.refundedOnOrders),
-    money(totals.paidOnOrders - totals.refundedOnOrders), money(totals.outstanding), '', '', '', '', '',
+    money(totals.paidOnOrders - totals.refundedOnOrders), money(totals.outstanding), '', '', '', '', '', '', '',
     money(totals.revenue.studio), money(totals.revenue.mua), money(totals.revenue.unallocated), money(totals.discountCredits), money(totals.analyticsCollected),
   ];
   return [headers.map(cell).join(','), ...rows.map((row) => row.join(',')), totalRow.join(',')].join('\r\n');

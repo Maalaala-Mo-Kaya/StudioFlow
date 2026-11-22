@@ -150,6 +150,7 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
       });
     }
     return {
+      id: record.id,
       level: record.level,
       levelName: record.levelName,
       schoolId: record.schoolId,
@@ -168,6 +169,9 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
       addOns: Object.fromEntries(charges),
       otherFees: record.otherFees,
       discount,
+      // "10% · Loyal client" for the DISCOUNT cell's note in the Overall Excel.
+      discountNote: discount ? [record.discount?.fixed ? "Fixed amount" : record.discount?.percentage !== undefined && record.discount?.percentage !== null ? Number(Number(record.discount.percentage).toFixed(2)) + "%" : "",
+        record.discount?.reason || "", record.discount?.by ? "by " + record.discount.by : ""].filter(Boolean).join(" · ") : "",
       revenueTerms: record.revenueTerms,
       due: record.due,
       payments: paymentsByRegistration.get(record.id) || { full: 0, additional: 0, down: 0, refunded: 0 },
@@ -176,10 +180,13 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
 
   const sortColumns = (columns) => [...columns.values()].sort((a, b) =>
     (a.code || a.name).localeCompare(b.code || b.name) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  // MUA pages: what each artist earned on these orders and the shared MUA charges (studio_mua_payouts.js).
+  const mua = require(__hooks + "/studio_mua_payouts.js").ordersReport(e.app, registrations.map((record) => record.id));
   e.response.header().set("Cache-Control", "no-store");
   return e.json(200, {
     packages: sortColumns(packageColumns),
     addOns: sortColumns(addOnColumns),
     rows,
+    mua,
   });
 }, $apis.requireAuth("users"));
