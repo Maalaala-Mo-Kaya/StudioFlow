@@ -31,12 +31,17 @@ routerAdd("POST", "/api/studioflow/camera/{id}/{action}", (e) => {
   workflow.staff(e.app, e.auth, ["admin", "photographer"]);
   const id = e.request.pathValue("id");
   const body = e.requestInfo().body || {};
-  camera.findStation(e.app, id);
-  switch (e.request.pathValue("action")) {
+  const station = camera.findStation(e.app, id);
+  const action = e.request.pathValue("action");
+  if (action !== "scan" && station.getString("active_registration") && station.getString("session_photographer")
+    && station.getString("session_photographer") !== e.auth.id) {
+    throw new ForbiddenError("This camera is linked to another photographer.");
+  }
+  switch (action) {
     case "scan": camera.scan(e.app, id); break;
-    case "start": camera.startSession(e.app, id, String(body.registration || "")); break;
+    case "start": camera.startSession(e.app, id, String(body.registration || ""), e.auth.id); break;
     case "end": camera.endSession(e.app, id, String(body.registration || "")); break;
-    case "claim-waiting": camera.claimWaiting(e.app, id); break;
+    case "claim-waiting": camera.claimWaiting(e.app, id, e.auth.id); break;
     default: throw new NotFoundError("Unknown camera action.");
   }
   return e.json(200, camera.status(e.app, camera.findStation(e.app, id)));
@@ -56,20 +61,44 @@ onRecordCreateRequest((e) => {
 
 onRecordUpdateRequest((e) => {
   const camera = require(__hooks + "/studio_camera_import.js");
-  const before = e.record.original();
-  const name = e.record.getString("name").trim();
-  if (!name) throw new BadRequestError("Give the camera a name, such as Booth 1.");
-  e.record.set("name", name);
-  const folder = camera.validateWatchFolder(e.app, e.record.getString("watch_folder"), e.record.id);
-  e.record.set("watch_folder", folder);
-  for (const field of camera.sessionFields) e.record.set(field, before.get(field));
-  // A new folder or a disabled camera ends the current session.
-  if (!e.record.getBool("enabled") || folder.toLowerCase() !== before.getString("watch_folder").toLowerCase()) {
-    e.record.set("active_registration", "");
-    e.record.set("session_skip", []);
-    e.record.set("waiting_count", 0);
-  }
-  return e.next();
+  const app = e.app;
+  return app.runInTransaction((tx) => {
+    tx.db().newQuery("UPDATE camera_stations SET id = id WHERE id = {:id}").bind({ id: e.record.id }).execute();
+    const before = camera.findStation(tx, e.record.id);
+    const name = e.record.getString("name").trim();
+    if (!name) throw new BadRequestError("Give the camera a name, such as Booth 1.");
+    e.record.set("name", name);
+    const folder = camera.validateWatchFolder(tx, e.record.getString("watch_folder"), e.record.id);
+    e.record.set("watch_folder", folder);
+    for (const field of camera.sessionFields) e.record.set(field, before.get(field));
+    const changedFolder = folder.toLowerCase() !== before.getString("watch_folder").toLowerCase();
+    if (changedFolder || !e.record.getBool("enabled") || e.record.getBool("import_raw") !== before.getBool("import_raw")
+      || e.record.getBool("include_subfolders") !== before.getBool("include_subfolders")) {
+      if (before.getString("session_task")) throw new ApiError(409, "Finish syncing the linked photography session before changing its import settings.");
+    }
+    // Legacy camera sessions end when their folder changes or the camera is disabled.
+    if (changedFolder || !e.record.getBool("enabled")) {
+      e.record.set("active_registration", "");
+      e.record.set("session_photographer", "");
+      e.record.set("session_skip", []);
+      e.record.set("waiting_count", 0);
+    }
+    e.app = tx;
+    try { return e.next(); } finally { e.app = app; }
+  });
+}, "camera_stations");
+
+onRecordDeleteRequest((e) => {
+  const camera = require(__hooks + "/studio_camera_import.js");
+  const app = e.app;
+  return app.runInTransaction((tx) => {
+    tx.db().newQuery("UPDATE camera_stations SET id = id WHERE id = {:id}").bind({ id: e.record.id }).execute();
+    if (camera.findStation(tx, e.record.id).getString("session_task")) {
+      throw new ApiError(409, "Finish syncing the linked photography session before deleting the camera.");
+    }
+    e.app = tx;
+    try { return e.next(); } finally { e.app = app; }
+  });
 }, "camera_stations");
 
 onRecordAfterCreateSuccess((e) => {
@@ -92,7 +121,8 @@ onRecordAfterUpdateSuccess((e) => {
   try {
     const camera = require(__hooks + "/studio_camera_import.js");
     for (const station of e.app.findRecordsByFilter("camera_stations", "active_registration = {:id}", "", 0, 0, { id: record.id })) {
-      camera.endSession(e.app, station.id, record.id);
+      if (station.getString("session_task")) camera.scan(e.app, station.id);
+      else camera.endSession(e.app, station.id, record.id);
     }
   } catch (err) {
     console.log("StudioFlow: could not unlink the camera of a client sent to makeup:", err);

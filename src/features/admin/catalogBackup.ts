@@ -11,7 +11,10 @@
 // Load this module with import(): it pulls in fflate.
 import { strFromU8, unzipSync } from 'fflate';
 import type PocketBase from 'pocketbase';
-import type { AddOn, CatalogItem, ItemPackage, Package } from '../../types';
+import type { AddOn, CatalogItem, ItemPackage, Package, StaffUser } from '../../types';
+import {
+  backupMatchKey as key, backupPhotographerIds, enabledBackupPhotographers, findBackupItem, missingBackupPhotographers,
+} from './catalogImport/backupPhotographers';
 
 export const BACKUP_MARKER = 'StudioFlow catalog backup (do not edit)';
 export const BACKUP_SHEET = 'StudioFlow backup';
@@ -23,7 +26,7 @@ export interface CatalogBackup {
   format: typeof FORMAT;
   version: 1;
   exported_at: string;
-  items: { id: string; name: string; category: string; amount: number; client_kind: string; is_active: boolean }[];
+  items: { id: string; name: string; category: string; amount: number; client_kind: string; is_active: boolean; required_photographers?: string[] }[];
   poses: { id: string; name: string; items: { item: string; qty: number }[] }[];
   packages: {
     id: string; code: string; name: string; amount: number; description: string; tagline: string;
@@ -43,6 +46,7 @@ export function makeBackup(data: { items: CatalogItem[]; poses: ItemPackage[]; p
     items: data.items.map((i) => ({
       id: i.id, name: i.name, category: i.category || 'other', amount: Number(i.amount) || 0,
       client_kind: i.client_kind || 'both', is_active: !!i.is_active,
+      ...(i.required_photographers === undefined ? {} : { required_photographers: i.required_photographers }),
     })),
     poses: data.poses.map((p) => ({ id: p.id, name: p.name, items: (p.items || []).map((r) => ({ item: r.item, qty: Number(r.qty) || 1 })) })),
     packages: data.packages.map((p) => ({
@@ -165,7 +169,6 @@ export interface RestoreResult {
 
 const MAKEUP_WORDS = /\b(make[\s-]?up|grooming|hmua|mua|hair\s*(?:and|&)\s*make)/i;
 
-const key = (value: string) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const message = (err: unknown) => {
   const data = (err as { response?: { message?: string; data?: Record<string, { message?: string }> } })?.response;
   const field = data?.data && Object.values(data.data)[0]?.message;
@@ -187,7 +190,9 @@ function remap(value: unknown, ids: Map<string, string>): unknown {
  * packages point at the right items. Existing ones are left as they are unless `update` is set.
  */
 export async function restoreCatalog(pb: PocketBase, backup: CatalogBackup, update: boolean,
-  onProgress?: (label: string, fraction: number) => void): Promise<RestoreResult> {
+  onProgress?: (label: string, fraction: number) => void,
+  replacements?: ReadonlyMap<string, string>,
+): Promise<RestoreResult> {
   const result: RestoreResult = { created: 0, updated: 0, kept: 0, failed: [], guessedRevenue: [] };
   // Studio, or MUA for makeup (as Import from File guesses); listed so the admin can check.
   const revenueOf = (b: { name: string; revenue_category: string; requires_mua: boolean }, label: string) => {
@@ -206,6 +211,21 @@ export async function restoreCatalog(pb: PocketBase, backup: CatalogBackup, upda
     pb.collection('packages').getFullList<Package>(opts),
     pb.collection('add_ons').getFullList<AddOn>(opts),
   ]);
+
+  const enabledIds = new Set<string>();
+  if (backup.items.some((item) => backupPhotographerIds(item).length && (update || !findBackupItem(items, item)))) {
+    const staff = await pb.collection('users').getFullList<StaffUser>({ ...opts, filter: 'role = "photographer"' });
+    for (const photographer of enabledBackupPhotographers(staff)) enabledIds.add(photographer.id);
+  }
+  const missing = missingBackupPhotographers(backup, items, update, enabledIds);
+  const resolved = new Map<string, string>();
+  for (const [id, names] of missing) {
+    const replacement = replacements?.get(id);
+    if (!replacement || !enabledIds.has(replacement)) {
+      throw new Error(`Choose an enabled replacement photographer for ${[...names].join(', ')} before restoring.`);
+    }
+    resolved.set(id, replacement);
+  }
 
   /** Create (keeping the id when free) or, if asked, update an existing record. */
   const put = async <T extends { id: string }>(collection: string, what: string, name: string, found: T | undefined, id: string, body: Record<string, unknown>) => {
@@ -227,8 +247,10 @@ export async function restoreCatalog(pb: PocketBase, backup: CatalogBackup, upda
   const itemIds = new Map<string, string>();
   for (const b of backup.items) {
     step('Single items');
-    const found = items.find((r) => r.id === b.id) ?? items.find((r) => key(r.name) === key(b.name) && (r.category || 'other') === b.category);
-    const body = { name: b.name, category: b.category, amount: b.amount, client_kind: b.client_kind, is_active: b.is_active && b.amount > 0 };
+    const found = findBackupItem(items, b);
+    const photographers = [...new Set(backupPhotographerIds(b).map((id) => resolved.get(id) ?? id))];
+    const body = { name: b.name, category: b.category, amount: b.amount, client_kind: b.client_kind, is_active: b.is_active && b.amount > 0,
+      ...(Array.isArray(b.required_photographers) ? { required_photographers: photographers } : {}) };
     const id = await put('catalog_items', 'Single item', b.name, found, b.id, body);
     if (id) itemIds.set(b.id, id);
   }

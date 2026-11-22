@@ -233,6 +233,9 @@ export function useAdminData() {
       const cents = (value: unknown) => Math.round(Number(value || 0) * 100);
       const peso = (value: unknown) => `₱${(cents(value) / 100).toFixed(2)}`;
       const problems: string[] = [];
+      if (data.required_photographers && [...(stored.required_photographers || [])].sort().join() !== [...data.required_photographers].sort().join()) {
+        problems.push('the required photographers differ');
+      }
       if (data.name !== undefined && stored.name !== data.name.trim().replace(/\s+/g, ' ')) problems.push(`the name is "${stored.name}"`);
       if (data.category !== undefined && stored.category !== data.category) problems.push(`the kind is ${stored.category}`);
       if (data.amount !== undefined && cents(stored.amount) !== cents(data.amount)) problems.push(`the price is ${peso(stored.amount)}, not ${peso(data.amount)}`);
@@ -602,10 +605,11 @@ export function useAdminData() {
   };
 
   /** Restores the catalog copy inside an exported price list (catalogBackup.ts). */
-  const handleRestoreCatalog = async (backup: CatalogBackup, update: boolean, onProgress?: (label: string, fraction: number) => void) => {
+  const handleRestoreCatalog = async (backup: CatalogBackup, update: boolean, onProgress: (label: string, fraction: number) => void,
+    replacements: ReadonlyMap<string, string>) => {
     try {
       const { restoreCatalog } = await import('./catalogBackup');
-      return await restoreCatalog(pb, backup, update, onProgress);
+      return await restoreCatalog(pb, backup, update, onProgress, replacements);
     } finally {
       await loadAllData();
     }

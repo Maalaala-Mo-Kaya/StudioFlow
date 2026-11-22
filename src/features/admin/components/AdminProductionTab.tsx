@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Frame, Copy, Check, Layers, MessageSquare, Save } from 'lucide-react';
-import type { Registration, ProductionStatus } from '../../../types';
+import type { PhotographyTask, Registration, ProductionStatus, StaffUser } from '../../../types';
 import { formatClientName, formatCurrency, orderFreebies, orderInclusions } from '../../../utils/formatters';
 import { getPhotoFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
 import { useToast } from '../../../context/ToastContext';
@@ -8,6 +8,7 @@ import { workflowError } from '../../../hooks/useWorkflowData';
 import { DataTable } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
+import { Modal } from '../../../components/common/Modal';
 import { clientDetail, clientGroup } from '../../../utils/clientInfo';
 import { StudentDirectoryFilters } from './StudentDirectoryFilters';
 import { ClientGroupFilter } from '../../../components/common/ClientGroupFilter';
@@ -17,9 +18,12 @@ import { useStudioSettings } from '../../../hooks/useStudioSettings';
 import { pb } from '../../../db/pocketbase';
 import { PickupNoticeInfo } from '../../cashier/components/PickupNoticeInfo';
 import { buildPickupMessage, PICKUP_PLACEHOLDERS, studioTime } from '../../../utils/pickupMessage';
+import { PhotographyProgress } from '../../photographer/components/PhotographyProgress';
+import { photographyAction } from '../../photographer/photographyTasks';
 
 interface AdminProductionTabProps {
   registrations: Registration[];
+  staffAccounts: StaffUser[];
   onSetProductionStatus: (ids: string[], status: ProductionStatus) => Promise<void>;
 }
 
@@ -138,7 +142,7 @@ const uniqueSorted = (values: string[]) => [...new Set(values.filter(Boolean))].
  * one order or of a whole group at once (e.g. every ACLC College order is In Production).
  * Release happens at the cashier, which records who claimed the order.
  */
-export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registrations, onSetProductionStatus }) => {
+export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registrations, staffAccounts, onSetProductionStatus }) => {
   const { toast } = useToast();
   const [filterGroup, setFilterGroup] = useState(ALL_CLIENTS);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
@@ -153,6 +157,21 @@ export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registra
   const [busyId, setBusyId] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [folder, setFolder] = useState<{ id: string; path: string }>();
+  const [photographyOrderId, setPhotographyOrderId] = useState('');
+  const [reassigning, setReassigning] = useState('');
+  const photographyOrder = registrations.find((reg) => reg.id === photographyOrderId);
+  const photographers = staffAccounts.filter((user) => user.role === 'photographer' && !user.disabled);
+  const reassign = async (reg: Registration, task: PhotographyTask, photographerId: string) => {
+    setReassigning(task.id);
+    try {
+      await photographyAction(reg.id, 'reassign', { taskId: task.id, photographerId });
+      toast.success('Photography session reassigned.');
+    } catch (error) {
+      toast.error(workflowError(error));
+    } finally {
+      setReassigning('');
+    }
+  };
 
   // Paid orders only: unpaid and cancelled job orders have nothing to produce.
   const orders = useMemo(
@@ -294,7 +313,12 @@ export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registra
     },
     {
       id: 'shoot', header: 'Photoshoot', sortable: true, accessor: (reg) => (isPhotographed(reg) ? 1 : 0),
-      cell: (reg) => isPhotographed(reg)
+      cell: (reg) => reg.photography?.tasks.length ? (
+        <button type="button" className="min-h-9 border border-line px-2 font-bold hover:border-gold"
+          onClick={() => setPhotographyOrderId(reg.id)}>
+          {isPhotographed(reg) ? 'Officially Done' : 'View Progress'}
+        </button>
+      ) : isPhotographed(reg)
         ? <span className="text-emerald-700 font-black text-[11px]">✓ Done</span>
         : <span className="text-amber-700 font-black text-[11px] uppercase">Not yet</span>,
     },
@@ -441,6 +465,25 @@ export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registra
 
       <PickupMessageEditor />
 
+      {photographyOrder && (
+        <Modal title="Photography Progress" subtitle={formatClientName(photographyOrder)} onClose={() => setPhotographyOrderId('')}>
+          <PhotographyProgress registration={photographyOrder} audit action={(task) => (
+            !task.removedAt && task.status !== 'completed' && !['cancelled', 'released'].includes(photographyOrder.status) && (
+              <label className="mt-1 flex flex-wrap items-center gap-2">
+                <span>Reassign</span>
+                <select aria-label={`Reassign ${task.name}`} value="" disabled={!!reassigning}
+                  className="min-h-9 border border-line bg-canvas px-2"
+                  onChange={(event) => void reassign(photographyOrder, task, event.target.value)}>
+                  <option value="" disabled>Choose photographer</option>
+                  {photographers.filter((user) => user.id !== task.photographerId).map((user) => (
+                    <option key={user.id} value={user.id}>{user.name || user.username}</option>
+                  ))}
+                </select>
+              </label>
+            )
+          )} />
+        </Modal>
+      )}
       <ConfirmModal
         isOpen={confirmBulk}
         title="Update Production Status"

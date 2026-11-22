@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Sparkles, Gift, Package as PackageIcon, Layers, Box, ListChecks, FileSpreadsheet, FileText, FileDown, Loader2 } from 'lucide-react';
 import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
-import type { Package, AddOn, RevenueCategory, CatalogItem, CatalogItemInput, ItemPackage } from '../../../types';
+import type { Package, AddOn, RevenueCategory, CatalogItem, CatalogItemInput, ItemPackage, StaffUser } from '../../../types';
 import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
 import { parseInclusionTree } from '../../../utils/inclusions';
 import { optionGroups } from '../../../utils/packageOptions';
@@ -20,6 +20,7 @@ import { packagePhotoUrls } from '../../../utils/packagePhotos';
 type View = 'packages' | 'sets' | 'items' | 'addons';
 
 interface AdminPackagesTabProps {
+  staffAccounts: StaffUser[];
   packages: Package[];
   addOns: AddOn[];
   catalogItems: CatalogItem[];
@@ -45,6 +46,7 @@ const TABS: { id: View; label: string; icon: React.ComponentType<{ className?: s
 ];
 
 export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
+  staffAccounts,
   packages,
   addOns,
   catalogItems,
@@ -301,7 +303,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
       )}
 
       {view === 'items' && (
-        <CatalogItemsPanel items={catalogItems} onSave={onSaveCatalogItem} onDelete={onDeleteCatalogItem} />
+        <CatalogItemsPanel items={catalogItems} staffAccounts={staffAccounts} onSave={onSaveCatalogItem} onDelete={onDeleteCatalogItem} />
       )}
 
       {view === 'addons' && (

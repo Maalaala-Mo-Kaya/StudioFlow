@@ -1013,6 +1013,42 @@ test('backup: an exported price list (Excel, CSV or Word) restores the catalog i
     // Running it again changes nothing.
     const again = await restoreCatalog(target, backup, false);
     assert.equal(again.created + again.updated + again.failed.length, 0, format + ': a second restore only keeps');
+    if (format === 'csv') await t.test('photographer assignments are resolved against target staff before restore', async () => {
+      const photographer = (pb, username, extra = {}) => pb.collection('users').create({
+        username, name: username, email: username + '@example.test', password: 'password123', passwordConfirm: 'password123',
+        role: 'photographer', ...extra,
+      });
+      const original = await photographer(source, 'source-camera');
+      const shared = await photographer(source, 'shared-camera');
+      const targetShared = await photographer(target, 'shared-camera', { id: shared.id });
+      const replacement = await photographer(target, 'target-camera');
+      const disabled = await photographer(target, 'disabled-camera', { disabled: true });
+      const ordinary = await item('On-location print', 'print', { amount: 200 });
+      const assigned = await item('On-location coverage', 'other', {
+        amount: 2500, is_active: true, required_photographers: [original.id, shared.id],
+      });
+      const file = await priceListFile({ items: [ordinary, assigned], poses: [], packages: [], addOns: [] }, 'csv');
+      const assignedBackup = await findBackupInFile(new File([file], 'assigned.csv'));
+      assert.ok(assignedBackup);
+      assert.deepEqual(assignedBackup.items[1].required_photographers, [original.id, shared.id]);
+
+      await assert.rejects(restoreCatalog(target, assignedBackup, false), /enabled replacement photographer.*On-location coverage/);
+      await assert.rejects(restoreCatalog(target, assignedBackup, false, undefined, new Map([[original.id, disabled.id]])),
+        /enabled replacement photographer/);
+      await assert.rejects(target.collection('catalog_items').getOne(ordinary.id), { status: 404 });
+
+      const remapping = new Map([[original.id, replacement.id]]);
+      const restored = await restoreCatalog(target, assignedBackup, false, undefined, remapping);
+      assert.deepEqual(restored.failed, []);
+      assert.equal(restored.created, 2);
+      const saved = await target.collection('catalog_items').getOne(assigned.id);
+      assert.deepEqual(saved.required_photographers, [replacement.id, targetShared.id]);
+      const listing = await target.collection('add_ons').getFirstListItem('catalog_item = "' + assigned.id + '"');
+      assert.deepEqual([saved.amount, listing.amount, listing.is_active], [2500, 2500, true]);
+      assert.equal((await restoreCatalog(target, assignedBackup, false)).kept, 2);
+      await assert.rejects(restoreCatalog(target, assignedBackup, true), /enabled replacement photographer/);
+      assert.equal((await restoreCatalog(target, assignedBackup, true, undefined, remapping)).updated, 2);
+    });
     if (format !== 'xlsx') continue;
     // A changed price stays unless "update existing" is chosen.
     const changed = (await target.collection('catalog_items').getFullList({ filter: 'name = "8R"' }))[0];

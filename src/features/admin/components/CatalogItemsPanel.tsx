@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Pencil, Check, X, Printer, Frame, Box, Store, Shirt, Palette, Loader2, ShieldCheck, AlertTriangle } from 'lucide-react';
-import type { CatalogItem, CatalogItemCategory, CatalogItemInput } from '../../../types';
+import type { CatalogItem, CatalogItemCategory, CatalogItemInput, StaffUser } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { formatCurrency } from '../../../utils/formatters';
 import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
@@ -24,8 +24,39 @@ const sellable = (category: CatalogItemCategory) => category === 'print' || cate
 
 interface CatalogItemsPanelProps {
   items: CatalogItem[];
+  staffAccounts: StaffUser[];
   onSave: (id: string | null, data: CatalogItemInput) => Promise<CatalogItem>;
   onDelete: (id: string) => Promise<void>;
+}
+
+function PhotographyRequirementFields({ enabled, setEnabled, ids, setIds, staff, disabled }: {
+  enabled: boolean; setEnabled: (enabled: boolean) => void; ids: string[]; setIds: (ids: string[]) => void;
+  staff: StaffUser[]; disabled: boolean;
+}) {
+  const options = staff.filter((user) => (user.role === 'photographer' && !user.disabled) || ids.includes(user.id));
+  return (
+    <fieldset disabled={disabled} className="space-y-2 border border-line bg-canvas p-3">
+      <legend className="px-1 text-[11px] font-black uppercase tracking-wider text-ink">Photography Requirements <span className="font-normal normal-case">(optional)</span></legend>
+      <label className="flex items-center gap-2 font-bold">
+        <input type="checkbox" className="size-4 accent-gold" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+        Requires Photography Session
+      </label>
+      {enabled && <>
+        <p className="font-bold">Required Photographer(s)</p>
+        <p className="font-sans text-neutral-600">Every selected photographer must finish their session before the client moves to Photo Chooser.</p>
+        <div className="max-h-36 space-y-1 overflow-y-auto">
+          {options.map((user) => (
+            <label key={user.id} className="flex min-h-8 items-center gap-2">
+              <input type="checkbox" className="size-4 accent-gold" checked={ids.includes(user.id)}
+                onChange={(event) => setIds(event.target.checked ? [...ids, user.id] : ids.filter((id) => id !== user.id))} />
+              {user.name || user.username}{(user.disabled || user.role !== 'photographer') && ' (unavailable)'}
+            </label>
+          ))}
+          {!options.length && <p className="text-neutral-600">No enabled photographer accounts.</p>}
+        </div>
+      </>}
+    </fieldset>
+  );
 }
 
 export function CategoryPicker({ value, onChange }: { value: CatalogItemCategory; onChange: (value: CatalogItemCategory) => void }) {
@@ -64,14 +95,16 @@ const toAmount = (value: string) => {
  * (handleSaveCatalogItem checks name, kind, price, client type and the kiosk listing); the popup
  * shows what the database now holds, or what differs.
  */
-function CatalogItemEditModal({ item, onSave, onClose }: {
-  item: CatalogItem; onSave: (id: string, data: CatalogItemInput) => Promise<CatalogItem>; onClose: () => void;
+function CatalogItemEditModal({ item, staffAccounts, onSave, onClose }: {
+  item: CatalogItem; staffAccounts: StaffUser[]; onSave: (id: string, data: CatalogItemInput) => Promise<CatalogItem>; onClose: () => void;
 }) {
   const [name, setName] = useState(item.name);
   const [category, setCategory] = useState<CatalogItemCategory>(item.category || 'other');
   const [price, setPrice] = useState(item.amount ? String(item.amount) : '');
   const [kind, setKind] = useState<PackageKind>((item.client_kind || 'both') as PackageKind);
   const [atKiosk, setAtKiosk] = useState(!!item.is_active);
+  const [photographers, setPhotographers] = useState(item.required_photographers || []);
+  const [requiresPhotography, setRequiresPhotography] = useState(photographers.length > 0);
   const [state, setState] = useState<{ phase: 'edit' | 'saving' } | { phase: 'saved'; stored: CatalogItem } | { phase: 'failed'; message: string }>({ phase: 'edit' });
   const busy = state.phase === 'saving';
   const amount = toAmount(price);
@@ -86,6 +119,7 @@ function CatalogItemEditModal({ item, onSave, onClose }: {
   const problem = !name.trim() ? 'Enter the item name.'
     : canSell && Number.isNaN(amount) ? 'Enter a valid price, such as 150 or 150.50.'
     : canSell && atKiosk && !(amount > 0) ? 'Set a price above zero to sell it at the kiosk.'
+    : category === 'other' && requiresPhotography && !photographers.length ? 'Select at least one photographer.'
     : '';
 
   const save = async (e: React.FormEvent) => {
@@ -94,6 +128,7 @@ function CatalogItemEditModal({ item, onSave, onClose }: {
     const data: CatalogItemInput = canSell
       ? { name: name.trim(), category, amount, client_kind: kind, is_active: atKiosk }
       : { name: name.trim(), category, amount: 0, is_active: false };
+    data.required_photographers = category === 'other' && requiresPhotography ? photographers : [];
     setState({ phase: 'saving' });
     try {
       setState({ phase: 'saved', stored: await onSave(item.id, data) });
@@ -127,6 +162,7 @@ function CatalogItemEditModal({ item, onSave, onClose }: {
                 <li>Offered to: {PACKAGE_KIND_LABELS[(state.stored.client_kind || 'both') as PackageKind]}</li>
                 <li>Kiosk: {state.stored.is_active ? <b>sold at {formatCurrency(state.stored.amount ?? 0, { exact: true })}</b> : 'not sold on its own'}</li>
               </>}
+              {!!state.stored.required_photographers?.length && <li>Required photographers · {state.stored.required_photographers.length}</li>}
             </ul>
             <p className="text-[11px]">Packages using it are updated. Job orders already sold keep their price.</p>
           </div>
@@ -155,6 +191,8 @@ function CatalogItemEditModal({ item, onSave, onClose }: {
                 </label>
               </>
             )}
+            {category === 'other' && <PhotographyRequirementFields enabled={requiresPhotography} setEnabled={setRequiresPhotography}
+              ids={photographers} setIds={setPhotographers} staff={staffAccounts} disabled={busy} />}
             {state.phase === 'failed' && (
               <p role="alert" className="flex items-start gap-2 p-2 border border-red-500 bg-red-50 text-red-800 font-sans">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {state.message}
@@ -191,7 +229,7 @@ function CatalogItemEditModal({ item, onSave, onClose }: {
  * ① Single items: the building blocks of poses, packages and freebies. Each has its own
  * price (one piece) and is sold on its own at the kiosk only while "Sell at kiosk" is on.
  */
-export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, onSave, onDelete }) => {
+export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, staffAccounts, onSave, onDelete }) => {
   const { toast } = useToast();
   const [name, setName] = useState('');
   const [category, setCategory] = useState<CatalogItemCategory>('print');
@@ -199,6 +237,9 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, onS
   const [kind, setKind] = useState<PackageKind>('both');
   const [editing, setEditing] = useState<CatalogItem | null>(null);
   const [busy, setBusy] = useState(false);
+  const [photographers, setPhotographers] = useState<string[]>([]);
+  const [requiresPhotography, setRequiresPhotography] = useState(false);
+  const missingPhotographer = category === 'other' && requiresPhotography && !photographers.length;
 
   const run = async (action: () => Promise<unknown>, done: string) => {
     setBusy(true);
@@ -216,10 +257,18 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, onS
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || missingPhotographer) return;
     const amount = toAmount(price);
     if (Number.isNaN(amount)) { toast.error('Enter a valid price, such as 150 or 150.50.'); return; }
-    if (await run(() => onSave(null, sellable(category) ? { name: name.trim(), category, amount, client_kind: kind } : { name: name.trim(), category }), `"${name.trim()}" added.`)) { setName(''); setPrice(''); }
+    const data: CatalogItemInput = { name: name.trim(), category };
+    if (sellable(category)) Object.assign(data, { amount, client_kind: kind });
+    if (category === 'other' && requiresPhotography) data.required_photographers = photographers;
+    if (await run(() => onSave(null, data), `"${name.trim()}" added.`)) {
+      setName('');
+      setPrice('');
+      setPhotographers([]);
+      setRequiresPhotography(false);
+    }
   };
 
   return (
@@ -243,13 +292,15 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, onS
               <PriceInput value={price} onChange={setPrice} label="Price" />
             </label>
           ) : <span />}
-          <button type="submit" disabled={busy || !name.trim()}
+          <button type="submit" disabled={busy || !name.trim() || missingPhotographer}
             className="btn-tactile min-h-[42px] px-4 flex items-center justify-center gap-1.5 bg-obsidian text-gold border border-line font-black uppercase cursor-pointer disabled:opacity-50">
             <Plus className="w-4 h-4" /> Add item
           </button>
         </div>
         <CategoryPicker value={category} onChange={setCategory} />
         {sellable(category) && <PackageKindInput value={kind} onChange={setKind} />}
+        {category === 'other' && <PhotographyRequirementFields enabled={requiresPhotography} setEnabled={setRequiresPhotography}
+          ids={photographers} setIds={setPhotographers} staff={staffAccounts} disabled={busy} />}
         <p className="text-[10px] font-sans text-neutral-600">{CATEGORY_HELP[category]}</p>
       </form>
 
@@ -305,7 +356,7 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, onS
           </div>
         );
       })}
-      {editing && <CatalogItemEditModal item={editing} onSave={onSave} onClose={() => setEditing(null)} />}
+      {editing && <CatalogItemEditModal item={editing} staffAccounts={staffAccounts} onSave={onSave} onClose={() => setEditing(null)} />}
     </div>
   );
 };

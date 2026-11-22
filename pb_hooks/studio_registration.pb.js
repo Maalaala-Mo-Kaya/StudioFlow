@@ -13,7 +13,7 @@ onRecordCreateRequest((e) => {
     photo_edit_until: 0, photo_revision: 0,
     photo_selection: null, photo_pending: null, photo_last_request: null,
     refunded_amount: 0, cancelled_at: "", cancelled_by: "", cancel_reason: "", status_before_cancel: "",
-    restored_at: "", restored_by: "", deleted_by_id: "", had_discount_credit: false, order_changes: null,
+    restored_at: "", restored_by: "", deleted_by_id: "", had_discount_credit: false, order_changes: null, photography: null,
   })) e.record.set(field, value);
   // Other fees change the price: only an admin sets them (the kiosk is public, so it can't).
   if (!e.hasSuperuserAuth() && e.auth?.getString("role") !== "admin") e.record.set("other_fees", 0);
@@ -24,6 +24,7 @@ onRecordCreateRequest((e) => {
 onRecordCreate((e) => {
   const workflow = require(__hooks + "/studio_workflow.js");
   workflow.saveMakeupServices(e.record, workflow.purchasedServices(e.app, e.record));
+  require(__hooks + "/studio_photography.js").updatePlan(e.app, e.record);
   e.record.set("shoot_completed", false);
   return e.next();
 }, "registrations");
@@ -31,6 +32,11 @@ onRecordCreate((e) => {
 onRecordUpdate((e) => {
   const workflow = require(__hooks + "/studio_workflow.js");
   const original = e.record.original();
+  const photography = require(__hooks + "/studio_photography.js");
+  if (["package", "package_options", "add_ons"].some((field) => e.record.getString(field) !== original.getString(field))) {
+    photography.updatePlan(e.app, e.record, original);
+  }
+  photography.applyStatus(e.record, original);
   // A removed discount still leaves financial history for deletion eligibility.
   e.record.set("had_discount_credit", original.getBool("had_discount_credit")
     || !!workflow.json(original, "revenue_discount") || !!workflow.json(e.record, "revenue_discount"));
@@ -75,7 +81,7 @@ onRecordUpdateRequest((e) => {
     "job_order_no", "queue_number", "queue_issued_at",
     "makeup_service", "makeup_services", "makeup_state", "makeup_artist", "makeup_completed_at", "makeup_version", "shoot_completed",
     "photo_folder", "photo_folder_key", "photo_edit_until", "photo_revision",
-    "photo_selection", "photo_pending", "photo_last_request",
+    "photo_selection", "photo_pending", "photo_last_request", "photography",
     // Server-owned pickup tracking (see studio_production.pb.js).
     "ready_at", "pickup_notified_at", "pickup_notified_by", "pickup_notify_count",
   ];
@@ -123,7 +129,16 @@ onRecordUpdateRequest((e) => {
     if (current.collection().fields.fieldNames().some((field) => current.getString(field) !== before.getString(field))) {
       throw new ApiError(409, "This registration changed. Refresh the student and try again.");
     }
-    if (!e.hasSuperuserAuth()) workflow.staff(tx, e.auth, [role]);
+    const account = e.hasSuperuserAuth() ? null : workflow.staff(tx, e.auth, [role]);
+    if (role === "photographer") {
+      const photography = require(__hooks + "/studio_photography.js");
+      if (photography.active(photography.data(current)).length) {
+        throw new ForbiddenError("Use the assigned photography session to update this order.");
+      }
+      if (changed("status") && e.record.getString("status") === "done_shooting" && account) {
+        photography.rememberPrimaryCompletion(e.record, account);
+      }
+    }
     e.app = tx;
     try {
       const beforePhotography = ["pending_payment", "paid"];

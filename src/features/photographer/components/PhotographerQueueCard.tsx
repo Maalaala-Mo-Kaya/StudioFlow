@@ -21,6 +21,7 @@ interface PhotographerQueueCardProps {
   busy: boolean;
   onSelect?: (reg: Registration) => void;
   onMarkDone: (reg: Registration) => void;
+  sessionActions?: React.ReactNode;
   /** Name of the camera currently sending photos to this client. */
   cameraName?: string;
 }
@@ -32,6 +33,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
   busy,
   onSelect,
   onMarkDone,
+  sessionActions,
   cameraName = '',
 }) => {
   const [copied, setCopied] = useState(false);
@@ -209,7 +211,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
       )}
 
       {/* Large Touch Action Buttons */}
-      <div className={`grid gap-2.5 pt-3 border-t border-neutral-500/20 ${onSelect ? 'grid-cols-2' : 'grid-cols-1'}`}>
+      {sessionActions ?? <div className={`grid gap-2.5 pt-3 border-t border-neutral-500/20 ${onSelect ? 'grid-cols-2' : 'grid-cols-1'}`}>
         {onSelect && (
           <button
             type="button"
@@ -231,7 +233,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
           <CheckCircle2 className="size-4 shrink-0 stroke-[2.5]" />
           <span>Mark Done</span>
         </button>
-      </div>
+      </div>}
     </article>
   );
 };

@@ -6,11 +6,17 @@ import type { Registration } from '../../types';
 import { playStudioChime } from '../../utils/audio';
 import { useToast } from '../../context/ToastContext';
 import { workflowError } from '../../hooks/useWorkflowData';
+import { useAuth } from '../../context/AuthContext';
+import { activePhotographyTasks } from './photographyTasks';
 
 export function usePhotographerQueue() {
   const { toast } = useToast();
+  const user = useAuth().user;
+  const photographerId = user?.id;
+  const admin = user?.role === 'admin';
   const [queue, setQueue] = useState<Registration[]>([]);
   const [recentlyDone, setRecentlyDone] = useState<Registration[]>([]);
+  const [photographyRecords, setPhotographyRecords] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<'queue' | 'history'>('queue');
@@ -21,7 +27,7 @@ export function usePhotographerQueue() {
     try {
       const [queueRes, doneRes] = await Promise.all([
         pb.collection('registrations').getFullList<Registration>({
-          filter: "status = 'shooting' || (status = 'paid' && queue_number > 0 && (paid_amount > 0 || (payment_status = 'fully_paid' && total_amount = 0)) && (makeup_state = 'completed' || (makeup_service = '' && makeup_state = '')))",
+          filter: "(status = 'shooting' || status = 'paid') && queue_number > 0 && (paid_amount > 0 || (payment_status = 'fully_paid' && total_amount = 0)) && (makeup_state = 'completed' || (makeup_service = '' && makeup_state = ''))",
           sort: 'queue_issued_at,queue_number,id',
           expand: 'organization,level,course,package,session_type',
           requestKey: null,
@@ -35,8 +41,14 @@ export function usePhotographerQueue() {
       ]);
 
       if (request !== queueRequest.current) return;
-      setQueue(queueRes);
-      setRecentlyDone(doneRes.items);
+      setPhotographyRecords([...queueRes, ...doneRes.items]);
+      setQueue(queueRes.filter((reg) => {
+        const tasks = activePhotographyTasks(reg);
+        return admin || !tasks.length || tasks.some((task) => task.status !== 'completed' && (!task.photographerId || task.photographerId === photographerId));
+      }));
+      const mine = (reg: Registration) => activePhotographyTasks(reg)
+        .some((task) => task.status === 'completed' && task.photographerId === photographerId);
+      setRecentlyDone([...queueRes.filter(mine), ...doneRes.items.filter((reg) => admin || !activePhotographyTasks(reg).length || mine(reg))]);
       setLoadError('');
     } catch (err) {
       if (request !== queueRequest.current) return;
@@ -47,7 +59,7 @@ export function usePhotographerQueue() {
     } finally {
       if (request === queueRequest.current) setLoading(false);
     }
-  }, []);
+  }, [admin, photographerId]);
 
   const live = useRealtimeClient();
   useEffect(() => {
@@ -99,6 +111,7 @@ export function usePhotographerQueue() {
 
   return {
     queue,
+    photographyRecords,
     recentlyDone,
     loading,
     loadError,

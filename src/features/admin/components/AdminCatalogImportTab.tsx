@@ -3,7 +3,7 @@ import {
   FileImage, FileSpreadsheet, FileText, Loader2, Plus, RefreshCw, Trash2, UploadCloud, Download,
   ArrowLeftRight, AlertTriangle, CheckCircle2, ScanText, Gift, DatabaseBackup, X,
 } from 'lucide-react';
-import type { AddOn, Package, RevenueCategory } from '../../../types';
+import type { AddOn, CatalogItem, Package, RevenueCategory, StaffUser } from '../../../types';
 import { formatCurrency } from '../../../utils/formatters';
 import { useToast } from '../../../context/ToastContext';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
@@ -24,13 +24,17 @@ import {
 } from '../catalogImport/readCatalogSource';
 import type { CatalogSaveResult } from '../catalogImport/saveCatalog';
 import type { CatalogBackup, RestoreResult } from '../catalogBackup';
+import { enabledBackupPhotographers, missingBackupPhotographers } from '../catalogImport/backupPhotographers';
 
 interface AdminCatalogImportTabProps {
   packages: Package[];
   addOns: AddOn[];
+  items: CatalogItem[];
+  staffAccounts: StaffUser[];
   onSave: (packages: DraftPackage[], addOns: DraftAddOn[]) => Promise<CatalogSaveResult>;
   /** Restores the catalog copy inside an exported price list. */
-  onRestore: (backup: CatalogBackup, update: boolean, onProgress?: (label: string, fraction: number) => void) => Promise<RestoreResult>;
+  onRestore: (backup: CatalogBackup, update: boolean, onProgress: (label: string, fraction: number) => void,
+    replacements: ReadonlyMap<string, string>) => Promise<RestoreResult>;
   onOpenCatalog: () => void;
 }
 
@@ -50,7 +54,9 @@ const MANUAL = 'manual';
 const KIND_ICONS = { image: FileImage, sheet: FileSpreadsheet, doc: FileText, text: FileText, json: FileText } as const;
 const KIND_LABELS = { image: 'Photo', sheet: 'Spreadsheet', doc: 'Word document', text: 'Text file', json: 'StudioFlow package file' } as const;
 
-export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ packages, addOns, onSave, onRestore, onOpenCatalog }) => {
+export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({
+  packages, addOns, items, staffAccounts, onSave, onRestore, onOpenCatalog,
+}) => {
   const { toast } = useToast();
   const [sources, setSources] = useState<Source[]>([]);
   const [packageRows, setPackageRows] = useState<PackageRow[]>([]);
@@ -67,11 +73,17 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
   const [updateExisting, setUpdateExisting] = useState(false);
   const [restoring, setRestoring] = useState<{ label: string; fraction: number } | null>(null);
   const [restored, setRestored] = useState<RestoreResult | null>(null);
+  const [replacements, setReplacements] = useState(new Map<string, string>());
+  const photographers = enabledBackupPhotographers(staffAccounts);
+  const enabledIds = new Set(photographers.map((account) => account.id));
+  const missing = backupFile ? [...missingBackupPhotographers(backupFile.backup, items, updateExisting, enabledIds)] : [];
+  const needsReplacement = missing.some(([id]) => !enabledIds.has(replacements.get(id) ?? ''));
   const runRestore = async () => {
-    if (!backupFile || restoring) return;
+    if (!backupFile || restoring || needsReplacement) return;
     setRestoring({ label: 'Starting', fraction: 0 });
     try {
-      const result = await onRestore(backupFile.backup, updateExisting, (label, fraction) => setRestoring({ label, fraction }));
+      const result = await onRestore(backupFile.backup, updateExisting,
+        (label, fraction) => setRestoring({ label, fraction }), replacements);
       setRestored(result);
       if (result.failed.length) toast.warning(`Restored with ${result.failed.length} problem(s). See the list below.`);
       else toast.success(`Catalog restored: ${result.created} added, ${result.updated} updated, ${result.kept} already there.`);
@@ -126,6 +138,7 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
       const backup = await (await import('../catalogBackup')).findBackupInFile(file);
       if (backup) {
         setBackupFile({ name: file.name, backup });
+        setReplacements(new Map());
         setRestored(null);
         toast.success(`${file.name} is a StudioFlow catalog backup. Check the summary and press Restore.`);
         continue;
@@ -298,6 +311,35 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
             <input type="checkbox" className="size-4 accent-gold" checked={updateExisting} disabled={!!restoring} onChange={(e) => setUpdateExisting(e.target.checked)} />
             Also change existing items and packages to match the backup
           </label>
+          {missing.length > 0 && (
+            <fieldset className="space-y-3 border border-line p-3">
+              <legend className="px-1 font-bold text-ink">Replace unavailable photographers</legend>
+              <p className="font-sans text-xs text-neutral-700">
+                {photographers.length
+                  ? 'Choose an enabled photographer for each unavailable account. Choosing the same replacement twice on an item combines those assignments.'
+                  : 'Add or enable a photographer in Staff Accounts, then upload the backup again.'}
+              </p>
+              {missing.map(([id, names]) => (
+                <label key={id} className="block space-y-1">
+                  <span className="block break-words font-bold">Replacement for {id} · {[...names].join(', ')}</span>
+                  <select
+                    className="w-full min-h-10 border border-line bg-canvas px-2 text-ink sm:max-w-sm"
+                    value={enabledIds.has(replacements.get(id) ?? '') ? replacements.get(id) : ''}
+                    disabled={!!restoring || !photographers.length}
+                    onChange={(e) => {
+                      const replacement = e.target.value;
+                      setReplacements((current) => new Map(current).set(id, replacement));
+                    }}
+                  >
+                    <option value="">Select an enabled photographer</option>
+                    {photographers.map((account) => (
+                      <option key={account.id} value={account.id}>{account.name} ({account.username})</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </fieldset>
+          )}
           {restoring && (
             <div className="space-y-1">
               <div className="text-[10px] font-black uppercase text-neutral-600">Restoring {restoring.label}… {Math.round(restoring.fraction * 100)}%</div>
@@ -318,7 +360,7 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
               <button type="button" onClick={onOpenCatalog}
                 className="btn-tactile min-h-[40px] px-4 border border-line bg-canvas font-black uppercase cursor-pointer">Open the catalog</button>
             )}
-            <button type="button" disabled={!!restoring} onClick={() => void runRestore()}
+            <button type="button" disabled={!!restoring || needsReplacement} onClick={() => void runRestore()}
               className="btn-tactile min-h-[40px] px-5 flex items-center gap-1.5 bg-obsidian text-gold border border-line font-black uppercase cursor-pointer disabled:opacity-50">
               {restoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <DatabaseBackup className="w-4 h-4" />} {restored ? 'Restore again' : 'Restore'}
             </button>
@@ -337,7 +379,7 @@ export const AdminCatalogImportTab: React.FC<AdminCatalogImportTabProps> = ({ pa
               Upload a package flyer photo, an Excel price list or a Word document. StudioFlow reads the
               package names, prices, inclusions, freebies, options and add-ons for you to check. Nothing is saved until you
               press Save. Files are read on this computer and never sent to the internet. A price list exported from
-              StudioFlow (Excel, CSV or Word) restores the whole catalog exactly.
+              StudioFlow (Excel, CSV or Word) can be used to restore the catalog.
             </p>
           </div>
           <button type="button" onClick={() => void downloadCatalogTemplate()}

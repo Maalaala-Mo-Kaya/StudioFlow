@@ -62,7 +62,7 @@ export function useCameraLink() {
     return () => { active = false; window.clearInterval(timer); };
   }, [selectedId, enabled]);
 
-  const run = useCallback(async (action: 'start' | 'end' | 'claim-waiting', registration?: string) => {
+  const run = useCallback(async (action: 'start' | 'end' | 'claim-waiting' | 'scan', registration?: string) => {
     if (!selectedId || actionPending.current) return false;
     actionPending.current = true;
     actionVersion.current++;
@@ -91,5 +91,6 @@ export function useCameraLink() {
     linkClient: (registrationId: string) => run('start', registrationId),
     unlinkClient: (registrationId?: string) => run('end', registrationId),
     claimWaiting: () => run('claim-waiting'),
+    sync: () => run('scan'),
   };
 }

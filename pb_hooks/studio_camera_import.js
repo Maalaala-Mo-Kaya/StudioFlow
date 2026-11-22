@@ -16,6 +16,7 @@
 //   the staging folder and is delivered to the same job order on the next scan.
 const storage = require(__hooks + "/studio_photo_storage.js");
 const workflow = require(__hooks + "/studio_workflow.js");
+const photography = require(__hooks + "/studio_photography.js");
 
 const stagingName = ".studioflow-importing";
 const rawFormats = new Set([
@@ -23,13 +24,16 @@ const rawFormats = new Set([
   ".nef", ".nrw", ".orf", ".pef", ".raf", ".rw2", ".rwl", ".sr2", ".srf", ".srw", ".x3f",
 ]);
 const settleMs = 2000;
+const finishQuietMs = 8000;
 const lockMs = 2 * 60 * 1000;
 const maxDepth = 4;
 const maxFilesPerScan = 300;
 const sessionFields = [
   "active_registration", "session_started", "session_imported", "session_skip",
   "waiting_count", "last_scan", "last_import", "last_error", "scan_lock",
+  "session_task", "session_photographer", "session_finishing",
 ];
+const taskPrefix = (task, photographer) => "sf-" + task + "-" + photographer + "-";
 // Lets the integration test exercise the cross-drive copy path on one drive.
 const forceCopy = () => $os.getenv("STUDIOFLOW_IMPORT_COPY") === "1";
 
@@ -88,8 +92,7 @@ function candidates(station) {
   const walk = (dir, rel, depth) => {
     let entries;
     try { entries = $os.readDir(dir); } catch (error) {
-      if (depth === 0) throw error;
-      return;
+      throw error;
     }
     for (const entry of entries) {
       const name = entry.name();
@@ -104,8 +107,7 @@ function candidates(station) {
       const ext = $filepath.ext(name).toLowerCase();
       const kind = storage.formats[ext] ? "photo" : raw && rawFormats.has(ext) ? "raw" : "";
       if (!kind) continue;
-      let info;
-      try { info = entry.info(); } catch (_) { continue; }
+      const info = entry.info();
       const modified = info.modTime().unixMilli();
       found.push({ abs, dir, name, path, kind, size: info.size(), modified, key: [path.toLowerCase(), info.size(), modified].join("|") });
     }
@@ -168,7 +170,15 @@ function deliver(app, staged, registration) {
   if (!student) throw new Error("The client folder could not be opened.");
   try {
     if (sub) student.mkdirAll(sub, 0o750);
-    const rel = freeName(student, folder, sub, name);
+    const attributed = /^sf-(?:primary|[a-z0-9]{12})-[a-z0-9]{15}-[a-z0-9]{20}-/.test(name);
+    const rel = attributed ? (sub ? sub + "/" + name : name) : freeName(student, folder, sub, name);
+    if (attributed && storage.statEntry(student, rel)) {
+      // Publishing is atomic. A retry after publishing but before deleting the staged
+      // copy uses the same import identity and must not make another gallery image.
+      if (student.stat(rel).size() !== $os.stat(staged).size()) throw new Error("The imported photo conflicts with its staged copy.");
+      $os.remove(staged);
+      return rel;
+    }
     let moved = false;
     if (!forceCopy()) {
       try {
@@ -188,7 +198,7 @@ function deliver(app, staged, registration) {
 
 // Claims a file from the watch folder and delivers it. Returns "imported",
 // "busy" (still being written, retry later) or "skipped" (not a valid photo).
-function importFile(app, watch, file, registration) {
+function importFile(app, watch, file, registration, prefix) {
   if (!storage.usableName(file.name)) return "skipped";
   if (file.kind === "photo") {
     let valid;
@@ -204,7 +214,9 @@ function importFile(app, watch, file, registration) {
   $os.mkdirAll(stageDir, 0o750);
   const ext = $filepath.ext(file.name);
   const stem = file.name.slice(0, file.name.length - ext.length);
-  let staged = $filepath.join(stageDir, file.name);
+  const safeStem = stem.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 75) || "photo";
+  const name = prefix ? prefix + $security.randomStringWithAlphabet(20, "abcdefghijklmnopqrstuvwxyz0123456789") + "-" + safeStem + ext : file.name;
+  let staged = $filepath.join(stageDir, name);
   for (let n = 2; exists(staged); n++) staged = $filepath.join(stageDir, stem + "_" + n + ext);
   try { $os.rename(file.abs, staged); } catch (_) {
     return "busy";
@@ -214,26 +226,35 @@ function importFile(app, watch, file, registration) {
 }
 
 // Finishes imports that were claimed but not delivered. Returns counts per job id.
-function resumeStaged(app, watch, errors) {
+function resumeStaged(app, watch, activeId, errors) {
   const counts = {};
   const root = $filepath.join(watch, stagingName);
   let jobs;
-  try { jobs = $os.readDir(root); } catch (_) { return counts; }
+  try { jobs = $os.readDir(root); } catch (error) {
+    if (!storage.isMissing(error)) throw error;
+    return counts;
+  }
   for (const job of jobs) {
     if (!job.isDir()) continue;
     const dir = $filepath.join(root, job.name());
+    const fail = (message) => {
+      if (!activeId || activeId === job.name()) errors.push(message);
+      else app.logger().warn("Camera import is holding photos for another order", "registration", job.name(), "error", message);
+    };
     let registration;
     try { registration = app.findRecordById("registrations", job.name()); } catch (_) {
-      errors.push("Photos for a removed job order are held in " + dir + ".");
+      fail("Photos for a removed job order are held in " + dir + ".");
       continue;
     }
-    for (const entry of $os.readDir(dir)) {
+    let entries;
+    try { entries = $os.readDir(dir); } catch (error) { fail(text(error)); continue; }
+    for (const entry of entries) {
       if (!entry.type().isRegular() || entry.name().endsWith(".studioflow-partial")) continue;
       try {
         deliver(app, $filepath.join(dir, entry.name()), registration);
         counts[registration.id] = (counts[registration.id] || 0) + 1;
       } catch (error) {
-        errors.push(entry.name() + ": " + text(error));
+        fail(entry.name() + ": " + text(error));
       }
     }
     try { $os.remove(dir); } catch (_) { /* not empty yet */ }
@@ -254,13 +275,17 @@ function scan(app, id, flush = false) {
   let waiting = 0;
   let registrationId = "";
   let unlink = false;
+  let resolved = false;
   const errors = [];
   try {
     const station = app.findRecordById("camera_stations", id);
     if (station.getBool("enabled")) {
       const watch = station.getString("watch_folder");
       registrationId = station.getString("active_registration");
-      const resumed = resumeStaged(app, watch, errors);
+      const taskId = station.getString("session_task");
+      const photographerId = station.getString("session_photographer");
+      const prefix = taskId ? taskPrefix(taskId, photographerId) : "";
+      const resumed = resumeStaged(app, watch, registrationId, errors);
       imported += resumed[registrationId] || 0;
 
       let files = [];
@@ -270,7 +295,7 @@ function scan(app, id, flush = false) {
       let registration = null;
       if (registrationId) {
         try { registration = app.findRecordById("registrations", registrationId); } catch (_) { /* removed */ }
-        if (!registration || ["cancelled", "released"].includes(registration.getString("status"))) {
+        if (!registration || (!taskId && ["cancelled", "released"].includes(registration.getString("status")))) {
           errors.push("The linked client is no longer on the photo floor. Link the next client.");
           unlink = true;
           registration = null;
@@ -280,16 +305,40 @@ function scan(app, id, flush = false) {
         waiting = files.length;
       } else {
         const skip = new Set(workflow.json(station, "session_skip") || []);
+        let backlog = false;
         let processed = 0;
         for (const file of files) {
           if (skip.has(file.key)) { waiting++; continue; }
-          if (processed >= maxFilesPerScan) break;
-          if (!flush && (file.size <= 0 || started - file.modified < settleMs)) continue;
+          if (processed >= maxFilesPerScan) { backlog = true; break; }
+          if ((!flush || taskId) && (file.size <= 0 || started - file.modified < settleMs)) {
+            backlog = true;
+            continue;
+          }
           processed++;
           try {
-            if (importFile(app, watch, file, registration) === "imported") imported++;
+            const result = importFile(app, watch, file, registration, prefix);
+            if (result === "imported") imported++;
+            else if (result === "busy") backlog = true;
+            else if (taskId) errors.push(file.name + ": The camera file is not a readable photo.");
           } catch (error) {
             errors.push(file.name + ": " + text(error));
+          }
+        }
+        const assigned = taskId && photography.active(photography.data(registration))
+          .some((task) => task.id === taskId && task.photographerId === photographerId);
+        const retiring = taskId && (!assigned || !photography.eligible(registration));
+        const finishing = station.getInt("session_finishing");
+        if (retiring && !finishing) {
+          app.db().newQuery("UPDATE camera_stations SET session_finishing = {:time} WHERE id = {:id} AND session_finishing = 0")
+            .bind({ id, time: Date.now() }).execute();
+        }
+        if (taskId && finishing) {
+          if (imported || backlog || errors.length) {
+            app.db().newQuery("UPDATE camera_stations SET session_finishing = {:time} WHERE id = {:id} AND scan_lock = {:lock}")
+              .bind({ id, time: Date.now(), lock: started }).execute();
+          } else if (started - finishing >= finishQuietMs) {
+            resolved = finishTask(app, station, prefix);
+            if (!resolved) errors.push("Waiting for a readable photo for this session.");
           }
         }
       }
@@ -302,13 +351,14 @@ function scan(app, id, flush = false) {
         scan_lock = 0, last_scan = {:time}, waiting_count = {:waiting}, last_error = {:error},
         session_imported = CASE WHEN {:reg} != '' AND active_registration = {:reg} THEN COALESCE(session_imported, 0) + {:count} ELSE session_imported END,
         last_import = CASE WHEN {:count} > 0 THEN {:time} ELSE last_import END,
+        session_photographer = CASE WHEN {:unlink} AND active_registration = {:reg} THEN '' ELSE session_photographer END,
         active_registration = CASE WHEN {:unlink} AND active_registration = {:reg} THEN '' ELSE active_registration END
-      WHERE id = {:id}`).bind({
+      WHERE id = {:id} AND scan_lock = {:lock}`).bind({
       id, time, waiting, error: errors.slice(0, 3).join(" | ").slice(0, 1000),
-      reg: registrationId, count: imported, unlink: unlink ? 1 : 0,
+      reg: registrationId, count: imported, unlink: unlink ? 1 : 0, lock: started,
     }).execute();
   }
-  if (imported || unlink) require(__hooks + "/studio_station_events.js").notify(app);
+  if (imported || unlink || resolved) require(__hooks + "/studio_station_events.js").notify(app);
   return true;
 }
 
@@ -358,6 +408,9 @@ function status(app, station) {
     importRaw: station.getBool("import_raw"),
     folderOk,
     client,
+    taskId: station.getString("session_task"),
+    photographerId: station.getString("session_photographer"),
+    finishing: !!station.getInt("session_finishing"),
     sessionStarted: station.getString("session_started"),
     sessionImported: station.getInt("session_imported"),
     waiting: station.getInt("waiting_count"),
@@ -367,7 +420,7 @@ function status(app, station) {
   };
 }
 
-function startSession(app, id, registrationId) {
+function startSession(app, id, registrationId, photographerId) {
   const before = findStation(app, id);
   if (!before.getBool("enabled")) throw new BadRequestError("This camera is turned off in Admin → Camera Import.");
   let registration;
@@ -377,15 +430,25 @@ function startSession(app, id, registrationId) {
   if (!["paid", "shooting", "done_shooting"].includes(registration.getString("status")) || !require(__hooks + "/studio_workflow.js").paymentEligible(registration)) {
     throw new BadRequestError("Only paid clients on the photo floor can receive camera photos.");
   }
+  if (before.getString("session_task") || photography.active(photography.data(registration)).length) {
+    throw new ApiError(409, "Use the assigned photography session to link this camera.");
+  }
   if (before.getString("active_registration") === registration.id) return;
   // The previous client's last shots go to them before the camera switches.
   if (before.getString("active_registration")) scan(app, id, true);
   const station = findStation(app, id);
   let skip = [];
   try { skip = candidates(station).map((file) => file.key); } catch (_) { /* reported by the next scan */ }
-  app.db().newQuery(`UPDATE camera_stations SET active_registration = {:reg}, session_started = {:time},
-      session_imported = 0, session_skip = {:skip}, waiting_count = {:waiting}, last_error = '' WHERE id = {:id}`)
-    .bind({ id, reg: registration.id, time: now(), skip: JSON.stringify(skip), waiting: skip.length }).execute();
+  workflow.withRegistration(app, registration.id, (tx, current) => {
+    if (photography.active(photography.data(current)).length) throw new ApiError(409, "Use the assigned photography session to link this camera.");
+    const linked = tx.db().newQuery(`UPDATE camera_stations SET active_registration = {:reg}, session_started = {:time},
+        session_photographer = {:user}, session_imported = 0, session_skip = {:skip}, waiting_count = {:waiting}, last_error = ''
+        WHERE id = {:id} AND enabled = true AND watch_folder = {:folder} AND session_task = '' AND active_registration = {:before}
+          AND (session_photographer = '' OR session_photographer = {:user}) AND scan_lock = 0`)
+      .bind({ id, reg: current.id, user: photographerId, before: before.getString("active_registration"), folder: station.getString("watch_folder"),
+        time: now(), skip: JSON.stringify(skip), waiting: skip.length }).execute();
+    if (!linked.rowsAffected()) throw new ApiError(409, "The camera is busy. Check its active session and try again.");
+  });
   require(__hooks + "/studio_station_events.js").notify(app);
 }
 
@@ -393,18 +456,82 @@ function endSession(app, id, registrationId) {
   const station = findStation(app, id);
   const active = station.getString("active_registration");
   if (!active || (registrationId && registrationId !== active)) return;
+  if (station.getString("session_task")) throw new ApiError(409, "Use Mark Done to finish the assigned camera session.");
   scan(app, id, true);
-  app.db().newQuery(`UPDATE camera_stations SET active_registration = '', session_skip = '[]'
-      WHERE id = {:id} AND active_registration = {:reg}`).bind({ id, reg: active }).execute();
+  app.db().newQuery(`UPDATE camera_stations SET active_registration = '', session_photographer = '', session_skip = '[]'
+      WHERE id = {:id} AND active_registration = {:reg} AND session_task = ''`).bind({ id, reg: active }).execute();
   require(__hooks + "/studio_station_events.js").notify(app);
 }
 
 // Sends the files that were waiting when the session started to the current client.
-function claimWaiting(app, id) {
+function claimWaiting(app, id, photographerId) {
   const station = findStation(app, id);
   if (!station.getString("active_registration")) throw new BadRequestError("Link a client to this camera first.");
-  app.db().newQuery("UPDATE camera_stations SET session_skip = '[]' WHERE id = {:id}").bind({ id }).execute();
+  const changed = app.db().newQuery(`UPDATE camera_stations SET session_skip = '[]',
+    session_finishing = CASE WHEN session_finishing > 0 THEN {:now} ELSE 0 END
+    WHERE id = {:id} AND active_registration = {:reg} AND session_started = {:started}
+      AND (session_photographer = '' OR session_photographer = {:user})`).bind({
+    id, reg: station.getString("active_registration"), user: photographerId, started: station.getString("session_started"), now: Date.now(),
+  }).execute();
+  if (!changed.rowsAffected()) throw new ApiError(409, "The camera's active session changed.");
   scan(app, id, true);
+}
+
+function linkTask(tx, id, record, task, account) {
+  const station = findStation(tx, id);
+  if (!station.getBool("enabled")) throw new BadRequestError("Select an enabled camera.");
+  if (station.getString("active_registration") === record.id && station.getString("session_task") === task.id
+    && station.getString("session_photographer") === account.id) return;
+  if (station.getString("active_registration")) throw new ApiError(409, "Finish the current camera session before linking the next client.");
+  if (tx.findRecordsByFilter("camera_stations", "active_registration = {:reg} && session_task = {:task} && session_photographer = {:user}",
+    "", 1, 0, { reg: record.id, task: task.id, user: account.id }).length) {
+    throw new ApiError(409, "This session is already linked to another camera.");
+  }
+  let skip;
+  try { skip = candidates(station).map((file) => file.key); } catch (_) {
+    throw new ApiError(409, "The camera output folder cannot be read.");
+  }
+  const result = tx.db().newQuery(`UPDATE camera_stations SET active_registration = {:reg}, session_started = {:time},
+    session_task = {:task}, session_photographer = {:user}, session_finishing = 0,
+    session_imported = 0, session_skip = {:skip}, waiting_count = {:waiting}, last_error = ''
+    WHERE id = {:id} AND scan_lock = 0`)
+    .bind({ id, reg: record.id, task: task.id, user: account.id, time: now(), skip: JSON.stringify(skip), waiting: skip.length }).execute();
+  if (!result.rowsAffected()) throw new ApiError(409, "The camera is scanning. Try selecting the session again.");
+}
+
+function finishTask(app, station, prefix) {
+  return workflow.withRegistration(app, station.getString("active_registration"), (tx, record) => {
+    const current = findStation(tx, station.id);
+    if (current.getInt("scan_lock") !== station.getInt("scan_lock")
+      || current.getInt("session_finishing") !== station.getInt("session_finishing")) return false;
+    const plan = photography.data(record);
+    const task = photography.active(plan).find((entry) => entry.id === station.getString("session_task")
+      && entry.photographerId === station.getString("session_photographer"));
+    if (task?.finishingAt && record.getString("status") !== "cancelled") {
+      const folder = storage.photoFolder(tx, record);
+      const root = storage.openStudent(folder);
+      if (!root) return false;
+      try {
+        if (!storage.inventory(root, folder).some((file) => task.adoptedCamera || file.name.startsWith(prefix))) return false;
+      } finally { root.close(); }
+      task.status = "completed";
+      task.completedAt = new Date().toISOString();
+      delete task.finishingAt;
+      if (workflow.json(record, "photo_selection") || workflow.json(record, "photo_pending")?.request) {
+        plan.selectionReview = task.id;
+      }
+      record.set("photography", plan);
+      tx.save(record);
+    } else if (task && task.status !== "completed") {
+      task.status = "pending";
+      delete task.finishingAt;
+      record.set("photography", plan);
+      tx.save(record);
+    }
+    tx.db().newQuery(`UPDATE camera_stations SET active_registration = '', session_task = '', session_photographer = '',
+      session_finishing = 0, session_skip = '[]' WHERE id = {:id}`).bind({ id: station.id }).execute();
+    return true;
+  });
 }
 
 function browse(path) {
@@ -445,5 +572,5 @@ function createFolder(parent, name) {
 
 module.exports = {
   browse, claimWaiting, createFolder, endSession, findStation, scan, scanAll, sessionFields,
-  startSession, status, validateWatchFolder,
+  startSession, status, validateWatchFolder, linkTask,
 };

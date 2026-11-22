@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { spawn, execFileSync } = require('node:child_process');
 const { once } = require('node:events');
-const { mkdtemp, mkdir, writeFile, readdir, readFile, copyFile, link, stat, rm, utimes } = require('node:fs/promises');
+const { mkdtemp, mkdir, writeFile, readdir, readFile, copyFile, link, stat, rm, rename, utimes } = require('node:fs/promises');
 const { createHash, randomBytes, randomUUID } = require('node:crypto');
 const { createServer } = require('node:net');
 const { tmpdir } = require('node:os');
@@ -36,7 +36,7 @@ async function port() {
   return number;
 }
 
-test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout: 120_000 }, async (t) => {
+test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout: 150_000 }, async (t) => {
   const home = await mkdtemp(join(tmpdir(), 'studioflow-workflow-'));
   const data = join(home, 'db');
   const photos = join(home, 'photos');
@@ -1116,6 +1116,168 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.deepEqual((await send(api + '/camera/browse?path=' + encodeURIComponent(home), { token: photographer })).payload.folders
     .map((folder) => folder.name).includes('camera'), true);
   await send(records('camera_stations', camera.id), { token: photographer, method: 'DELETE', status: 404 });
+
+  await t.test('multi-photographer orders wait for both cameras in either completion order', async () => {
+    const primaryAccount = (await login('photographer', 'password123')).record;
+    const familyAccount = await createStaff('familyphotographer', 'photographer');
+    const familyDir = join(home, 'family-camera');
+    await mkdir(familyDir);
+    const familyCamera = await create('camera_stations', { ...booth, name: 'Family Booth', watch_folder: familyDir });
+    const family = await create('catalog_items', {
+      name: 'Family Picture', category: 'other', amount: 300, is_active: true, required_photographers: [familyAccount.id],
+    });
+    const familyAddOn = (await send(records('add_ons') + '?filter=' + encodeURIComponent(`catalog_item = "${family.id}"`),
+      { token: admin })).payload.items[0];
+    const portraitPackage = await create('packages', {
+      code: 'FAMILY', name: 'Family Package', amount: 1300, is_active: true, revenue_category: 'studio',
+      structure: { inclusions: [{ type: 'item', id: family.id, qty: 1 }], freebies: [family.id] },
+    });
+    const primary = { id: primaryAccount.id, token: photographer, camera, dir: cameraDir };
+    const second = { ...familyAccount, camera: familyCamera, dir: familyDir };
+    const read = async (student) => (await registrations(student)).payload;
+    const act = (student, actor, action, taskId, status = 200, fields = {}) => send(`${api}/photography/${student.id}/${action}`, {
+      method: 'POST', token: actor.token || actor, status, body: { taskId, cameraId: actor.camera?.id, ...fields },
+    });
+    const scan = (actor, action = 'scan', status = 200) => send(`${api}/camera/${actor.camera.id}/${action}`,
+      { method: 'POST', token: actor.token, status }).then((result) => result.payload);
+    const shootImage = async (actor, name, bytes = jpeg, fresh = false) => {
+      const path = join(actor.dir, name);
+      await writeFile(path, bytes);
+      if (!fresh) await utimes(path, settled, settled);
+    };
+    const finish = async (student, actor, taskId) => {
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        const state = await scan(actor);
+        if (!state.client) return (await read(student)).photography.tasks.find((task) => task.id === taskId);
+        await delay(500);
+      }
+      assert.fail('The linked camera did not finish syncing.');
+    };
+    const inChooser = async (student) => (await list(student.student_id)).filter((item) => item.id === student.id).length;
+
+    for (const familyFirst of [false, true]) {
+      // The second order references the same item as an inclusion, freebie and add-on.
+      const student = await register(familyFirst ? portraitPackage : standard, [{ id: familyAddOn.id }]);
+      await pay(student, familyFirst ? 1600 : 1300);
+      const { tasks } = (await read(student)).photography;
+      assert.deepEqual(tasks.map((task) => task.name), ['Graduation Portrait', 'Family Picture']);
+      const familyTask = tasks[1].id;
+      await act(student, primary, 'start', familyTask, 403);
+      await shoot(student, 'done_shooting', 403);
+      await act(student, primary, 'start', 'primary');
+      await act(student, second, 'start', familyTask);
+      await act(student, primary, 'done', familyTask, 403);
+      await scan({ ...primary, camera: familyCamera }, 'end', 403);
+      const [first, last] = familyFirst ? [second, primary] : [primary, second];
+      const [firstTask, lastTask] = familyFirst ? [familyTask, 'primary'] : ['primary', familyTask];
+      await shootImage(first, 'SAME_001.jpg');
+      await scan(first);
+      assert.equal((await act(student, first, 'done', firstTask)).payload.syncing, true);
+      assert.equal(await inChooser(student), 0);
+      const firstCompleted = await finish(student, first, firstTask);
+      assert.equal(firstCompleted.status, 'completed');
+      assert.equal(firstCompleted.photographerId, first.id);
+      assert.ok(firstCompleted.completedAt);
+      assert.equal((await scan(last)).client.id, student.id, 'The other camera stays linked.');
+      assert.equal((await read(student)).status, 'shooting');
+      assert.equal(await inChooser(student), 0);
+      const familyBytes = Buffer.concat([jpeg.subarray(0, -2), Buffer.from([1, 2, 3, 0xff, 0xd9])]);
+      await act(student, last, 'done', lastTask);
+      if (familyFirst) {
+        const offline = last.dir + '-offline';
+        await rename(last.dir, offline);
+        try {
+          const unavailable = await scan(last);
+          assert.match(unavailable.lastError, /camera folder cannot be read/i);
+          assert.equal(unavailable.client.id, student.id);
+          assert.equal(await inChooser(student), 0);
+        } finally {
+          await rename(offline, last.dir);
+        }
+      }
+      await shootImage(last, 'SAME_001.jpg', familyBytes, true);
+      assert.equal((await scan(last)).finishing, true);
+      assert.equal(await inChooser(student), 0);
+      const lastCompleted = await finish(student, last, lastTask);
+      assert.equal(lastCompleted.status, 'completed');
+      assert.equal((await read(student)).status, 'done_shooting');
+      assert.equal(await inChooser(student), 1);
+      assert.equal((await act(student, last, 'done', lastTask)).payload.official, true);
+      const dir = await folder(student);
+      const shots = (await readdir(dir)).filter((name) => name.endsWith('-SAME_001.jpg'));
+      assert.equal(shots.length, 2);
+      assert.deepEqual(await readFile(join(dir, shots.find((name) => name.startsWith(`sf-${lastTask}-${last.id}-`)))), familyBytes);
+      assert.deepEqual(await readFile(join(dir, shots.find((name) => name.startsWith(`sf-${firstTask}-${first.id}-`)))), jpeg);
+      const duplicate = shots.find((name) => name.startsWith(`sf-${firstTask}-${first.id}-`));
+      const retryDir = join(first.dir, '.studioflow-importing', student.id);
+      await mkdir(retryDir, { recursive: true });
+      await writeFile(join(retryDir, duplicate), jpeg);
+      await scan(first);
+      assert.deepEqual((await readdir(dir)).filter((name) => name.endsWith('-SAME_001.jpg')), shots, 'Replaying a staged import preserves its filename.');
+    }
+
+    const late = await register(standard);
+    await pay(late, 1000);
+    await shoot(late, 'done_shooting');
+    assert.equal(await inChooser(late), 1);
+    const lateFolder = await folder(late);
+    await writeFile(join(lateFolder, 'original.jpg'), jpeg);
+    const lateGallery = `${api}/chooser/${late.id}`;
+    const openLate = () => send(lateGallery + '/open', { token: chooser.token, method: 'POST' }).then((result) => result.payload);
+    const confirmLate = (gallery) => send(lateGallery + '/confirm', {
+      token: chooser.token, method: 'POST',
+      body: { version: gallery.version, requestId: randomUUID(), selected: gallery.photos.map((photo) => photo.id) },
+    });
+    await confirmLate(await openLate());
+    await registrations(late, cashier, { add_ons: [{ id: familyAddOn.id }] });
+    const latePlan = (await read(late)).photography;
+    assert.equal(latePlan.tasks[0].status, 'completed');
+    assert.equal(latePlan.tasks[0].photographerId, primary.id);
+    assert.equal(await inChooser(late), 0);
+    await act(late, second, 'reassign', latePlan.tasks[1].id, 403, { photographerId: primary.id });
+    await act(late, admin, 'reassign', latePlan.tasks[1].id, 200, { photographerId: primary.id });
+    await registrations(late, admin, { add_ons: [] });
+    const removed = (await read(late)).photography.tasks[1];
+    assert.ok(removed.removedAt);
+    assert.equal(removed.assignments[0].to, primary.id);
+    assert.equal(await inChooser(late), 1, 'Removing an outstanding line restores chooser eligibility.');
+    await registrations(late, cashier, { add_ons: [{ id: familyAddOn.id }] });
+    const reinstated = (await read(late)).photography.tasks.find((task) => task.name === 'Family Picture' && !task.removedAt);
+    await act(late, second, 'start', reinstated.id);
+    await shootImage(second, 'late-family.jpg');
+    await scan(second);
+    await act(late, second, 'done', reinstated.id);
+    await finish(late, second, reinstated.id);
+    const afterLate = await browse({ q: late.student_id, done: 'not_selected' });
+    assert.equal(afterLate.items.find((item) => item.id === late.id).selectionState, 'needs_review');
+    const updatedGallery = await openLate();
+    assert.ok(updatedGallery.photos.find((photo) => photo.name === 'original.jpg').selected);
+    await confirmLate(updatedGallery);
+    assert.ok(ids(await browse({ q: late.student_id, done: 'selected' })).includes(late.id));
+
+    const midShoot = await register(standard);
+    await pay(midShoot, 1000);
+    await shoot(midShoot, 'shooting');
+    await cameraApi('start', { registration: midShoot.id });
+    await shootImage(primary, 'legacy-primary.jpg');
+    await scan(primary);
+    await registrations(midShoot, cashier, { add_ons: [{ id: familyAddOn.id }] });
+    const midShootTasks = (await read(midShoot)).photography.tasks;
+    assert.equal(midShootTasks[0].photographerId, primary.id);
+    assert.equal((await scan(primary)).taskId, 'primary');
+    await act(midShoot, second, 'start', midShootTasks[1].id);
+    await shootImage(second, 'concurrent-family.jpg');
+    await scan(second);
+    await Promise.all([act(midShoot, primary, 'done', 'primary'), act(midShoot, second, 'done', midShootTasks[1].id)]);
+    await Promise.all([finish(midShoot, primary, 'primary'), finish(midShoot, second, midShootTasks[1].id)]);
+    assert.equal(await inChooser(midShoot), 1, 'Concurrent camera finalization releases one order.');
+
+    await patchCatalog('catalog_items', family, { required_photographers: [primary.id, second.id] });
+    const both = await register(standard, [{ id: familyAddOn.id }]);
+    assert.deepEqual((await read(both)).photography.tasks.map((task) => task.photographerId), ['', primary.id, second.id]);
+    assert.equal((await read(midShoot)).photography.tasks.length, 2, 'Catalog edits never add tasks to earlier sales.');
+  });
 
   // MUA note: the preferred-look choices are retired, but the optional note remains.
   const lookPackage = await create('packages', {

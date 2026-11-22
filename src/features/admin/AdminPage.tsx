@@ -84,6 +84,7 @@ export const AdminPage: React.FC = () => {
           {/* TAB 3: PACKAGES & ADD-ONS (T020) */}
           {admin.activeTab === 'packages' && (
             <AdminPackagesTab
+              staffAccounts={admin.staffAccounts}
               packages={admin.packages}
               addOns={admin.addOns}
               catalogItems={admin.catalogItems}
@@ -107,6 +108,8 @@ export const AdminPage: React.FC = () => {
             <AdminCatalogImportTab
               packages={admin.packages}
               addOns={admin.addOns}
+              items={admin.catalogItems}
+              staffAccounts={admin.staffAccounts}
               onSave={admin.handleImportCatalog}
               onRestore={admin.handleRestoreCatalog}
               onOpenCatalog={() => admin.setActiveTab('packages')}
@@ -146,6 +149,7 @@ export const AdminPage: React.FC = () => {
           {/* TAB 6: PRODUCTION & PICKUP (framing, printing, ready for pickup) */}
           {admin.activeTab === 'framing' && (
             <AdminProductionTab
+              staffAccounts={admin.staffAccounts}
               registrations={admin.registrations}
               onSetProductionStatus={admin.handleSetProductionStatus}
             />

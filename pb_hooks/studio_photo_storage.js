@@ -260,6 +260,6 @@ function displayPath(relative) {
 }
 
 module.exports = {
-  assignFolder, basePath, displayPath, documentsDir, formats, image, inventory, openStudent, pathFor, photoFolder,
+  assignFolder, basePath, displayPath, documentsDir, formats, image, inventory, isMissing, openStudent, pathFor, photoFolder,
   photoDirectories, photoMime, provision, saveDocument, setFolder, statEntry, usableName,
 };

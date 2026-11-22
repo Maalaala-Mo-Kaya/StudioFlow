@@ -44,7 +44,8 @@ function describe(record, photos) {
   let selectionState = "awaiting";
   if (workflow.json(record, "photo_pending")) selectionState = "recovering";
   else if (record.getFloat("photo_edit_until") > Date.now()) selectionState = "in_progress";
-  else if (saved && selected && JSON.stringify(saved) !== JSON.stringify(selected.map(({ path, fingerprint }) => [path, fingerprint]))) {
+  else if (workflow.json(record, "photography")?.selectionReview
+    || (saved && selected && JSON.stringify(saved) !== JSON.stringify(selected.map(({ path, fingerprint }) => [path, fingerprint])))) {
     selectionState = "needs_review";
   } else if (saved) selectionState = "completed";
   return { selectionState, selectedCount: selected?.length ?? saved?.length ?? 0, unselectedCount: selected ? photos.length - selected.length : 0 };
@@ -137,6 +138,11 @@ function recover(app, id) {
           throw new Error("The selected folder changed during the transfer.");
         }
         current.set("photo_selection", selected);
+        const plan = workflow.json(current, "photography");
+        if (plan?.selectionReview && plan.selectionReview === pending.selectionReview) {
+          delete plan.selectionReview;
+          current.set("photography", plan);
+        }
         current.set("photo_last_request", pending.request);
         current.set("photo_revision", current.getInt("photo_revision") + 1);
         current.set("photo_edit_until", 0);
@@ -190,7 +196,8 @@ function queueMoves(app, id, auth, input) {
         const selected = photos.filter((photo) => chosen.has(photo.id))
           .map(({ path, fingerprint }) => [destinations.get(path) ?? path, fingerprint])
           .sort(([a], [b]) => a < b ? -1 : Number(a > b));
-        record.set("photo_pending", { moves, selected, request });
+        const selectionReview = workflow.json(record, "photography")?.selectionReview;
+        record.set("photo_pending", { moves, selected, request, selectionReview });
       }
       if (!input) {
         record.set("photo_edit_until", Date.now() + 15 * 60 * 1000);
