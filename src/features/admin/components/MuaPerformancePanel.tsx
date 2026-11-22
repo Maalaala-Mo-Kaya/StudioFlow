@@ -4,6 +4,7 @@ import { pb } from '../../../db/pocketbase';
 import { useToast } from '../../../context/ToastContext';
 import { useWorkflowData, workflowApi, workflowError } from '../../../hooks/useWorkflowData';
 import { randomId } from '../../../utils/randomId';
+import { clampDay, useStudioCalendar } from '../../../hooks/useStudioCalendar';
 import { stationButton, stationCard } from '../../workflow/StationLayout';
 import { formatMuaAmount, type MuaCompletion, type MuaPerformanceReport } from '../muaPerformance';
 
@@ -16,6 +17,7 @@ export function MuaPerformancePanel() {
   const [date, setDate] = useState('');
   const [exporting, setExporting] = useState(false);
   const [tab, setTab] = useState<'performance' | 'earnings'>('performance');
+  const { start, today } = useStudioCalendar();
   const { toast } = useToast();
   const { data: report, error, refresh } = useWorkflowData<MuaPerformanceReport>(`/mua-performance?date=${encodeURIComponent(date)}`);
 
@@ -37,7 +39,8 @@ export function MuaPerformancePanel() {
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs font-bold">
             <span className="block">Date · Asia/Manila</span>
-            <input type="date" value={date || report?.today || ''} onChange={(event) => setDate(event.target.value)}
+            <input type="date" value={date || report?.today || ''} min={start || undefined} max={report?.today || today}
+              onChange={(event) => setDate(clampDay(event.target.value, start, report?.today || today))}
               className="min-h-10 border border-line bg-panel px-2" />
           </label>
           {date && <button type="button" className={stationButton} onClick={() => setDate('')}>Today</button>}

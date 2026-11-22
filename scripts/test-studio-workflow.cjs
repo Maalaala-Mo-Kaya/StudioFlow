@@ -1271,7 +1271,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const included = await register(studio, [{ id: wardrobe.id, amount: 0 }], 200, {
       no_mua_default_quote: wardrobe.id + ':5000',
     });
-    assert.deepEqual([included.total_amount, included.balance, included.makeup_service], [1550, 1550, 'Wardrobe']);
+    // Wardrobe is a shared MUA charge: money for the MUA team, not a service an artist completes.
+    assert.deepEqual([included.total_amount, included.balance, included.makeup_service], [1550, 1550, '']);
     assert.deepEqual(included.add_ons, [{
       id: wardrobe.id, code: 'WARDROBE', name: 'Wardrobe', amount: 50, revenue_category: 'mua', auto_applied: true,
     }]);
@@ -1321,28 +1322,24 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const includedPaid = (await registrations(included, cashier)).payload;
     assert.equal(includedPaid.total_amount, 1550);
     assert.equal(includedPaid.balance, 0);
-    assert.equal(includedPaid.queue_number, null, 'Default MUA services wait for confirmation before photography.');
-    assert.ok((await queue(defaultArtist)).some((row) => row.id === included.id));
-    await contest(included, defaultArtist, 'claim');
-    await contest(included, defaultArtist, 'complete');
-    const includedCompleted = (await registrations(included, cashier)).payload;
-    assert.ok(includedCompleted.queue_number > 0, 'Default MUA confirmation hands off to photography.');
-    const completionDate = studioDate(includedCompleted.makeup_completed_at);
-    const completedPath = api + '/makeup-completed?date=' + completionDate;
-    const completedDefault = (await send(completedPath, { token: defaultArtist.token })).payload.find((row) => row.id === included.id);
-    assert.deepEqual([completedDefault.jobOrder, completedDefault.artistName, completedDefault.services[0].defaultService],
-      [includedCompleted.job_order_no, defaultArtist.username, true]);
+    assert.ok(includedPaid.queue_number > 0, 'A shared MUA charge does not hold the client at the MUA station.');
+    assert.equal((await queue(defaultArtist)).some((row) => row.id === included.id), false);
     assert.equal((await send(api + '/makeup?completed=0', { token: admin })).payload.some((row) => row.id === included.id), false);
-    assert.equal((await send(completedPath, { token: artists[1].token })).payload.some((row) => row.id === included.id), false);
     await send(api + '/makeup-completed?date=2026-02-30', { token: admin, status: 400 });
-    await send(completedPath, { token: cashier, status: 403 });
     assert.deepEqual(orderExtras(includedPaid), [['Wardrobe (MUA)', 50]]);
     assert.equal(wardrobePayment.balance_before, 1550);
     assert.deepEqual((await auditFor(included)).totals.revenue, { studio: 1500, mua: 50, unallocated: 0 });
     const includedReport = (await send(api + '/student-excel', { token: admin })).payload;
     assert.equal(includedReport.rows.find((row) => row.jobOrder === includedPaid.job_order_no).addOns[wardrobe.id], 5000);
-    assert.equal((await report()).rows.flatMap((row) => row.details).filter((detail) => detail.jobId === included.id).length, 1,
-      'A confirmed default service is recorded once in MUA performance analytics.');
+    // The master Excel's MUA pages list it as the team's shared money, never credited to one artist.
+    assert.deepEqual(includedReport.mua.shared.filter((line) => line.jobId === included.id).map((line) => [line.item, line.amount, line.paidInFull]),
+      [['Wardrobe', 50, true]]);
+    assert.equal(includedReport.mua.lines.some((line) => line.jobId === included.id), false);
+    const today = studioDate(new Date().toISOString());
+    const todayPayouts = (await send(`${api}/mua-payouts?from=${today}&to=${today}`, { token: admin })).payload;
+    assert.ok(todayPayouts.shared.some((line) => line.jobId === included.id && line.amount === 50));
+    await send(`${api}/mua-payouts?from=${today}&to=2000-01-01`, { token: admin, status: 400 });
+    await send(`${api}/mua-payouts?from=${today}&to=${today}`, { token: cashier, status: 403 });
 
     // Catalog price determines new earnings, including three separately completed purchases.
     const rateArtist = await createStaff('earningsartist', 'mua');
@@ -1398,6 +1395,47 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const reviewedEarnings = await artistReport();
     assert.deepEqual([reviewedEarnings.counts[serviceId], reviewedEarnings.earnings[serviceId]], [3, 300]);
     assert.ok(reviewedEarnings.details.every((item) => item.basis.earned === 20000 && !item.pendingReview.length));
+
+    // Payouts: the studio records paying an artist for a period (optional); those lines are then paid.
+    const period = `from=${today}&to=${today}`;
+    // Report pickers start at the studio's first day (here: the legacy MUA completion seeded on 2026-01-06) and end today.
+    const calendar = (await send(api + '/studio-calendar', { token: cashier })).payload;
+    assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(calendar.start) && calendar.start === '2026-01-06' && calendar.today === today);
+    await send(api + '/studio-calendar', { status: 401 });
+    const payoutLines = async () => (await send(`${api}/mua-payouts?${period}`, { token: admin })).payload.lines
+      .filter((line) => line.artistId === rateArtist.id);
+    assert.deepEqual((await payoutLines()).map((line) => [line.earned, line.payoutNo]), [[125, ''], [0, ''], [175, '']]);
+    const payFor = (token, status = 200, extra = {}) => send(`${api}/mua-payouts`, { method: 'POST', token, status,
+      body: { artistId: rateArtist.id, from: today, to: today, ...extra } }).then((r) => r.payload);
+    await payFor(rateArtist.token, 403);
+    const payout = await payFor(admin, 200, { note: 'Cash after the event' });
+    assert.deepEqual([payout.payoutNo, payout.amount, payout.lines.length, payout.note], ['MP-000001', 300, 2, 'Cash after the event']);
+    assert.deepEqual((await payoutLines()).map((line) => line.payoutNo), ['MP-000001', '', 'MP-000001']);
+    await payFor(admin, 400);
+    await send(records('mua_payouts', payout.id), { method: 'DELETE', token: admin, status: 403 });
+    await send(`${api}/mua-payouts/${payout.id}/void`, { method: 'POST', token: admin, body: { reason: '' }, status: 400 });
+    assert.ok((await send(`${api}/mua-payouts/${payout.id}/void`, { method: 'POST', token: admin,
+      body: { reason: 'Recorded for the wrong week' } })).payload.voidedAt);
+    assert.deepEqual((await payoutLines()).map((line) => line.payoutNo), ['', '', '']);
+    assert.equal((await payFor(admin)).payoutNo, 'MP-000002');
+    // MUA pages: the payout export and the master Excel (same sheets, the master follows its own scope).
+    const { addMuaPayoutSheets } = await vite.ssrLoadModule('/src/features/admin/muaPayoutSheets.ts');
+    const { default: ExcelJS } = await import('exceljs');
+    const payoutBook = new ExcelJS.Workbook();
+    const periodReport = (await send(`${api}/mua-payouts?${period}`, { token: admin })).payload;
+    addMuaPayoutSheets(payoutBook, { ...periodReport, period: 'test period', name: (wanted) => wanted.slice(0, 28) });
+    const artistName = periodReport.lines.find((line) => line.artistId === rateArtist.id).artistName;
+    const summaryRow = (book) => {
+      let found;
+      book.getWorksheet('MUA PAYOUTS').eachRow((row) => { if (row.getCell(1).value === artistName) found = row; });
+      return [3, 4, 5, 6].map((column) => { const value = found.getCell(column).value; return value && typeof value === 'object' ? value.result : value; });
+    };
+    assert.deepEqual(summaryRow(payoutBook), [3, 300, 300, 0], 'services, earned, paid out, unpaid');
+    assert.ok(payoutBook.getWorksheet('MUA SHARED') && payoutBook.getWorksheet('MUA PAYOUT LOG'));
+    assert.ok(payoutBook.getWorksheet(('MUA - ' + artistName).slice(0, 28)));
+    const overallBook = buildStudentWorkbook((await send(api + '/student-excel', { token: admin })).payload, { kind: 'master' });
+    assert.deepEqual(summaryRow(overallBook), [3, 300, 300, 0], 'the master Excel has the same MUA pages');
+    assert.ok(overallBook.getWorksheet('MUA SHARED') && !overallBook.getWorksheet('MUA PAYOUT LOG'));
     const priceReport = await report();
     const { muaReportCsv, buildMuaWorkbook } = await import('../src/features/admin/muaPerformanceExport.ts');
     const { muaEarningsTable } = await import('../src/features/admin/muaPerformance.ts');
@@ -1543,7 +1581,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const beforeAssignment = await getTeam(parent, true);
     assert.ok(beforeAssignment.artists.some((artist) => artist.parent && artist.id === parent.id));
     assert.ok(!beforeAssignment.artists.some((artist) => artist.id === disabled.id));
-    assert.equal(beforeAssignment.report.rows.find((row) => row.id === defaultArtist.id).earnings['add_on:' + wardrobe.id], 50);
+    assert.equal(beforeAssignment.report.rows.find((row) => row.id === defaultArtist.id)?.earnings['add_on:' + wardrobe.id] ?? 0, 0,
+      'Shared MUA charges are not credited to an artist.');
     assert.ok((await queue(parent)).some((row) => row.id === mixed.id && row.state === 'waiting'));
     assert.ok(!(await queue(child)).some((row) => row.id === mixed.id));
     const detailPath = `${api}/makeup/${mixed.id}/details`;
@@ -1608,7 +1647,6 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal(history[4].artist_id, nextArtist.id);
     const historyDb = new DatabaseSync(join(data, 'data.db'));
     const historicalDate = '2026-10-04';
-    const priorWardrobe = adminReport.rows.flatMap(({ details }) => details).find(({ jobId }) => jobId === included.id);
     const makeupSnapshot = historyDb.prepare('SELECT makeup_services FROM registrations WHERE id = ?').get(mixed.id).makeup_services;
     try {
       historyDb.prepare('UPDATE mua_assignment_events SET created = ? WHERE id = ?').run('2026-10-04 08:00:00.000Z', history[0].id);
@@ -1621,17 +1659,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       assert.equal(historic.report.totalServices, 0);
       assert.deepEqual(historic.report.rows, []);
       assert.equal(history[1].service_count, 2);
-      historyDb.prepare('UPDATE mua_completions SET local_date = ? WHERE id = ?').run('2026-10-05', priorWardrobe.id);
-      const olderWardrobe = await getTeam(parent, true, '2026-10-05');
-      assert.equal(olderWardrobe.report.totalServices, 1);
-      assert.equal(olderWardrobe.report.rows[0].earnings['add_on:' + wardrobe.id], 50);
-      assert.deepEqual(olderWardrobe.report.columns, [{ id: 'add_on:' + wardrobe.id, name: 'Wardrobe' }]);
     } finally {
       for (const event of history.slice(0, 2)) {
         historyDb.prepare('UPDATE mua_assignment_events SET created = ? WHERE id = ?').run(event.created, event.id);
       }
       historyDb.prepare('UPDATE registrations SET makeup_services = ? WHERE id = ?').run(makeupSnapshot, mixed.id);
-      historyDb.prepare('UPDATE mua_completions SET local_date = ? WHERE id = ?').run(adminReport.date, priorWardrobe.id);
       historyDb.close();
     }
     const assignedHistory = (await send(detailPath, { token: parent.token })).payload.history;
@@ -1715,7 +1747,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       [[lateMakeup.id], 1200, 160, 'Late makeup'], 'Makeup replaces the automatic add-on.');
     const removedMakeup = await edit(withFee, { add_ons: [] });
     assert.deepEqual([ids(removedMakeup), removedMakeup.total_amount, removedMakeup.balance, removedMakeup.makeup_service],
-      [[autoFee.id], 1040, 0, 'Styling fee'], 'Without makeup the automatic add-on (and its service) comes back.');
+      [[autoFee.id], 1040, 0, ''], 'Without makeup the automatic add-on comes back (a shared MUA charge: no queue step).');
     assert.equal(removedMakeup.add_ons[0].auto_applied, true);
     await patchCatalog('add_ons', autoFee, { is_active: false });
 

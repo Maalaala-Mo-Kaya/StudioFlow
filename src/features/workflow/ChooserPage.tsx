@@ -5,6 +5,7 @@ import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
 import { studioDate } from '../../utils/studioDay';
+import { clampDay, useStudioCalendar } from '../../hooks/useStudioCalendar';
 import { DataTable, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
 import { TablePagination } from '../../components/common/TablePagination';
 import { Modal } from '../../components/common/Modal';
@@ -74,6 +75,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
   // Date created (studio day, Manila): all, today, yesterday or a picked date.
   const [dayMode, setDayMode] = useState<'' | 'today' | 'yesterday' | 'pick'>('');
   const [pickedDay, setPickedDay] = useState(() => studioDate());
+  const { start: firstDay } = useStudioCalendar();
   const day = dayMode === 'today' ? studioDate() : dayMode === 'yesterday' ? studioDate(1) : dayMode === 'pick' ? pickedDay : '';
   const [opening, setOpening] = useState(false);
   const [gallery, setGallery] = useState<Gallery>();
@@ -180,8 +182,8 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
                         <option value="pick">Pick a date…</option>
                       </select>
                       {dayMode === 'pick' && (
-                        <input type="date" aria-label="Date created" value={pickedDay} max={studioDate()}
-                          onChange={(event) => { if (event.target.value) change(setPickedDay)(event.target.value); }}
+                        <input type="date" aria-label="Date created" value={pickedDay} min={firstDay || undefined} max={studioDate()}
+                          onChange={(event) => { if (event.target.value) change(setPickedDay)(clampDay(event.target.value, firstDay, studioDate())); }}
                           className={tableFilterControl} />
                       )}
                     </div>

@@ -28,12 +28,13 @@ function makeupServices(registration) {
   return service ? [{ source: "legacy", name: service }] : [];
 }
 
+// A purchased item an artist performs (it sends the client to the MUA queue). A *shared* MUA charge
+// (an MUA item without "MUA service", e.g. the automatic Wardrobe add-on) is money for the MUA team
+// as a whole: no queue step, no credit to one artist (studio_mua_payouts.js lists it as a pool).
 function serviceRequirement(item, source) {
-  const defaultMua = source === "add_on" && item?.getBool("default_when_no_mua")
-    && item.getString("revenue_category") === "mua";
-  if ((!item?.getBool("requires_mua") && !defaultMua)
+  if (!item?.getBool("requires_mua")
     || (source === "add_on" && item.getString("revenue_category") === "studio")) return null;
-  return { source, id: item.id, name: item.getString("name"), defaultService: defaultMua };
+  return { source, id: item.id, name: item.getString("name") };
 }
 
 function purchasedServices(app, registration, before) {

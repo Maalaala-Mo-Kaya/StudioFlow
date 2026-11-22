@@ -26,6 +26,7 @@ import { PrintReceiptModal } from '../../cashier/components/PrintReceiptModal';
 import { DataTable, tableFilterControl } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { MuaPerformancePanel } from './MuaPerformancePanel';
+import { MuaPayoutsPanel } from './MuaPayoutsPanel';
 import { clientGroup, clientSummary } from '../../../utils/clientInfo';
 import { overviewMetrics, type OverviewMetrics } from '../overviewMetrics';
 import { buildAudit, isCountedPayment, type AuditGroup } from '../auditData';
@@ -634,6 +635,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       </div>
 
       <MuaPerformancePanel />
+      <MuaPayoutsPanel />
 
       {/* The ledger has its own sub-tab. */}
       <button type="button" onClick={onOpenLedger}
