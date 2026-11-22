@@ -38,14 +38,6 @@ export const PROTECTED_SYSTEM_USERNAMES: ReadonlyArray<string> = [
   'photographer',
 ];
 
-export const STAFF_PRESETS: ReadonlyArray<{
-  label: string;
-  username: string;
-}> = [
-  { label: 'Cashier', username: 'cashier' },
-  { label: 'Photo Set', username: 'photographer' },
-  { label: 'Admin', username: 'admin' },
-];
 
 export const ADMIN_STATION_LINKS: ReadonlyArray<{
   id: string;
