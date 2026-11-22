@@ -58,6 +58,8 @@ interface AdminAnalyticsTabProps {
   addOns?: AddOn[];
   /** Opens Packages & Add-ons, where a missing revenue type is chosen. */
   onOpenCatalog?: () => void;
+  /** Opens Students, where an order's revenue review is set. */
+  onOpenStudents?: () => void;
   payments: PaymentRecord[];
   refunds: RefundRecord[];
   onVoidPayment: (paymentId: string, reason: string) => Promise<void>;
@@ -73,6 +75,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   packages,
   addOns = [],
   onOpenCatalog,
+  onOpenStudents,
   payments,
   refunds,
   onVoidPayment,
@@ -473,22 +476,50 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       </div>
 
       {(untypedCatalog.length > 0 || untypedOrders.length > 0) && (
-        <div role="alert" className="p-4 border-2 border-amber-500 bg-amber-50 text-amber-900 text-xs space-y-1.5">
-          <p className="flex items-center gap-2 font-black uppercase tracking-wider"><TriangleAlert className="w-4 h-4 shrink-0" /> Revenue type missing</p>
-          {untypedCatalog.length > 0 && (
-            <p>
-              <b>{untypedCatalog.length} catalog item{untypedCatalog.length === 1 ? '' : 's'}</b> {untypedCatalog.length === 1 ? 'has' : 'have'} no Studio / MUA type: {list(untypedCatalog, 5)}.
-              New sales of {untypedCatalog.length === 1 ? 'it' : 'them'} can&apos;t be counted as Studio or MUA revenue.{' '}
-              {onOpenCatalog && <button type="button" onClick={onOpenCatalog} className="font-black underline underline-offset-2 cursor-pointer">Choose in Packages &amp; Add-ons</button>}
-            </p>
-          )}
-          {untypedOrders.length > 0 && (
-            <p>
-              <b>{untypedOrders.length} job order{untypedOrders.length === 1 ? '' : 's'}</b> ({list(untypedOrders, 8)}) {untypedOrders.length === 1 ? 'has' : 'have'} charges with no revenue type, so part of {untypedOrders.length === 1 ? 'its' : 'their'} payments stays unallocated even when fully paid.
-              Set the MUA amount in the order&apos;s revenue review (Students → Edit).
-            </p>
-          )}
-        </div>
+        <section role="alert" aria-labelledby="revenue-missing-title"
+          // Fixed red / white (not theme tokens): the alert stays red with white text in Night and Day.
+          className="border-2 border-[#dc2626] bg-red-50 text-red-900 shadow-[0_0_0_3px_rgba(220,38,38,0.25)]">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-[#dc2626] text-[#fff]">
+            <h3 id="revenue-missing-title" className="flex items-center gap-2 text-sm font-black uppercase tracking-wider m-0">
+              <TriangleAlert className="w-5 h-5 shrink-0 motion-safe:animate-pulse" aria-hidden="true" />
+              Action required: revenue type missing
+            </h3>
+            <span className="font-mono text-[10px] font-black uppercase tracking-widest border border-[#fff]/70 px-2 py-0.5">
+              Revenue figures are incomplete
+            </span>
+          </div>
+          <ol className="p-4 space-y-3 text-xs">
+            {untypedCatalog.length > 0 && (
+              <li className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <p className="m-0">
+                  <b className="font-black">1. {untypedCatalog.length} catalog item{untypedCatalog.length === 1 ? '' : 's'}</b> {untypedCatalog.length === 1 ? 'has' : 'have'} no Studio / MUA type: {list(untypedCatalog, 5)}.{' '}
+                  <b>Every new sale of {untypedCatalog.length === 1 ? 'it' : 'them'} goes uncounted</b> until you choose one.
+                </p>
+                {onOpenCatalog && (
+                  <button type="button" onClick={onOpenCatalog}
+                    className="btn-tactile shrink-0 min-h-[40px] px-4 bg-[#dc2626] text-[#fff] border border-[#b91c1c] text-[11px] font-black uppercase tracking-wider cursor-pointer hover:bg-[#b91c1c]">
+                    Fix in Packages &amp; Add-ons
+                  </button>
+                )}
+              </li>
+            )}
+            {untypedOrders.length > 0 && (
+              <li className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-red-300 first:pt-0 first:border-t-0">
+                <p className="m-0">
+                  <b className="font-black">{untypedCatalog.length > 0 ? '2. ' : '1. '}{untypedOrders.length} job order{untypedOrders.length === 1 ? '' : 's'}</b> ({list(untypedOrders, 8)}) {untypedOrders.length === 1 ? 'has' : 'have'} charges with no revenue type.{' '}
+                  <b>Part of {untypedOrders.length === 1 ? 'its' : 'their'} payments stays unallocated even when fully paid.</b>{' '}
+                  Set the MUA amount in the order&apos;s revenue review (Students → Edit).
+                </p>
+                {onOpenStudents && (
+                  <button type="button" onClick={onOpenStudents}
+                    className="btn-tactile shrink-0 min-h-[40px] px-4 bg-[#dc2626] text-[#fff] border border-[#b91c1c] text-[11px] font-black uppercase tracking-wider cursor-pointer hover:bg-[#b91c1c]">
+                    Review in Students
+                  </button>
+                )}
+              </li>
+            )}
+          </ol>
+        </section>
       )}
 
       {/* Accounting Reconciliation Banner */}
