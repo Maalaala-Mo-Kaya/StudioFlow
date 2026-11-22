@@ -18,7 +18,7 @@ import { useWorkflowData } from '../../hooks/useWorkflowData';
 import { registrationAddOns } from './registrationAddOns';
 import { keepValidPicks, missingPicks, optionGroups, picksPayload, type OptionPicks } from '../../utils/packageOptions';
 import {
-  emailPattern, mobilePattern, packageRequiredMessage, registrationFields, validationProps,
+  emailPattern, mobilePattern, packageRequiredMessage, registrationFields, registrationNameLimit, validationProps,
   type RegistrationErrors,
 } from './registrationValidation';
 
@@ -203,7 +203,7 @@ export function useRegistrationForm() {
     }
     setSearchName('');
     setIsSearching(false);
-    clearErrors('family_name', 'given_name', 'gender', 'email', 'mobile_number', 'organization', 'level', 'course');
+    clearErrors('family_name', 'given_name', 'middle_name', 'gender', 'email', 'mobile_number', 'organization', 'level', 'course');
   };
 
   const toggleAddOn = useCallback((id: string) => {
@@ -257,6 +257,16 @@ export function useRegistrationForm() {
     const fieldErrors: RegistrationErrors = {};
     if (!familyName.trim()) fieldErrors.family_name = 'Enter your family name.';
     if (!givenName.trim()) fieldErrors.given_name = 'Enter your given name.';
+    const names = [
+      ['family_name', 'Family name', familyName],
+      ['given_name', 'Given name', givenName],
+      ['middle_name', 'Middle name', middleName],
+    ] as const;
+    for (const [field, label, value] of names) {
+      if (Array.from(value.trim()).length > registrationNameLimit) {
+        fieldErrors[field] = `${label} must be ${registrationNameLimit} characters or fewer.`;
+      }
+    }
     if (!['male', 'female'].includes(gender)) fieldErrors.gender = "Please select the client's gender.";
     if (!clientKind) {
       fieldErrors.client_kind = availableKinds.length ? 'Choose the type of client.' : 'Registration is closed right now. Please ask the staff.';
@@ -444,7 +454,7 @@ export function useRegistrationForm() {
     givenName,
     setGivenName: changeField('given_name', setGivenName),
     middleName,
-    setMiddleName,
+    setMiddleName: changeField('middle_name', setMiddleName),
     gender,
     setGender: changeField('gender', setGender),
     studentId,

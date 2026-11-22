@@ -1,5 +1,5 @@
 export const registrationFields = [
-  'client_kind', 'family_name', 'given_name', 'gender', 'organization', 'level', 'course',
+  'client_kind', 'family_name', 'given_name', 'middle_name', 'gender', 'organization', 'level', 'course',
   'session_type', 'event_date', 'event_venue', 'email',
   'mobile_number', 'package', 'package_options', 'makeup_look', 'makeup_look_note', 'terms_accepted', 'signature',
 ] as const;
@@ -13,6 +13,9 @@ export const genderOptions = [
 ] as const;
 
 export const packageRequiredMessage = 'Please select a Job Order Package to continue.';
+
+// Keep in sync with pb_hooks/studio_photo_names.cjs.
+export const registrationNameLimit = 100;
 
 // Keep the contact formats in sync with pb_hooks/registration_validation.pb.js.
 export const emailPattern = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;

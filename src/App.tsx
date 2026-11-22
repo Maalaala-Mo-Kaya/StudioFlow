@@ -69,7 +69,7 @@ export default function App() {
               <strong className="font-display font-semibold text-foil uppercase tracking-[0.18em]">Hi-Light Studio</strong> •
               P. del Rosario St., Cebu City (opp. USC-Main) • Tel: 032-2540886
             </div>
-            <div className="text-neutral-500">
+            <div className="text-neutral-400">
               STUDIOFLOW V2 // OFFLINE LAN AUTOMATION
             </div>
           </div>

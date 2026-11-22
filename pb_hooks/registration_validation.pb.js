@@ -13,6 +13,14 @@ onRecordCreateRequest((e) => {
 
   if (!record.getString("family_name")) invalid("family_name", "Enter your family name.");
   if (!record.getString("given_name")) invalid("given_name", "Enter your given name.");
+  // Keep the new registration limits in sync with registrationValidation.ts.
+  const { registrationNameLimit } = require(__hooks + "/studio_photo_names.cjs");
+  const names = { family_name: "Family name", given_name: "Given name", middle_name: "Middle name" };
+  for (const field of Object.keys(names)) {
+    if (Array.from(record.getString(field)).length > registrationNameLimit) {
+      invalid(field, `${names[field]} must be ${registrationNameLimit} characters or fewer.`);
+    }
+  }
   if (!["male", "female"].includes(record.getString("gender"))) invalid("gender", "Please select the client's gender.");
 
   // Keep the contact formats in sync with src/features/registration/registrationValidation.ts.

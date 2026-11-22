@@ -6,6 +6,7 @@ import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useToast } from '../../../context/ToastContext';
 import { DataTable, tableFilterControl } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
+import { parseRosterCsv, type RosterImportResult, type RosterImportRow } from '../../../utils/csv';
 
 interface AdminRosterTabProps {
   organizations: Organization[];
@@ -14,7 +15,7 @@ interface AdminRosterTabProps {
   onRosterOrgIdChange: (val: string) => void;
   csvText: string;
   onCsvTextChange: (val: string) => void;
-  onImportRoster: () => Promise<void>;
+  onImportRoster: (organization: string, rows: RosterImportRow[]) => Promise<RosterImportResult>;
   onDeleteMasterListItem: (id: string) => Promise<void>;
   onClearMasterList: (orgId: string) => Promise<void>;
 }
@@ -32,6 +33,8 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
 }) => {
   const { toast } = useToast();
   const [searchRoster, setSearchRoster] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [rejections, setRejections] = useState<RosterImportResult['rejected']>([]);
 
   const [confirmModalState, setConfirmModalState] = useState<{
     isOpen: boolean;
@@ -47,38 +50,25 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
 
   const selectedOrg = organizations.find((o) => o.id === rosterOrgId);
 
-  // Parse lines for live preview (T021)
-  const parsedPreview = useMemo(() => {
-    if (!csvText.trim()) return [];
-    return csvText
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .map((line, index) => {
-        const parts = line.split(/[,\t]/).map((p) => p.trim());
-        return {
-          id: index,
-          name: parts[0] || '',
-          studentId: parts[1] || '',
-          section: parts[2] || '',
-          email: parts[3] || '',
-          mobile: parts[4] || '',
-          isValid: Boolean(parts[0] && parts[0].length >= 3),
-        };
-      });
-  }, [csvText]);
-
-  const validRowCount = parsedPreview.filter((r) => r.isValid).length;
-  const previewColumns: DataTableColumn<typeof parsedPreview[number]>[] = [
-    { id: 'name', header: 'Name', sortable: true, accessor: (row) => row.name, cellClassName: 'font-bold' },
-    { id: 'studentId', header: 'ID', sortable: true, accessor: (row) => row.studentId },
-    { id: 'section', header: 'Sec', sortable: true, accessor: (row) => row.section },
-    { id: 'status', header: 'Status', sortable: true, accessor: (row) => row.isValid, cell: (row) => row.isValid ? '✓' : 'Invalid' },
+  const parsedPreview = useMemo(() => parseRosterCsv(csvText), [csvText]);
+  const validRowCount = parsedPreview.filter((row) => !row.error).length;
+  const previewColumns: DataTableColumn<RosterImportRow>[] = [
+    { id: 'name', header: 'Name', accessor: (row) => row.fields.full_name, cellClassName: 'font-bold' },
+    { id: 'studentId', header: 'ID', accessor: (row) => row.fields.student_id },
+    { id: 'section', header: 'Section', accessor: (row) => row.fields.section },
+    { id: 'email', header: 'Email', accessor: (row) => row.fields.email },
+    { id: 'mobile', header: 'Mobile', accessor: (row) => row.fields.mobile_number },
+    { id: 'status', header: 'Status', accessor: (row) => row.error ?? 'Ready' },
   ];
 
+  const scopedRoster = useMemo(() => {
+    if (rosterOrgId !== 'unassigned') return masterList.filter((item) => item.organization === rosterOrgId);
+    const schoolIds = new Set(organizations.map((org) => org.id));
+    return masterList.filter((item) => !item.organization || !schoolIds.has(item.organization));
+  }, [masterList, organizations, rosterOrgId]);
+
   const orgMasterList = useMemo(() => {
-    return masterList.filter((item) => {
-      if (rosterOrgId && item.organization && item.organization !== rosterOrgId) return false;
+    return scopedRoster.filter((item) => {
       if (searchRoster.trim()) {
         const q = searchRoster.toLowerCase();
         return (
@@ -89,14 +79,22 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
       }
       return true;
     });
-  }, [masterList, rosterOrgId, searchRoster]);
+  }, [scopedRoster, searchRoster]);
 
   const handleImport = async () => {
+    if (!selectedOrg || importing) return;
+    setImporting(true);
     try {
-      await onImportRoster();
-      toast.success(`Successfully imported ${validRowCount} roster records`);
+      const { saved, rejected } = await onImportRoster(selectedOrg.id, parsedPreview);
+      setRejections(rejected);
+      onCsvTextChange(rejected.map(({ row }) => row.source).join('\n'));
+      const summary = `Imported ${saved} roster records. Rejected ${rejected.length}.`;
+      if (rejected.length) toast.error(summary);
+      else toast.success(summary);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -104,7 +102,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
     setConfirmModalState({
       isOpen: true,
       title: `Clear School Roster: ${selectedOrg?.name || 'School'}`,
-      message: `Are you sure you want to delete all ${orgMasterList.length} master roster records for ${selectedOrg?.name}? This action cannot be undone.`,
+      message: `Are you sure you want to delete all ${scopedRoster.length} master roster records for ${selectedOrg?.name}? This action cannot be undone.`,
       action: async () => {
         try {
           await onClearMasterList(rosterOrgId);
@@ -155,11 +153,13 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
           </div>
 
           <div>
-            <label className="block text-[11px] font-black uppercase mb-1">
+            <label htmlFor="roster-school" className="block text-[11px] font-black uppercase mb-1">
               Target Organization / School
             </label>
             <select
+              id="roster-school"
               value={rosterOrgId}
+              disabled={importing}
               onChange={(e) => onRosterOrgIdChange(e.target.value)}
               className="w-full p-2.5 bg-panel border border-line font-bold"
             >
@@ -168,26 +168,39 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
                   {o.name} ({o.code || 'ORG'})
                 </option>
               ))}
+              <option value="unassigned">No school assigned</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-[11px] font-black uppercase mb-1">
+            <label htmlFor="roster-paste" className="block text-[11px] font-black uppercase mb-1">
               Paste CSV / Tab-Delimited Rows
             </label>
             <p className="text-[10px] text-neutral-500 mb-2">
               Format: <code>Full Name, Student ID, Section, Email, Mobile</code>
             </p>
             <textarea
+              id="roster-paste"
               rows={6}
               placeholder="Claire Varlo, 2026-001, BSCS-4A, claire@example.com, 0917-111-2222&#10;John Dela Cruz, 2026-002, STEM-12, john@example.com, 0918-333-4444"
               value={csvText}
-              onChange={(e) => onCsvTextChange(e.target.value)}
+              disabled={importing}
+              onChange={(e) => {
+                onCsvTextChange(e.target.value);
+                setRejections([]);
+              }}
               className="w-full text-xs font-mono p-3 border border-neutral-400 bg-canvas focus:bg-panel"
             />
           </div>
 
-          {/* Validation & Preview Box (T021) */}
+          {rejections.length > 0 && (
+            <ul aria-label="Rejected roster rows" className="list-disc space-y-1 pl-5 text-red-700">
+              {rejections.map(({ row, message }) => (
+                <li key={row.line}>Original line {row.line}{row.fields.full_name ? ` (${row.fields.full_name})` : ''}. {message}</li>
+              ))}
+            </ul>
+          )}
+
           {parsedPreview.length > 0 && (
             <div className="border border-neutral-300 p-3 bg-canvas space-y-2">
               <div className="flex items-center justify-between text-[11px]">
@@ -195,7 +208,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
                   Preview: {validRowCount} valid of {parsedPreview.length} lines
                 </span>
                 <span className={validRowCount === parsedPreview.length ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>
-                  {validRowCount === parsedPreview.length ? '✓ All rows valid' : '⚠ Some rows incomplete'}
+                  {validRowCount === parsedPreview.length ? 'Ready to import' : 'Some rows need corrections'}
                 </span>
               </div>
 
@@ -203,12 +216,11 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
                 label="Roster import preview"
                 rows={parsedPreview}
                 columns={previewColumns}
-                getRowId={(row) => row.id}
-                defaultSort={{ column: 'name', direction: 'ascending' }}
+                getRowId={(row) => row.line}
                 viewportClassName="max-h-[140px]"
                 className="border! border-neutral-200! shadow-none!"
                 headerClassName="uppercase"
-                rowClassName={(row) => row.isValid ? '' : 'bg-red-50 text-red-700'}
+                rowClassName={(row) => row.error ? 'bg-red-50 text-red-700' : ''}
               />
             </div>
           )}
@@ -216,10 +228,10 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
           <button
             type="button"
             onClick={handleImport}
-            disabled={validRowCount === 0}
+            disabled={!selectedOrg || validRowCount === 0 || importing}
             className="btn-tactile w-full py-2.5 bg-obsidian text-gold border border-line font-black uppercase tracking-wider cursor-pointer disabled:opacity-40"
           >
-            Commit Ingestion ({validRowCount} Valid Students)
+            {importing ? 'Importing…' : `Commit Ingestion (${validRowCount} Ready)`}
           </button>
         </div>
 
@@ -235,7 +247,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
                 <span className="font-mono text-[10px] bg-obsidian text-gold px-2 py-0.5 font-bold">
                   {orgMasterList.length} Students
                 </span>
-                {orgMasterList.length > 0 && (
+                {selectedOrg && scopedRoster.length > 0 && (
                   <button
                     type="button"
                     onClick={promptClearRoster}
@@ -250,7 +262,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
             <DataTable label="Master roster records" rows={orgMasterList} columns={rosterColumns}
               getRowId={(item) => item.id} pagination={false} viewportClassName="max-h-[380px]"
               tableClassName="min-w-[410px]" headerClassName="uppercase" filtered={Boolean(searchRoster.trim())}
-              emptyMessage={'No roster entries found for ' + (selectedOrg?.name || 'this school') + '.'}
+              emptyMessage={selectedOrg ? `No roster entries found for ${selectedOrg.name}.` : 'No roster entries without a school.'}
               toolbar={<div className="relative p-2">
                 <Search aria-hidden="true" className="pointer-events-none absolute left-5 top-1/2 size-3.5 -translate-y-1/2 text-neutral-400" />
                 <input type="search" aria-label="Search roster" value={searchRoster}
@@ -262,7 +274,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
           </div>
 
           <div className="mt-4 pt-3 border-t border-neutral-200 flex justify-between items-center text-neutral-500 text-[10px]">
-            <span>School: <strong>{selectedOrg?.name || 'All'}</strong></span>
+            <span>School: <strong>{selectedOrg?.name || 'Unassigned'}</strong></span>
             <span>Total Ingested: <strong>{masterList.length}</strong></span>
           </div>
         </div>

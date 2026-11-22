@@ -104,7 +104,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, queueCo
                   <button
                     type="button"
                     onClick={handleSignOut}
-                    aria-label="Sign out"
+                    aria-label="Exit (sign out)"
                     title="Sign out"
                     className="btn-tactile flex shrink-0 items-center gap-1.5 border border-neutral-700 bg-obsidian px-2.5 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-300 hover:bg-panel hover:text-ink cursor-pointer sm:ml-1"
                   >

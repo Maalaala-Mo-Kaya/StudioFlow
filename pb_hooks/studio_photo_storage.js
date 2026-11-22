@@ -1,5 +1,5 @@
 const { catalogItem } = require(__hooks + "/studio_workflow.js");
-const { clientFolderName } = require(__hooks + "/studio_photo_names.cjs");
+const { clientFolderName, folderNameBytes, utf8Bytes } = require(__hooks + "/studio_photo_names.cjs");
 const defaultRoot = "C:\\StudioFlow_Photos";
 const formats = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif" };
 
@@ -26,8 +26,9 @@ function pathFor(app, registration, layout = "current") {
   const job = registration.getString("job_order_no");
   const family = clean(registration.getString("family_name") || "STUDENT");
   const given = registration.getString("given_name");
-  const leaf = layout === "current"
-    ? clientFolderName(job, registration.getString("family_name"), given, registration.getString("middle_name"))
+  const leaf = layout === "current" || layout === "unbounded"
+    ? clientFolderName(job, registration.getString("family_name"), given, registration.getString("middle_name"),
+      layout === "unbounded" ? Infinity : undefined)
     : `${clean(job)}_${family}${given ? "_" + clean(given) : ""}`.replace(/_+$/, "");
   if (registration.getString("client_kind") === "walkin") {
     // Walk-ins have no school or course: file them by the month they registered (studio time, UTC+8).
@@ -84,7 +85,7 @@ function saveDocument(relative, name, bytes) {
 
 function photoFolder(app, registration, newlyNumbered = false) {
   const saved = registration.getString("photo_folder");
-  if (saved) return saved;
+  if (saved && (folderLeafBytes(saved) <= folderNameBytes || probeFolder(saved) !== "too-long")) return saved;
 
   const jobOrder = registration.getString("job_order_no");
   const matches = jobOrder ? app.findRecordsByFilter("registrations", "job_order_no = {:job}", "", 2, 0, { job: jobOrder }) : [];
@@ -92,19 +93,33 @@ function photoFolder(app, registration, newlyNumbered = false) {
     throw new ApiError(409, "This legacy job order cannot be matched to a unique photo folder.");
   }
   const canonical = pathFor(app, registration);
-  const paths = [...new Set([canonical, pathFor(app, registration, "legacy"), pathFor(app, registration, "browser")])];
-  const existing = paths.filter((path) => {
-    const root = openStudent(path);
-    if (!root) return false;
-    root.close();
-    return true;
-  });
+  const paths = [...new Set([canonical, ...["unbounded", "legacy", "browser"].map((layout) => pathFor(app, registration, layout))])];
+  const existing = paths.filter((path) => probeFolder(path) === "exists");
   if (existing.length > 1) throw new ApiError(409, "Photos exist in two legacy folders for this job order.");
   const path = existing[0] || canonical;
   if (app.findRecordsByFilter("registrations", "photo_folder_key = {:path} && id != {:id}", "", 1, 0, {
     path: path.toLowerCase(), id: registration.id,
   }).length) throw new ApiError(409, "This photo folder belongs to another registration.");
   return path;
+}
+
+function folderLeafBytes(path) {
+  return Array.from(path.split("/").pop()).reduce((size, character) => size + utf8Bytes(character), 0);
+}
+
+function probeFolder(path) {
+  const leaf = path.split("/").pop();
+  const length = basePath().startsWith("/") ? folderLeafBytes(path) : leaf.length;
+  if (length > 255) return "too-long";
+  try {
+    const root = openStudent(path);
+    if (!root) return "missing";
+    root.close();
+    return "exists";
+  } catch (error) {
+    if (/file name too long|filename or extension is too long|name is too long/i.test(String(error))) return "too-long";
+    throw error;
+  }
 }
 
 function isMissing(error) {

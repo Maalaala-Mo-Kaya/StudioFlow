@@ -21,6 +21,10 @@ const { clientFolderName } = require('../pb_hooks/studio_photo_names.cjs');
 test('photo repository names retain the official number and normalize client names', () => {
   assert.equal(clientFolderName('0018', 'Dela Cruz', 'Juan', ''), '0018_Dela_Cruz_Juan');
   assert.equal(clientFolderName('0018', '  Dela / Cruz ', 'Juan', 'Santos*'), '0018_Dela_Cruz_Juan_Santos');
+  assert.equal(clientFolderName('0018', 'X'.repeat(500), 'Juan', ''), '0018_' + 'X'.repeat(115));
+  const unicode = clientFolderName('0018', '😀'.repeat(100), '', '');
+  assert.equal(unicode, '0018_' + '😀'.repeat(28));
+  assert.ok(Buffer.byteLength(unicode) <= 120);
   assert.throws(() => clientFolderName('', 'Dela Cruz', 'Juan', ''), /official job order/);
 });
 

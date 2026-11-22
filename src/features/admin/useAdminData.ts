@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
+import { mountSubscription, useRealtimeClient } from '../../hooks/useRealtimeClient';
 import { useToast } from '../../context/ToastContext';
 import type {
   Organization, Level, Course, SchoolCourse, AssignSchoolCourse, Package, AddOn,
   Registration, MasterListItem, CatalogItem, CatalogItemInput, ItemPackage, PackageStructure, StaffUser, StaffRole, RevenueCategory,
   ProductionStatus, ProductionUpdateResult, PhotoStatus, PaymentRecord, RefundRecord,
 } from '../../types';
-import { parseRosterCsv, exportRegistrationsToCsv } from '../../utils/csv';
+import { exportRegistrationsToCsv, type RosterImportResult, type RosterImportRow } from '../../utils/csv';
 import { PROTECTED_SYSTEM_USERNAMES } from '../../constants/studio';
 import { overviewMetrics } from './overviewMetrics';
 import { refreshClientDocuments } from '../receipts/clientDocuments';
@@ -129,38 +130,24 @@ export function useAdminData() {
       setStaffAccounts(usersRes);
       setPayments(paymentsRes);
       setRefunds(refundsRes);
-      if (orgsRes.length > 0 && !rosterOrgId) setRosterOrgId(orgsRes[0].id);
+      setRosterOrgId((current) => current === 'unassigned' || orgsRes.some((org) => org.id === current)
+        ? current : orgsRes[0]?.id ?? 'unassigned');
     } catch (err) {
       if (generation !== loadGeneration.current) return;
       if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
       setCourseCatalogStatus((status) => status === 'ready' ? status : 'error');
       console.error('Failed to load admin data:', err);
     }
-  }, [rosterOrgId]);
+  }, []);
 
+  const live = useRealtimeClient();
   useEffect(() => {
-    loadAllData();
-    pb.collection('registrations').subscribe('*', () => {
-      loadAllData();
-    });
-    void pb.realtime.subscribe('studioflow-registration-deleted', loadAllData).catch(console.error);
-    pb.collection('packages').subscribe('*', () => {
-      loadAllData();
-    }).catch((error) => console.error('Could not subscribe to package updates:', error));
-    pb.collection('payments').subscribe('*', () => {
-      loadAllData();
-    }).catch((error) => console.error('Could not subscribe to payment updates:', error));
-    pb.collection('refunds').subscribe('*', () => {
-      loadAllData();
-    }).catch((error) => console.error('Could not subscribe to refund updates:', error));
-    return () => {
-      pb.collection('registrations').unsubscribe('*');
-      void pb.realtime.unsubscribeByTopicAndListener('studioflow-registration-deleted', loadAllData).catch(console.error);
-      pb.collection('packages').unsubscribe('*');
-      pb.collection('payments').unsubscribe('*');
-      pb.collection('refunds').unsubscribe('*');
-    };
-  }, [loadAllData]);
+    void loadAllData();
+    const stops = ['registrations', 'packages', 'payments', 'refunds'].map((name) =>
+      mountSubscription((listener) => live.collection(name).subscribe('*', listener), loadAllData));
+    stops.push(mountSubscription((listener) => live.realtime.subscribe('studioflow-registration-deleted', listener), loadAllData));
+    return () => stops.forEach((stop) => stop());
+  }, [live, loadAllData]);
 
   // Metrics Calculations
   // All-time figures (the Overview tab can also show today or this month).
@@ -284,30 +271,29 @@ export function useAdminData() {
   };
 
   // Import Roster
-  const handleImportRoster = async () => {
-    const rows = parseRosterCsv(csvText);
-    if (rows.length === 0) return;
-
-    let imported = 0;
-    for (const item of rows) {
+  const handleImportRoster = async (organization: string, rows: RosterImportRow[]): Promise<RosterImportResult> => {
+    const result: RosterImportResult = { saved: 0, rejected: [] };
+    for (const row of rows) {
+      if (row.error) {
+        result.rejected.push({ row, message: row.error });
+        continue;
+      }
       try {
-        await pb.collection('master_lists').create({
-          organization: rosterOrgId,
-          full_name: item.full_name,
-          student_id: item.student_id,
-          section: item.section,
-          email: item.email,
-          mobile_number: item.mobile_number,
-        });
-        imported++;
-      } catch {
-        // Continue with remaining rows if one fails
+        await pb.collection('master_lists').create({ organization, ...row.fields });
+        result.saved++;
+      } catch (error) {
+        const details = error instanceof ClientResponseError ? error.response.data : undefined;
+        const labels: Record<string, string> = {
+          full_name: 'Full Name', student_id: 'Student ID', section: 'Section',
+          email: 'Email', mobile_number: 'Mobile', organization: 'School',
+        };
+        const message = Object.entries(details ?? {}).map(([field, detail]) =>
+          `${labels[field] ?? field}: ${(detail as { message?: string }).message ?? 'Check this field.'}`).join(' ');
+        result.rejected.push({ row, message: message || 'The row could not be saved. Check the connection and try again.' });
       }
     }
-
-    toast.success(`Successfully imported ${imported} roster records!`);
-    setCsvText('');
-    loadAllData();
+    if (result.saved) await loadAllData();
+    return result;
   };
 
   // Create Staff Account

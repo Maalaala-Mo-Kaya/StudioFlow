@@ -320,7 +320,7 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
             <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gold-soft">
               Admin Sections
             </span>
-            <span className="text-[9px] font-mono text-neutral-400">{navItems.filter((n) => !n.parent).length} TABS</span>
+            <span className="text-[9px] font-mono text-ink">{navItems.filter((n) => !n.parent).length} TABS</span>
           </div>
 
           <div className="space-y-1.5">

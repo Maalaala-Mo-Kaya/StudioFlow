@@ -88,7 +88,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
 
       {/* Participant Profile Preview */}
       <div className="p-3 bg-obsidian-2 border border-neutral-800 space-y-1.5">
-        <span className="text-[9px] uppercase font-bold text-neutral-500 block tracking-widest">
+        <span className="text-[9px] uppercase font-bold text-neutral-400 block tracking-widest">
           Candidate Profile
         </span>
         <div className="font-black text-sm text-white truncate">
@@ -102,7 +102,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
 
       {/* Selected Package Breakdown */}
       <div className="space-y-2">
-        <span className="text-[9px] uppercase font-bold text-neutral-500 block tracking-widest">
+        <span className="text-[9px] uppercase font-bold text-neutral-400 block tracking-widest">
           Chosen Pictorial Package
         </span>
         {selectedPkg ? (
@@ -122,7 +122,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
             </span>
           </div>
         ) : (
-          <div className="p-3 border border-dashed border-neutral-700 text-neutral-500 text-center italic text-[11px]">
+          <div className="p-3 border border-dashed border-neutral-700 text-neutral-400 text-center italic text-[11px]">
             Please select a package from Section 03
           </div>
         )}
@@ -138,7 +138,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
       {/* Selected Add-ons Breakdown */}
       {activeAddOns.length > 0 && (
         <div className="space-y-1.5">
-          <span className="text-[9px] uppercase font-bold text-neutral-500 block tracking-widest">
+          <span className="text-[9px] uppercase font-bold text-neutral-400 block tracking-widest">
             Selected Add-Ons ({activeAddOns.length})
           </span>
           <div className="space-y-1 max-h-[120px] overflow-y-auto pr-1">
@@ -224,7 +224,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
           >
             {termsAccepted && <Check className="w-3 h-3 stroke-[3]" />}
           </div>
-          <span className={termsAccepted ? 'text-neutral-200 font-bold' : 'text-neutral-500'}>
+          <span className={termsAccepted ? 'text-neutral-200 font-bold' : 'text-neutral-400'}>
             Studio Terms &amp; Policies Accepted
           </span>
         </div>
@@ -239,7 +239,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
           >
             {hasSignature && <Check className="w-3 h-3 stroke-[3]" />}
           </div>
-          <span className={hasSignature ? 'text-neutral-200 font-bold' : 'text-neutral-500'}>
+          <span className={hasSignature ? 'text-neutral-200 font-bold' : 'text-neutral-400'}>
             Touch Signature Captured on File
           </span>
         </div>
@@ -265,7 +265,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
         )}
       </button>
 
-      <div className="text-center text-[10px] text-neutral-500 font-mono flex items-center justify-center gap-1.5 pt-1">
+      <div className="text-center text-[10px] text-neutral-400 font-mono flex items-center justify-center gap-1.5 pt-1">
         <ShieldCheck className="w-3.5 h-3.5 text-gold" />
         <span>Job Order issued after payment</span>
       </div>

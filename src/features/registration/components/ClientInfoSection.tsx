@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Organization, Level, Course } from '../../../types';
-import { genderOptions, validationProps, type RegistrationErrors } from '../registrationValidation';
+import { genderOptions, registrationNameLimit, validationProps, type RegistrationErrors } from '../registrationValidation';
 import { RegistrationFieldError } from './RegistrationFieldError';
 import { SearchableSelect } from '../../../components/common/SearchableSelect';
 
@@ -72,7 +72,9 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
           <span className="font-mono text-gold-soft mr-2">01 //</span>
           Client Information
         </h2>
-        <span className="font-mono text-[10px] text-neutral-500 uppercase">Required *</span>
+        <span id="registration-name-limit" className="font-mono text-[10px] text-neutral-500">
+          Up to {registrationNameLimit} characters per name field
+        </span>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -82,6 +84,7 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
           </label>
           <input
             {...validationProps('family_name', errors.family_name)}
+            aria-describedby={errors.family_name ? 'registration-family_name-error registration-name-limit' : 'registration-name-limit'}
             type="text"
             required
             placeholder="DELA CRUZ"
@@ -97,6 +100,7 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
           </label>
           <input
             {...validationProps('given_name', errors.given_name)}
+            aria-describedby={errors.given_name ? 'registration-given_name-error registration-name-limit' : 'registration-name-limit'}
             type="text"
             required
             placeholder="JUAN"
@@ -111,13 +115,15 @@ export const ClientInfoSection: React.FC<ClientInfoSectionProps> = ({
             Middle Name
           </label>
           <input
-            id="registration-middle_name"
+            {...validationProps('middle_name', errors.middle_name)}
+            aria-describedby={errors.middle_name ? 'registration-middle_name-error registration-name-limit' : 'registration-name-limit'}
             type="text"
             placeholder="SANTOS"
             value={middleName}
             onChange={(e) => onMiddleNameChange(e.target.value)}
-            className="w-full min-h-[48px] text-sm px-3.5 py-2.5 border border-neutral-400 focus:border-line bg-canvas focus:bg-panel uppercase font-bold transition"
+            className={`w-full min-h-[48px] text-sm px-3.5 py-2.5 border border-neutral-400 focus:border-line bg-canvas focus:bg-panel uppercase font-bold transition ${invalidBorder}`}
           />
+          <RegistrationFieldError field="middle_name" errors={errors} />
         </div>
       </div>
 

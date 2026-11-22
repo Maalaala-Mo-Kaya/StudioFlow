@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
+import { mountSubscription, useRealtimeClient } from '../../hooks/useRealtimeClient';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { workflowApi, workflowError } from '../../hooks/useWorkflowData';
@@ -146,20 +147,18 @@ export function useCashierState() {
     }
   }, []);
 
+  const live = useRealtimeClient();
   useEffect(() => {
-    fetchRegistrations();
-
-    pb.collection('registrations').subscribe('*', () => {
-      fetchRegistrations();
-    });
-    const refreshDeleted = () => void fetchRegistrations(true);
-    void pb.realtime.subscribe('studioflow-registration-deleted', refreshDeleted).catch(console.error);
-
+    void fetchRegistrations();
+    const stopRegistrations = mountSubscription(
+      (listener) => live.collection('registrations').subscribe('*', listener), () => fetchRegistrations());
+    const stopDeleted = mountSubscription(
+      (listener) => live.realtime.subscribe('studioflow-registration-deleted', listener), () => fetchRegistrations(true));
     return () => {
-      pb.collection('registrations').unsubscribe('*');
-      void pb.realtime.unsubscribeByTopicAndListener('studioflow-registration-deleted', refreshDeleted).catch(console.error);
+      stopRegistrations();
+      stopDeleted();
     };
-  }, [fetchRegistrations]);
+  }, [live, fetchRegistrations]);
 
   const deleteRegistration = async (reg: Registration, reason: string) => {
     try {

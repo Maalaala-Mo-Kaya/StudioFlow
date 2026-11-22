@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { pb } from '../db/pocketbase';
+import { clearStudioAuth, pb } from '../db/pocketbase';
 import type { StaffUser, StaffRole } from '../types';
 
 interface AuthContextValue {
@@ -77,7 +77,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (pb.authStore.token === token) pb.authStore.save(token, current);
       } catch (error) {
         if (pb.authStore.token === token && error && typeof error === 'object' &&
-          'status' in error && [401, 403, 404].includes(Number(error.status))) pb.authStore.clear();
+          'status' in error && [401, 403, 404].includes(Number(error.status))) clearStudioAuth();
       }
     };
     void refresh();
@@ -86,7 +86,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const logout = useCallback(() => {
-    pb.authStore.clear();
+    clearStudioAuth();
     setUser(null);
   }, []);
 

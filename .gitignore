@@ -35,3 +35,6 @@ docs/PROJECT_AUDIT_REPORT.md
 
 # OCR engine copied from node_modules by scripts/copy-ocr-assets.cjs
 public/ocr
+
+# Context files
+.context/

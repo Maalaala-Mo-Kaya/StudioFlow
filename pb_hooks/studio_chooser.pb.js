@@ -208,7 +208,7 @@ routerAdd("POST", "/api/studioflow/photo-folder/{id}", (e) => {
     try { storage.provision(folder); } catch (_) {
       throw new ApiError(503, "The photo folder could not be created. Check the server's photo storage.");
     }
-    if (!record.getString("photo_folder")) {
+    if (record.getString("photo_folder") !== folder) {
       storage.setFolder(record, folder);
       tx.save(record);
     }

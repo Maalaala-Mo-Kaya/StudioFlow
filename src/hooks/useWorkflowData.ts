@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { pb } from '../db/pocketbase';
+import { mountSubscription, useRealtimeClient } from './useRealtimeClient';
 
 export const workflowApi = '/api/studioflow';
 
@@ -11,12 +12,12 @@ export function useWorkflowData<T>(path: string | null, interval = 8_000, keepPr
   const [result, setResult] = useState<{ path: string; data?: T; error?: string }>();
   const refreshRef = useRef<() => void>(() => {});
   const refresh = useCallback(() => refreshRef.current(), []);
+  const realtime = useRealtimeClient();
 
   useEffect(() => {
     if (path === null) return;
     let live = true;
     let generation = 0;
-    let stop: (() => Promise<void>) | undefined;
     let debounce: number | undefined;
     const load = async () => {
       const request = ++generation;
@@ -36,10 +37,7 @@ export function useWorkflowData<T>(path: string | null, interval = 8_000, keepPr
       debounce = window.setTimeout(load, 120);
     };
     refreshRef.current();
-    void pb.realtime.subscribe('studioflow-workflow', () => refresh()).then((unsubscribe) => {
-      if (live) stop = unsubscribe;
-      else void unsubscribe().catch(console.error);
-    }).catch(console.error);
+    const stop = mountSubscription((listener) => realtime.realtime.subscribe('studioflow-workflow', listener), refresh);
     const timer = window.setInterval(refresh, interval);
     window.addEventListener('focus', refresh);
     return () => {
@@ -48,9 +46,9 @@ export function useWorkflowData<T>(path: string | null, interval = 8_000, keepPr
       window.clearTimeout(debounce);
       window.clearInterval(timer);
       window.removeEventListener('focus', refresh);
-      void stop?.().catch(console.error);
+      stop();
     };
-  }, [path, interval, keepPreviousData, refresh]);
+  }, [path, interval, keepPreviousData, refresh, realtime]);
 
   return {
     data: path !== null && (result?.path === path || keepPreviousData) ? result?.data : undefined,

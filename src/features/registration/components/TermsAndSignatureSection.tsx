@@ -39,7 +39,8 @@ export const TermsAndSignatureSection: React.FC<TermsAndSignatureSectionProps> =
           </span>
         </div>
 
-        <div className="bg-canvas border border-neutral-300 p-4 text-xs text-neutral-700 space-y-1.5 max-h-48 overflow-y-auto leading-relaxed">
+        <div role="region" aria-labelledby="sec-terms" tabIndex={0}
+          className="bg-canvas border border-neutral-300 p-4 text-xs text-neutral-700 space-y-1.5 max-h-48 overflow-y-auto leading-relaxed focus-visible:outline-2 focus-visible:outline-gold">
           {clauses.map((clause, index) => (
             <p key={index}>
               <strong>{index + 1}.</strong> {clause}

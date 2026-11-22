@@ -11,24 +11,46 @@ export interface ParsedRosterRow {
   mobile_number: string;
 }
 
+export interface RosterImportRow {
+  line: number;
+  source: string;
+  fields: ParsedRosterRow;
+  error?: string;
+}
+
+export interface RosterImportResult {
+  saved: number;
+  rejected: Array<{ row: RosterImportRow; message: string }>;
+}
+
 /**
  * Parses raw CSV/text lines into structured student roster items.
  * Expected format: `Full Name, Student ID, Section, Email, Mobile`
  */
-export function parseRosterCsv(csvText: string): ParsedRosterRow[] {
-  if (!csvText.trim()) return [];
-  return csvText
-    .trim()
-    .split('\n')
-    .map((line) => line.split(',').map((cell) => cell.trim()))
-    .filter((parts) => parts.length >= 1 && Boolean(parts[0]))
-    .map((parts) => ({
-      full_name: parts[0],
-      student_id: parts[1] || '',
-      section: parts[2] || '',
-      email: parts[3] || '',
-      mobile_number: parts[4] || '',
-    }));
+export function parseRosterCsv(text: string): RosterImportRow[] {
+  const rows: RosterImportRow[] = [];
+  const records = text.replace(/^\uFEFF/, '').match(/(?:"(?:[^"]|"")*"|[^\r\n"]|")+(?:\r\n|\r|\n|$)|\r\n|\r|\n/g) ?? [];
+  let line = 1;
+  for (const record of records) {
+    const source = record.replace(/(?:\r\n|\r|\n)$/, '');
+    const start = line;
+    line += (record.match(/\r\n|\r|\n/g) ?? []).length;
+    if (!source.trim()) continue;
+
+    const delimiter = source.replace(/"(?:[^"]|"")*"/g, '').includes('\t') ? '\t' : ',';
+    const values = [''];
+    for (const token of source.match(/"(?:[^"]|"")*"|[^",\t]+|[",\t]/g) ?? []) {
+      if (token === delimiter) values.push('');
+      else values[values.length - 1] += token;
+    }
+    const [full_name = '', student_id = '', section = '', email = '', mobile_number = ''] = values
+      .map((value) => value.trim())
+      .map((value) => /^"(?:[^"]|"")*"$/.test(value) ? value.slice(1, -1).replace(/""/g, '"').trim() : value);
+    const error = values.length > 5 ? 'Use at most five columns. Put names containing commas in quotes when using CSV.'
+      : full_name.length < 3 ? 'Enter a full name with at least three characters.' : undefined;
+    rows.push({ line: start, source, fields: { full_name, student_id, section, email, mobile_number }, error });
+  }
+  return rows;
 }
 
 /** One CSV cell: quoted, with inner quotes doubled, so commas and quotes in names stay in their column. */

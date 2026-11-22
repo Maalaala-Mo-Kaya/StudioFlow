@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { pb } from '../../db/pocketbase';
+import type { RecordSubscription } from 'pocketbase';
+import { mountSubscription, useRealtimeClient } from '../../hooks/useRealtimeClient';
 import type { Registration } from '../../types';
 import { playStudioChime } from '../../utils/audio';
 import { useToast } from '../../context/ToastContext';
@@ -47,20 +49,17 @@ export function usePhotographerQueue() {
     }
   }, []);
 
+  const live = useRealtimeClient();
   useEffect(() => {
-    fetchLiveQueue();
-
-    const subscription = pb.collection('registrations').subscribe('*', (e) => {
-      if (e.action === 'create' || e.action === 'update') {
-        playStudioChime();
-      }
-      fetchLiveQueue();
-    });
-
-    return () => {
-      void subscription.then((unsubscribe) => unsubscribe()).catch(console.error);
-    };
-  }, [fetchLiveQueue]);
+    void fetchLiveQueue();
+    return mountSubscription<RecordSubscription<Registration>>(
+      (listener) => live.collection('registrations').subscribe('*', listener),
+      (event) => {
+        if (event.action === 'create' || event.action === 'update') playStudioChime();
+        void fetchLiveQueue();
+      },
+    );
+  }, [live, fetchLiveQueue]);
 
   const handleCallStudent = useCallback(
     async (reg: Registration) => {

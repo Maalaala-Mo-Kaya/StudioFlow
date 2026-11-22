@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { pb } from '../db/pocketbase';
+import { mountSubscription, useRealtimeClient } from './useRealtimeClient';
 import type { SessionType, StudioSettings } from '../types';
 import { REGISTRATION_TERMS_CLAUSES } from '../constants/studio';
 import { DEFAULT_PICKUP_MESSAGE } from '../utils/pickupMessage';
@@ -28,20 +29,13 @@ export function useStudioSettings() {
     }
   }, []);
 
+  const live = useRealtimeClient();
   useEffect(() => {
-    let active = true;
-    const stops: Array<() => Promise<void>> = [];
     void refresh();
-    for (const name of ['studio_settings', 'session_types']) {
-      void pb.collection(name).subscribe('*', () => { if (active) void refresh(); })
-        .then((stop) => { if (active) stops.push(stop); else void stop(); })
-        .catch(() => { /* realtime is optional; the data was loaded above */ });
-    }
-    return () => {
-      active = false;
-      stops.forEach((stop) => void stop().catch(() => {}));
-    };
-  }, [refresh]);
+    const stops = ['studio_settings', 'session_types'].map((name) =>
+      mountSubscription((listener) => live.collection(name).subscribe('*', listener), refresh));
+    return () => stops.forEach((stop) => stop());
+  }, [live, refresh]);
 
   return {
     settings,

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { pb } from '../../../db/pocketbase';
+import { mountSubscription, useRealtimeClient } from '../../../hooks/useRealtimeClient';
 import type { Course, Level, Organization, Package, PaymentRecord, RefundRecord, Registration } from '../../../types';
 import { sumAddOnAmounts } from '../../../utils/registrationAddOns';
 import {
@@ -85,12 +86,12 @@ function readMapping(): PackageMapping {
 function usePaymentLedger() {
   const [ledger, setLedger] = useState<{ status: 'loading' | 'error' } | { status: 'ready'; records: PaymentRecord[]; refunds: RefundRecord[] }>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  const live = useRealtimeClient();
 
   useEffect(() => {
     const collection = pb.collection('payments');
     let active = true;
     let version = 0;
-    let unsubscribe: (() => Promise<void>) | undefined;
 
     async function refresh() {
       const request = ++version;
@@ -107,17 +108,17 @@ function usePaymentLedger() {
     }
 
     void refresh();
-    void collection.subscribe('*', refresh).then((stop) => {
-      if (!active) return stop();
-      unsubscribe = stop;
+    const unsubscribe = mountSubscription(async (listener) => {
+      const stop = await live.collection('payments').subscribe('*', listener);
       // Catch transactions recorded between the initial fetch and the subscription.
-      return refresh();
-    }).catch((error) => console.error('Could not subscribe to payment updates:', error));
+      if (active) void refresh();
+      return stop;
+    }, refresh);
     return () => {
       active = false;
-      void unsubscribe?.().catch(console.error);
+      unsubscribe();
     };
-  }, [attempt]);
+  }, [attempt, live]);
 
   return {
     ledger,

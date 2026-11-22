@@ -171,7 +171,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
 
           {/* Safe Pictorial Directory Helper (T042 / AC021) */}
           <div className="mt-3 pt-2 border-t border-neutral-500/20 flex items-center justify-between text-[10px] font-mono">
-            <span className="flex items-center gap-1 text-neutral-400">
+            <span className="flex items-center gap-1 text-neutral-500">
               <Folder className="w-3 h-3 text-gold" /> Pictorial Folder:
             </span>
             <button
