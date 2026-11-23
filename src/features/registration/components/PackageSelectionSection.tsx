@@ -10,6 +10,9 @@ import { PackageCompareModal } from './PackageCompareModal';
 import { validationProps, type RegistrationErrors } from '../registrationValidation';
 import { RegistrationFieldError } from './RegistrationFieldError';
 
+const preferredPackageWidth = 320;
+const packagePeekWidth = 32;
+
 interface PackageSelectionSectionProps {
   packages: Package[];
   selectedPackageId: string | null;
@@ -53,6 +56,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
   const [viewedIndex, setViewedIndex] = useState(0);
+  const [hasOverflow, setHasOverflow] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
   const viewingPackage = packages.find((pkg) => pkg.id === detailsId) ?? null;
 
@@ -70,12 +74,26 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   useEffect(() => {
     const track = trackRef.current;
     if (!track) return;
-    const update = () => updateViewedIndex(track);
-    const resizeObserver = new ResizeObserver(update);
-    update();
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      const availableWidth = entry.contentRect.width;
+      if (availableWidth === 0) return;
+
+      const gap = parseFloat(getComputedStyle(track).columnGap);
+      const visibleCount = Math.max(1, Math.round((availableWidth - packagePeekWidth) / (preferredPackageWidth + gap)));
+      const overflowing = packages.length > visibleCount;
+      // Leave room for a gap and a sliver of the next card at each leading snap position.
+      const reservedWidth = overflowing ? gap + packagePeekWidth : 0;
+      const cardCount = overflowing ? visibleCount : packages.length;
+      const fittedWidth = (availableWidth - reservedWidth - (cardCount - 1) * gap) / cardCount;
+      const cardWidth = overflowing ? fittedWidth : Math.min(preferredPackageWidth, fittedWidth);
+
+      track.style.setProperty('--package-width', `${cardWidth}px`);
+      setHasOverflow(overflowing);
+      updateViewedIndex(track);
+    });
     resizeObserver.observe(track);
     return () => resizeObserver.disconnect();
-  }, [packages, updateViewedIndex]);
+  }, [packages.length, part, updateViewedIndex]);
 
   return (
     <section
@@ -100,7 +118,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                 <Columns3 className="w-3.5 h-3.5" /> Compare
               </button>
             )}
-            {packages.length > 1 && (
+            {hasOverflow && packages.length > 1 && (
               <span className="text-[10px] text-neutral-500 uppercase flex items-center gap-1">
                 Swipe or Scroll
                 <ArrowRight className="w-3 h-3 text-gold-soft" aria-hidden="true" />
@@ -125,9 +143,9 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
         role="group"
         aria-label="Available packages"
         tabIndex={0}
-        className={`${packages.length ? 'flex' : 'hidden'} overflow-x-auto gap-4 pb-4 snap-x snap-mandatory scrollbar-thin -mx-2 px-2 scroll-px-2 [--package-width:min(85vw,100%)] sm:[--package-width:min(320px,100%)] ${
+        className={`${packages.length ? 'flex' : 'hidden'} overflow-x-auto gap-4 pb-4 snap-x snap-mandatory scrollbar-thin -mx-2 px-2 scroll-px-2 [--package-width:min(320px,100%)] ${
           // Leave room for the last card to reach the leading snap position on wide screens.
-          packages.length > 1 ? 'after:shrink-0 after:-ml-4 after:w-[calc(100%-var(--package-width))]' : ''
+          hasOverflow && packages.length > 1 ? 'after:shrink-0 after:-ml-4 after:w-[calc(100%-var(--package-width))]' : ''
         }`}
       >
         {packages.map((pkg) => {
