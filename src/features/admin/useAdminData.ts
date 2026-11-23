@@ -46,7 +46,7 @@ export interface RefundRequest {
   clientKey: string;
 }
 
-export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students' | 'workflow' | 'camera' | 'clients' | 'catalog-import' | 'ledger';
+export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students' | 'workflow' | 'camera' | 'clients' | 'catalog-import' | 'ledger' | 'qr-codes';
 
 const excelUnavailable = 'The connected PocketBase server did not return an Excel report. Restart it with the latest StudioFlow hooks and migrations, then try again.';
 

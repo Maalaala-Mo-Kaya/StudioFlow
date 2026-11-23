@@ -1,33 +1,5 @@
 import { useEffect, useState } from 'react';
-
-type QrFactory = typeof import('qrcode-generator');
-let factory: Promise<QrFactory> | undefined;
-
-/** Loads the QR library only when a QR code is first shown. */
-function loadQr(): Promise<QrFactory> {
-  factory ??= import('qrcode-generator').then(({ default: qrcode }) => {
-    // Names such as "Peña" must survive the trip to the phone.
-    qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
-    return qrcode;
-  });
-  return factory;
-}
-
-/** Dark modules of a QR code as one SVG path (1 unit per module, 4-module quiet zone). */
-function qrPath(qrcode: QrFactory, text: string): { size: number; path: string } {
-  const qr = qrcode(0, 'M');
-  qr.addData(text);
-  qr.make();
-  const count = qr.getModuleCount();
-  const quiet = 4;
-  let path = '';
-  for (let row = 0; row < count; row++) {
-    for (let col = 0; col < count; col++) {
-      if (qr.isDark(row, col)) path += `M${col + quiet} ${row + quiet}h1v1h-1z`;
-    }
-  }
-  return { size: count + quiet * 2, path };
-}
+import { makeQrImage, type QrImage } from '../../../utils/qrImage';
 
 interface SmsQrCodeProps {
   /** Mobile number in 09XXXXXXXXX form. */
@@ -41,13 +13,13 @@ interface SmsQrCodeProps {
  * cashier scans it with the studio phone and presses Send.
  */
 export function SmsQrCode({ mobile, message }: Readonly<SmsQrCodeProps>) {
-  const [qr, setQr] = useState<{ size: number; path: string } | null>(null);
+  const [qr, setQr] = useState<QrImage | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
-    loadQr()
-      .then((qrcode) => { if (active) { setQr(qrPath(qrcode, `SMSTO:${mobile}:${message}`)); setFailed(false); } })
+    makeQrImage(`SMSTO:${mobile}:${message}`)
+      .then((image) => { if (active) { setQr(image); setFailed(false); } })
       .catch(() => { if (active) setFailed(true); });
     return () => { active = false; };
   }, [mobile, message]);

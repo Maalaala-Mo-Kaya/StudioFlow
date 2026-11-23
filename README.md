@@ -131,6 +131,14 @@ Create staff accounts in **Admin → Staff Accounts**. In **Packages & Add-ons**
 
 **Analytics & Overview → MUA Performance Analytics** shows completed service counts and earnings by catalog item for the selected Asia/Manila date. Select an artist to inspect their completions, recorded adjustments, and refunds or voids awaiting review. CSV exports match the daily totals. The Earnings Excel export includes an audit sheet. Historical completions with ambiguous catalog references retain their original column and earnings with a review flag.
 
+### QR Code Generator
+
+Open **Admin → QR Code Generator** to create, download, or print direct website links, password-protected links, and Wi-Fi codes. Saving a direct link replaces the raw URL preview with a managed QR code. Download the managed version if the destination needs to stay editable after printing. Protected links are saved when they are generated. Use **Saved QR Codes** to edit, disable, enable, or permanently delete a managed link.
+
+Managed QR codes use StudioFlow's backend address. Open StudioFlow at a stable address phones can reach before generating them, or configure that address using `VITE_PB_URL`. Use HTTPS where protected links are shared to protect passwords in transit. If the StudioFlow host or port changes, previously printed codes still point to the old address.
+
+StudioFlow generates Wi-Fi codes in the browser. Phones can scan them without reaching the StudioFlow server. **Save Network Details** stores the SSID and security settings for regeneration. Keep downloaded and printed copies private because they encode the Wi-Fi password. Regenerate and reprint them when the network credentials change.
+
 ---
 
 ## Studio LAN Setup

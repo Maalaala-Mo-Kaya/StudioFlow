@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { useAdminData } from './useAdminData';
 import { AdminHeader } from './components/AdminHeader';
 import { AdminSidebarNav } from './components/AdminSidebarNav';
@@ -16,6 +16,7 @@ import { stationButton } from '../workflow/StationLayout';
 import { CameraSettings } from '../camera/CameraSettings';
 import { AdminClientTypesTab } from './components/AdminClientTypesTab';
 import { MuaTeamSettings } from './components/MuaTeamSettings';
+const AdminQrCodesTab = lazy(() => import('./qrCodes/AdminQrCodesTab').then((module) => ({ default: module.AdminQrCodesTab })));
 
 export const AdminPage: React.FC = () => {
   const admin = useAdminData();
@@ -168,6 +169,11 @@ export const AdminPage: React.FC = () => {
 
           {admin.activeTab === 'camera' && <CameraSettings />}
           {admin.activeTab === 'clients' && <AdminClientTypesTab />}
+          {admin.activeTab === 'qr-codes' && (
+            <Suspense fallback={<p role="status" className="text-sm text-ink">Loading QR Code Generator…</p>}>
+              <AdminQrCodesTab />
+            </Suspense>
+          )}
 
           {admin.activeTab === 'staff' && (
             <AdminStaffTab

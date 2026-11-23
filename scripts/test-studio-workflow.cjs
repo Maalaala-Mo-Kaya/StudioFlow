@@ -160,6 +160,99 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const admin = (await login('admin', 'password123')).token;
   const cashier = (await login('cashier', 'password123')).token;
   const photographer = (await login('photographer', 'password123')).token;
+
+  await t.test('managed QR links, access passwords, and Wi-Fi metadata', async () => {
+    const qrApi = api + '/qr-codes';
+    const createQr = async (body, status = 201) => (await send(qrApi, { token: admin, method: 'POST', body, status })).payload;
+    const editQr = async (qr, body) => (await send(qrApi + '/' + qr.id, {
+      token: admin, method: 'PATCH', body,
+    })).payload;
+    const scan = async (qr, accessPassword, status) => {
+      const response = await fetch(host + '/q/' + qr.slug, accessPassword === undefined
+        ? { redirect: 'manual' }
+        : { method: 'POST', redirect: 'manual', body: new URLSearchParams({ password: accessPassword }) });
+      const html = await response.text();
+      assert.equal(response.status, status, html + '\n' + logs);
+      assert.equal(response.headers.get('cache-control'), 'private, no-store');
+      return { html, headers: response.headers };
+    };
+
+    await send(qrApi, { status: 401 });
+    await send(qrApi, { token: cashier, status: 403 });
+    await send(records('qr_codes'), { token: admin, status: 403 });
+    for (const destination of ['javascript:alert(1)', '//example.test', 'https://example.test\\@bad.test', 'https://user:pass@example.test']) {
+      await createQr({ kind: 'direct', destination }, 400);
+    }
+
+    const direct = await createQr({ kind: 'direct', destination: 'https://example.test/original' });
+    assert.equal((await scan(direct, undefined, 302)).headers.get('location'), 'https://example.test/original');
+    const changed = await editQr(direct, { destination: 'https://example.test/updated' });
+    assert.equal(changed.slug, direct.slug);
+    assert.equal((await scan(direct, undefined, 302)).headers.get('location'), 'https://example.test/updated');
+    await editQr(direct, { disabled: true });
+    await scan(direct, undefined, 404);
+    await editQr(direct, { disabled: false });
+    await scan(direct, undefined, 302);
+    await send(qrApi + '/' + direct.id, { token: admin, method: 'DELETE', status: 204 });
+    await scan(direct, undefined, 404);
+
+    const destination = 'https://example.test/protected-private-destination';
+    const secret = 'Private P@ss:ñ<&';
+    const alternate = 'New Access Password';
+    const protectedSettings = { kind: 'protected', destination, password: secret, confirmPassword: secret };
+    await createQr({ ...protectedSettings, confirmPassword: 'mismatch' }, 400);
+    await createQr({ ...protectedSettings, expiresOn: '2026-02-30' }, 400);
+    const protectedQr = await createQr(protectedSettings);
+    const twin = await createQr(protectedSettings);
+    assert.equal((await scan(twin, secret, 303)).headers.get('location'), destination);
+    const challenge = await scan(protectedQr, undefined, 200);
+    assert.match(challenge.html, /type="password"/);
+    assert.ok(!challenge.html.includes(destination) && !challenge.html.includes(secret));
+    assert.equal(challenge.headers.get('location'), null);
+    const rejected = await scan(protectedQr, 'wrong', 401);
+    assert.ok(!rejected.html.includes(destination));
+    assert.equal(rejected.headers.get('location'), null);
+    assert.equal((await scan(protectedQr, secret, 303)).headers.get('location'), destination);
+    const rotated = await editQr(protectedQr, { destination, password: alternate, confirmPassword: alternate });
+    assert.equal(rotated.slug, protectedQr.slug);
+    await scan(protectedQr, secret, 401);
+    await scan(protectedQr, alternate, 303);
+    await scan(protectedQr, 'wrong', 401);
+    const limited = await scan(protectedQr, alternate, 429);
+    assert.ok(Number(limited.headers.get('retry-after')) > 0);
+    assert.ok(!limited.html.includes(destination));
+    await editQr(protectedQr, { disabled: true });
+    await scan(protectedQr, alternate, 404);
+    const expired = await createQr({ ...protectedSettings, expiresOn: '2000-01-01' });
+    assert.equal(expired.status, 'expired');
+    await scan(expired, undefined, 404);
+
+    const wifiSecret = 'Never Persist Wi-Fi Credentials';
+    const wifi = await createQr({
+      kind: 'wifi', name: 'Guest', ssid: 'Studio ; Wi-Fi', security: 'WPA', hiddenNetwork: true,
+      password: wifiSecret, payload: 'WIFI:P:' + wifiSecret + ';;',
+    });
+    assert.deepEqual([wifi.slug, wifi.ssid, wifi.security, wifi.hiddenNetwork, wifi.status], ['', 'Studio ; Wi-Fi', 'WPA', true, 'metadata']);
+    const openWifi = await editQr(wifi, { ssid: 'Studio Open', security: 'nopass' });
+    assert.equal(openWifi.security, 'nopass');
+    const { payload } = await send(qrApi, { token: admin });
+    assert.ok(!/passwordHash|\$2[aby]\$/.test(JSON.stringify(payload)));
+    assert.ok(!JSON.stringify(payload).includes(wifiSecret));
+    const db = new DatabaseSync(join(data, 'data.db'), { readOnly: true });
+    try {
+      const readQr = db.prepare('SELECT * FROM qr_codes WHERE id = ?');
+      const hash = readQr.get(protectedQr.id).password;
+      const identicalInputs = [readQr.get(twin.id).password, readQr.get(expired.id).password];
+      assert.match(hash, /^\$2[aby]\$/);
+      assert.ok(identicalInputs.every((value) => /^\$2[aby]\$/.test(value)));
+      assert.notEqual(...identicalInputs);
+      assert.equal(readQr.get(wifi.id).password, '');
+      assert.ok(!JSON.stringify(readQr.get(wifi.id)).includes(wifiSecret));
+    } finally {
+      db.close();
+    }
+  });
+
   const create = (collection, body, token = admin) => send(records(collection), { method: 'POST', token, body }).then((r) => r.payload);
   const school = await create('organizations', { code: 'WORKFLOW', name: 'Workflow Academy', is_active: true });
   const level = await create('levels', { organization: school.id, name: 'College' });

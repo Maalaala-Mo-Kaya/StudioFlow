@@ -16,6 +16,7 @@ import {
   Shapes,
   ScanText,
   BookOpenCheck,
+  QrCode,
 } from 'lucide-react';
 import type { AdminTab } from '../useAdminData';
 
@@ -185,6 +186,12 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
       label: 'Camera Import',
       shortLabel: 'Camera',
       icon: Aperture,
+    },
+    {
+      id: 'qr-codes',
+      label: 'QR Code Generator',
+      shortLabel: 'QR Codes',
+      icon: QrCode,
     },
     {
       id: 'staff',
