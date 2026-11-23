@@ -161,7 +161,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const cashier = (await login('cashier', 'password123')).token;
   const photographer = (await login('photographer', 'password123')).token;
 
-  await t.test('managed QR links, access passwords, and Wi-Fi metadata', async () => {
+  await t.test('managed QR links, access passwords, and encrypted Wi-Fi credentials', async () => {
     const qrApi = api + '/qr-codes';
     const createQr = async (body, status = 201) => (await send(qrApi, { token: admin, method: 'POST', body, status })).payload;
     const editQr = async (qr, body) => (await send(qrApi + '/' + qr.id, {
@@ -227,18 +227,33 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal(expired.status, 'expired');
     await scan(expired, undefined, 404);
 
-    const wifiSecret = 'Never Persist Wi-Fi Credentials';
+    const wifiSecret = 'Éncrypted ;Wi-Fi\\pass:"';
+    await createQr({ kind: 'wifi', ssid: 'Studio', security: 'WPA' }, 400);
     const wifi = await createQr({
       kind: 'wifi', name: 'Guest', ssid: 'Studio ; Wi-Fi', security: 'WPA', hiddenNetwork: true,
-      password: wifiSecret, payload: 'WIFI:P:' + wifiSecret + ';;',
+      wifiPassword: wifiSecret,
     });
-    assert.deepEqual([wifi.slug, wifi.ssid, wifi.security, wifi.hiddenNetwork, wifi.status], ['', 'Studio ; Wi-Fi', 'WPA', true, 'metadata']);
-    const openWifi = await editQr(wifi, { ssid: 'Studio Open', security: 'nopass' });
-    assert.equal(openWifi.security, 'nopass');
+    assert.deepEqual([wifi.slug, wifi.ssid, wifi.security, wifi.hiddenNetwork, wifi.status, wifi.hasWifiPassword],
+      ['', 'Studio ; Wi-Fi', 'WPA', true, 'ready', true]);
+    const wifiPath = qrApi + '/' + wifi.id + '/wifi-password';
+    await send(wifiPath, { method: 'POST', status: 401 });
+    await send(wifiPath, { method: 'POST', token: cashier, status: 403 });
+    const readWifi = async () => {
+      const response = await fetch(host + wifiPath, { method: 'POST', headers: { Authorization: admin } });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('cache-control'), 'private, no-store');
+      return (await response.json()).password;
+    };
+    assert.equal(await readWifi(), wifiSecret);
+    const renamedWifi = await editQr(wifi, { name: 'Visitor Wi-Fi', ssid: wifi.ssid, security: 'WPA', hiddenNetwork: true });
+    assert.equal(renamedWifi.hasWifiPassword, true);
+    assert.equal(await readWifi(), wifiSecret);
     const { payload } = await send(qrApi, { token: admin });
-    assert.ok(!/passwordHash|\$2[aby]\$/.test(JSON.stringify(payload)));
-    assert.ok(!JSON.stringify(payload).includes(wifiSecret));
-    const db = new DatabaseSync(join(data, 'data.db'), { readOnly: true });
+    assert.ok(!/passwordHash|wifi_ciphertext|wifiPassword|\$2[aby]\$/.test(JSON.stringify(payload)));
+    assert.ok(!Object.hasOwn(wifi, 'wifiPassword'));
+    assert.ok(!Object.hasOwn(wifi, 'wifi_ciphertext'));
+    const db = new DatabaseSync(join(data, 'data.db'));
+    const legacyWifiId = 'testoldwifi0001';
     try {
       const readQr = db.prepare('SELECT * FROM qr_codes WHERE id = ?');
       const hash = readQr.get(protectedQr.id).password;
@@ -246,11 +261,23 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       assert.match(hash, /^\$2[aby]\$/);
       assert.ok(identicalInputs.every((value) => /^\$2[aby]\$/.test(value)));
       assert.notEqual(...identicalInputs);
-      assert.equal(readQr.get(wifi.id).password, '');
-      assert.ok(!JSON.stringify(readQr.get(wifi.id)).includes(wifiSecret));
+      const wifiRow = readQr.get(wifi.id);
+      assert.equal(wifiRow.password, '');
+      assert.ok(wifiRow.wifi_ciphertext.length > 0 && !wifiRow.wifi_ciphertext.includes(wifiSecret));
+      assert.equal(Object.values(wifiRow).includes(wifiSecret), false);
+      db.prepare("INSERT INTO qr_codes (id, kind, ssid, security, created) VALUES (?, 'wifi', 'Old Guest', 'WPA', ?)").run(legacyWifiId, wifi.created);
     } finally {
       db.close();
     }
+    const priorEntries = (await send(qrApi, { token: admin })).payload;
+    const oldWifi = priorEntries.find(({ id }) => id === legacyWifiId);
+    assert.equal(oldWifi.status, 'metadata');
+    await send(qrApi + '/' + legacyWifiId + '/wifi-password', { token: admin, method: 'POST', status: 404 });
+    assert.equal((await editQr(oldWifi, { ssid: oldWifi.ssid, security: 'WPA', wifiPassword: wifiSecret })).status, 'ready');
+    const openWifi = await editQr(wifi, { ssid: 'Studio Open', security: 'nopass', wifiPassword: 'Ignored Password' });
+    assert.equal(openWifi.security, 'nopass');
+    assert.equal(openWifi.hasWifiPassword, false);
+    await send(wifiPath, { token: admin, method: 'POST', status: 404 });
   });
 
   const create = (collection, body, token = admin) => send(records(collection), { method: 'POST', token, body }).then((r) => r.payload);

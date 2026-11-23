@@ -25,7 +25,7 @@ function validDestination(value) {
     .every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
 }
 
-function update(record, body, creating) {
+function update(app, record, body, creating) {
   const kind = creating ? body.kind : record.getString("kind");
   if (!["direct", "protected", "wifi"].includes(kind)) throw new BadRequestError("Choose a QR code type.");
   const name = string(body.name).trim();
@@ -39,6 +39,18 @@ function update(record, body, creating) {
       throw new BadRequestError("Enter a Wi-Fi network name of up to 32 bytes.");
     }
     if (!["WPA", "WEP", "nopass"].includes(body.security)) throw new BadRequestError("Choose a Wi-Fi security type.");
+    const password = string(body.wifiPassword);
+    if (body.security === "nopass") {
+      record.set("wifi_ciphertext", "");
+    } else if (password) {
+      if (byteLength(password) > 128 || /[\x00-\x1f\x7f]/.test(password)) {
+        throw new BadRequestError("Enter a valid Wi-Fi password of up to 128 bytes.");
+      }
+      const credentials = require(__hooks + "/studio_wifi_credentials.js");
+      record.set("wifi_ciphertext", credentials.encrypt(app, password));
+    } else if (creating || record.getString("security") !== body.security || !record.getString("wifi_ciphertext")) {
+      throw new BadRequestError("Enter the Wi-Fi password to save this connection.");
+    }
     record.set("ssid", ssid);
     record.set("security", body.security);
     record.set("hidden_network", body.hiddenNetwork === true);
@@ -76,7 +88,8 @@ function status(record) {
   if (record.getBool("disabled")) return "disabled";
   const expiresOn = record.getString("expires_on");
   if (expiresOn && expiryTime(expiresOn) <= Date.now()) return "expired";
-  return record.getString("kind") === "wifi" ? "metadata" : "active";
+  if (record.getString("kind") !== "wifi") return "active";
+  return record.getString("security") === "nopass" || record.getString("wifi_ciphertext") ? "ready" : "metadata";
 }
 
 function summary(record) {
@@ -93,6 +106,7 @@ function summary(record) {
     ssid: record.getString("ssid"),
     security: record.getString("security"),
     hiddenNetwork: record.getBool("hidden_network"),
+    hasWifiPassword: !!record.getString("wifi_ciphertext"),
   };
 }
 

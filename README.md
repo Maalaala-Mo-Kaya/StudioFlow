@@ -137,7 +137,9 @@ Open **Admin → QR Code Generator** to create, download, or print direct websit
 
 Managed QR codes use StudioFlow's backend address. Open StudioFlow at a stable address phones can reach before generating them, or configure that address using `VITE_PB_URL`. Use HTTPS where protected links are shared to protect passwords in transit. If the StudioFlow host or port changes, previously printed codes still point to the old address.
 
-StudioFlow generates Wi-Fi codes in the browser. Phones can scan them without reaching the StudioFlow server. **Save Network Details** stores the SSID and security settings for regeneration. Keep downloaded and printed copies private because they encode the Wi-Fi password. Regenerate and reprint them when the network credentials change.
+StudioFlow generates Wi-Fi codes in the browser. Phones can scan them without reaching the StudioFlow server. **Save Wi-Fi Connection** stores the network settings and encrypts its password on the server so admins can reopen and print the code. Use HTTPS for admin access when saving or reopening credentials. Keep downloaded and printed copies private because they encode the Wi-Fi password.
+
+The Wi-Fi encryption key lives next to the PocketBase data directory as `pb_data.wifi-key` for the default setup. Back up the key separately and restore it alongside the data directory when moving studios or restoring a database. Older saved Wi-Fi entries need their passwords entered once through **Edit → Generate QR Code → Update Wi-Fi Connection**.
 
 ---
 

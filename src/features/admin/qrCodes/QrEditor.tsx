@@ -4,7 +4,7 @@ import { makeQrImage } from '../../../utils/qrImage';
 import { stationButton, stationCard } from '../../workflow/StationLayout';
 import { ManagedQrAddress, QrPreview, type QrPreviewData } from './QrPreview';
 import {
-  destinationUrl, managedQrUrl, qrError, qrKindLabels, qrTitle, saveQr, validateAccessPassword,
+  destinationUrl, loadWifiPassword, managedQrUrl, qrError, qrKindLabels, qrTitle, saveQr, validateAccessPassword,
   wifiPayload, wifiSecurityLabels, type QrKind, type SavedQr, type WifiSecurity,
 } from './qrCodes';
 
@@ -48,6 +48,7 @@ export function QrEditor({ record, onCancel, onNew }: {
   const [notice, setNotice] = useState('');
   const form = useRef<HTMLFormElement>(null);
   const wifiSettings = { kind: 'wifi', name, ssid, security, hiddenNetwork } as const;
+  const storedWifiPassword = saved?.hasWifiPassword && saved.security === security;
 
   function clearPreview() {
     setPreview(null);
@@ -69,15 +70,18 @@ export function QrEditor({ record, onCancel, onNew }: {
   async function generate(event: FormEvent) {
     event.preventDefault();
     clearPreview();
+    setBusy(true);
     let payload: string;
     try {
-      payload = kind === 'wifi' ? wifiPayload(wifiSettings, wifiPassword) : destinationUrl(destination);
+      const availableWifiPassword = kind === 'wifi' && !wifiPassword && storedWifiPassword && saved
+        ? await loadWifiPassword(saved.id) : wifiPassword;
+      payload = kind === 'wifi' ? wifiPayload(wifiSettings, availableWifiPassword) : destinationUrl(destination);
       if (kind === 'protected') validateAccessPassword(password, confirmPassword, !saved);
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'Check the QR settings.');
+      setError(qrError(problem, problem instanceof Error ? problem.message : 'Check the QR settings.'));
+      setBusy(false);
       return;
     }
-    setBusy(true);
     try {
       let detail = kind === 'wifi' ? `Network: ${ssid}` : new URL(payload).host;
       if (kind === 'protected') {
@@ -114,7 +118,9 @@ export function QrEditor({ record, onCancel, onNew }: {
     setBusy(true);
     setError('');
     try {
-      const settings = kind === 'wifi' ? wifiSettings : { kind, name, destination: destinationUrl(destination) };
+      const settings = kind === 'wifi'
+        ? { ...wifiSettings, wifiPassword: security === 'nopass' ? '' : wifiPassword }
+        : { kind, name, destination: destinationUrl(destination) };
       const updated = await saveQr(settings, saved?.id);
       setSaved(updated);
       if (kind === 'direct') {
@@ -122,7 +128,8 @@ export function QrEditor({ record, onCancel, onNew }: {
         setPreview({ ...preview, image });
         setNotice('Managed QR code saved. Download this version to keep the printed code editable.');
       } else {
-        setNotice('Network details saved. Re-enter the Wi-Fi credentials to recreate the code later.');
+        setWifiPassword('');
+        setNotice(updated.hasWifiPassword ? 'Wi-Fi connection and encrypted password saved.' : 'Open Wi-Fi connection saved.');
       }
     } catch (problem) {
       setError(qrError(problem, 'The QR code could not be saved. Try again.'));
@@ -181,16 +188,17 @@ export function QrEditor({ record, onCancel, onNew }: {
                 </Field>
                 {security === 'WPA' && <p className="text-xs text-neutral-700">WPA3-only networks may need a compatible phone and scanner.</p>}
                 {security !== 'nopass' && (
-                  <Field id="qr-wifi-password" title="Wi-Fi Password">
+                  <Field id="qr-wifi-password" title={storedWifiPassword ? 'New Wi-Fi Password (optional)' : 'Wi-Fi Password'}>
                     <div className="flex gap-2">
                       <input id="qr-wifi-password" className={fieldClass} type={showPassword ? 'text' : 'password'}
-                        autoComplete="new-password" spellCheck={false} required maxLength={128} value={wifiPassword}
+                        autoComplete="new-password" spellCheck={false} required={!storedWifiPassword} maxLength={128} value={wifiPassword}
                         onChange={(event) => setWifiPassword(event.target.value)} />
                       <button type="button" className={secondary} onClick={() => setShowPassword(!showPassword)}
                         aria-label={showPassword ? 'Hide Wi-Fi password' : 'Show Wi-Fi password'}>
                         {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                       </button>
                     </div>
+                    {storedWifiPassword && <p className="text-xs text-neutral-700">Leave blank to use the saved password.</p>}
                   </Field>
                 )}
                 <label className="flex items-center gap-2 text-sm font-bold text-ink">
@@ -245,7 +253,7 @@ export function QrEditor({ record, onCancel, onNew }: {
               {((kind === 'direct' && !saved) || kind === 'wifi') && (
                 <button type="button" className={stationButton} disabled={busy} onClick={() => void savePreview()}>
                   <Save size={16} aria-hidden="true" /> {kind === 'wifi'
-                    ? (saved ? 'Update Network Details' : 'Save Network Details') : 'Save Managed QR Code'}
+                    ? (saved ? 'Update Wi-Fi Connection' : 'Save Wi-Fi Connection') : 'Save Managed QR Code'}
                 </button>
               )}
               {kind === 'wifi' && (
@@ -261,7 +269,7 @@ export function QrEditor({ record, onCancel, onNew }: {
           {preview && kind === 'direct' && !saved && (
             <p className="text-xs text-neutral-700">This code opens the destination directly. Save a managed version to edit the destination later.</p>
           )}
-          {preview && kind === 'wifi' && <p className="text-xs text-neutral-700">Saving network details keeps the name and settings for later. The password and QR image stay on this device.</p>}
+          {preview && kind === 'wifi' && security !== 'nopass' && <p className="text-xs text-neutral-700">Saving this connection stores its password encrypted on the StudioFlow server so admins can recreate the QR code.</p>}
           {preview && saved?.slug && <ManagedQrAddress slug={saved.slug} />}
           {notice && <p role="status" className="text-sm text-gold">{notice}</p>}
         </QrPreview>

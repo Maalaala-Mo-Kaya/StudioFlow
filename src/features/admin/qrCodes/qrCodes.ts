@@ -24,15 +24,16 @@ export interface SavedQr {
   destination: string;
   expiresOn: string;
   disabled: boolean;
-  status: 'active' | 'disabled' | 'expired' | 'metadata';
+  status: 'active' | 'disabled' | 'expired' | 'metadata' | 'ready';
   ssid: string;
   security: WifiSecurity | '';
   hiddenNetwork: boolean;
+  hasWifiPassword: boolean;
 }
 
 type QrSettings = { kind: 'direct'; name: string; destination: string }
   | { kind: 'protected'; name: string; destination: string; password: string; confirmPassword: string; expiresOn: string }
-  | { kind: 'wifi'; name: string; ssid: string; security: WifiSecurity; hiddenNetwork: boolean };
+  | { kind: 'wifi'; name: string; ssid: string; security: WifiSecurity; hiddenNetwork: boolean; wifiPassword?: string };
 
 const api = '/api/studioflow/qr-codes';
 
@@ -47,6 +48,10 @@ export const setQrDisabled = (id: string, disabled: boolean) => pb.send<SavedQr>
 );
 
 export const deleteQr = (id: string) => pb.send<void>(`${api}/${id}`, { method: 'DELETE' });
+
+export const loadWifiPassword = (id: string) => pb.send<{ password: string }>(
+  `${api}/${id}/wifi-password`, { method: 'POST' },
+).then(({ password }) => password);
 
 export const managedQrUrl = (slug: string) => pb.buildURL(`/q/${slug}`);
 

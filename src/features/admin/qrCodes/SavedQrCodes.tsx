@@ -6,12 +6,13 @@ import { makeQrImage, type QrImage } from '../../../utils/qrImage';
 import { stationButton, stationCard } from '../../workflow/StationLayout';
 import { ManagedQrAddress, QrGraphic, QrPreview } from './QrPreview';
 import {
-  deleteQr, destinationHost, listQrs, managedQrUrl, qrError, qrKindLabels, qrTitle, setQrDisabled, wifiSecurityLabels, type SavedQr,
+  deleteQr, destinationHost, listQrs, loadWifiPassword, managedQrUrl, qrError, qrKindLabels, qrTitle,
+  setQrDisabled, wifiPayload, wifiSecurityLabels, type SavedQr,
 } from './qrCodes';
 
 const secondary = `${stationButton} bg-canvas! text-ink! hover:text-gold!`;
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'Asia/Manila' });
-const statusLabels = { active: 'Active', disabled: 'Disabled', expired: 'Expired', metadata: 'Network details only' };
+const statusLabels = { active: 'Active', disabled: 'Disabled', expired: 'Expired', metadata: 'Password needed', ready: 'Ready' };
 const perPage = 9;
 
 function useManagedImage(slug: string) {
@@ -38,16 +39,43 @@ function Thumbnail({ slug }: { slug: string }) {
 
 function SavedPreview({ record, onClose, onEdit }: { record: SavedQr; onClose: () => void; onEdit: () => void }) {
   const { image, imageError } = useManagedImage(record.slug);
+  const [wifiImage, setWifiImage] = useState<QrImage | null>(null);
+  const [wifiError, setWifiError] = useState('');
   const title = qrTitle(record.kind, record.name);
   const close = <button type="button" className={secondary} onClick={onClose}>Close Preview</button>;
+  useEffect(() => {
+    if (record.kind !== 'wifi' || record.status !== 'ready' || !record.security) return;
+    let active = true;
+    const settings = {
+      kind: 'wifi', name: record.name, ssid: record.ssid, security: record.security, hiddenNetwork: record.hiddenNetwork,
+    } as const;
+    const credentials = record.hasWifiPassword ? loadWifiPassword(record.id) : Promise.resolve('');
+    void credentials.then((password) => makeQrImage(wifiPayload(settings, password))).then((result) => {
+      if (active) setWifiImage(result);
+    }).catch((problem) => {
+      if (active) setWifiError(qrError(problem, 'The Wi-Fi QR preview could not be loaded.'));
+    });
+    return () => { active = false; };
+  }, [record]);
+
   if (record.kind === 'wifi') {
+    if (wifiImage && record.security) {
+      return (
+        <QrPreview preview={{
+          kind: 'wifi', image: wifiImage, title, detail: `Network: ${record.ssid}`,
+          security: wifiSecurityLabels[record.security] + (record.hiddenNetwork ? ' · Hidden network' : ''),
+        }}>{close}</QrPreview>
+      );
+    }
     return (
       <section className={`${stationCard} space-y-3`}>
         <h3 className="font-black text-ink">{title}</h3>
         <p className="break-words text-sm text-ink">Network: {record.ssid}</p>
-        <p className="text-sm text-neutral-700">Re-enter the Wi-Fi credentials to regenerate, download, or print this code.</p>
+        {wifiError ? <p role="alert" className="text-sm text-red-600">{wifiError}</p>
+          : record.status === 'ready' ? <p role="status" className="text-sm">Loading QR preview…</p>
+            : <p className="text-sm text-neutral-700">Enter the Wi-Fi password to regenerate this older code.</p>}
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={stationButton} onClick={onEdit}>Regenerate Wi-Fi QR</button>
+          {(record.status !== 'ready' || wifiError) && <button type="button" className={stationButton} onClick={onEdit}>Regenerate Wi-Fi QR</button>}
           {close}
         </div>
       </section>
