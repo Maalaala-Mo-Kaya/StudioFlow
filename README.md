@@ -170,7 +170,7 @@ Runs run.bat               (Cashier Counter)         (Public Student Kiosk)
    - **Makeup station**: `http://192.168.1.50:8090/#/mua`
    - **Chooser station**: `http://192.168.1.50:8090/#/chooser`
 
-Leave `VITE_PB_URL` unset for the normal LAN setup so each browser uses the studio server's address. If you need to set it, use an address reachable by all stations.
+Leave `VITE_PB_URL` unset when PocketBase serves the production build. The app sends API requests to the same address as the page, including through an HTTPS tunnel. If you serve the frontend separately from PocketBase, set `VITE_PB_URL` to a backend URL reachable by all stations before building.
 
 ---
 
