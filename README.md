@@ -237,7 +237,7 @@ npm.cmd ci
 .\scripts\build.bat
 ```
 
-Run `npm.cmd ci` on a fresh checkout or after the dependency lockfile changes. The build script runs type checking and writes the production build to `dist\`. It returns a nonzero exit code on failure.
+Run `npm.cmd ci` on a fresh checkout or after the dependency lockfile changes. The build script runs type checking, writes the production build to `dist\`, and publishes it to PocketBase’s `pb_public\` folder. It returns a nonzero exit code if building or publishing fails.
 
 To build, deploy to PocketBase, and start the server on port 8090, run:
 
@@ -250,8 +250,8 @@ To build, deploy to PocketBase, and start the server on port 8090, run:
 | `run.bat` | 1-Click launcher with auto-detected studio LAN IP |
 | `run.bat --build` | Builds frontend and serves unified app on port 8090 |
 | `npm run dev` | Starts local development server with hot-reload |
-| `scripts\build.bat` | Type-checks and builds the frontend into `dist\` |
-| `npm run build` | Bundles production-optimized static assets to `/dist` |
+| `scripts\build.bat` | Type-checks, builds, and publishes the frontend |
+| `npm run build` | Builds `dist\` and publishes it to `pb_public\` |
 | `npm run lint` | Runs ESLint type and code quality checks |
 | `npm run test:workflow` | Runs the isolated PocketBase integration suite with Node.js 22.13+ |
 

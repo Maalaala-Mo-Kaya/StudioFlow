@@ -17,6 +17,7 @@ interface RegistrationSummarySidebarProps {
   defaultAddOn?: AddOn;
   selectedAddOns: string[];
   totalAmount: number;
+  amountDueNow: number;
   paymentType: 'full' | 'downpayment';
   onPaymentTypeChange: (type: 'full' | 'downpayment') => void;
   termsAccepted: boolean;
@@ -42,6 +43,7 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
   defaultAddOn,
   selectedAddOns,
   totalAmount,
+  amountDueNow,
   paymentType,
   onPaymentTypeChange,
   termsAccepted,
@@ -57,9 +59,6 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
   const activeAddOns = addOnsList.filter((a) => selectedAddOns.includes(a.id));
   if (defaultAddOn) activeAddOns.push(defaultAddOn);
 
-  const amountDueNow = selectedPkg && paymentType === 'downpayment'
-    ? Math.min(totalAmount, Math.round(Math.round(totalAmount * 100) / 200))
-    : totalAmount;
   const remainingBalance = totalAmount - amountDueNow;
 
   const fullName = [
@@ -198,11 +197,11 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
       <div className="border-t border-neutral-800 pt-3 space-y-1.5 text-xs font-mono">
         <div className="flex justify-between text-neutral-400">
           <span>Total Contract Billed:</span>
-          <span className="font-bold text-white">{selectedPkg ? formatCurrency(totalAmount) : '₱0.00'}</span>
+          <span className="font-bold text-white">{selectedPkg ? formatCurrency(totalAmount, { exact: true }) : '₱0.00'}</span>
         </div>
         <div className="flex justify-between text-gold font-black">
           <span>Amount Due at Cashier:</span>
-          <span className="text-sm">{selectedPkg ? formatCurrency(amountDueNow) : '₱0.00'}</span>
+          <span className="text-sm">{selectedPkg ? formatCurrency(amountDueNow, { exact: true }) : '₱0.00'}</span>
         </div>
         {remainingBalance > 0 && (
           <div className="flex justify-between text-neutral-400 text-[11px]">

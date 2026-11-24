@@ -1,4 +1,6 @@
 @echo off
+setlocal
+pushd "%~dp0" || exit /b 1
 title Highlight Server
 
 if "%~1"=="--dev" goto :dev
@@ -14,13 +16,7 @@ call "%~dp0scripts\build.bat"
 if %errorlevel% neq 0 (
     echo aborting...
     pause
-    exit /b 1
-)
-
-call "%~dp0scripts\deploy.bat"
-if %errorlevel% neq 0 (
-    echo aborting...
-    pause
+    popd
     exit /b 1
 )
 
@@ -63,6 +59,9 @@ echo.
 echo Launching PocketBase (Listening on 0.0.0.0:8090)...
 
 :: Bind to 0.0.0.0 so all physical network adapters accept connections
-pocketbase.exe serve --http="0.0.0.0:8090"
+"%~dp0pocketbase.exe" serve --http="0.0.0.0:8090" --publicDir="%~dp0pb_public"
 
+set "SERVER_RESULT=%ERRORLEVEL%"
 pause
+popd
+exit /b %SERVER_RESULT%

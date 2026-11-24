@@ -89,6 +89,9 @@ export const RegisterPage: React.FC = () => {
   }
 
   const selectedPackage = form.packages.find((pkg) => pkg.id === form.selectedPackageId);
+  const amountDueNow = selectedPackage && form.paymentType === 'downpayment'
+    ? Math.min(form.totalAmount, Math.round(Math.round(form.totalAmount * 100) / 200))
+    : form.totalAmount;
   const optionLines = chosenOptionLines(form.packageOptionGroups.map((group) => ({
     group_id: group.id, group: group.name, replaces: group.replaces,
     choices: availableChoices(group, gender).filter((choice) => (form.optionPicks[group.id] || []).includes(choice.id)),
@@ -212,6 +215,7 @@ export const RegisterPage: React.FC = () => {
                   paymentType={form.paymentType}
                   onPaymentTypeChange={form.setPaymentType}
                   totalAmount={form.totalAmount}
+                  amountDueNow={amountDueNow}
                   errors={form.errors}
                   gender={gender}
                   emptyMessage={form.catalogError || (form.catalogLoading ? 'Loading packages and add-ons…'
@@ -339,6 +343,7 @@ export const RegisterPage: React.FC = () => {
                   paymentType={form.paymentType}
                   onPaymentTypeChange={form.setPaymentType}
                   totalAmount={form.totalAmount}
+                  amountDueNow={amountDueNow}
                   errors={form.errors}
                   gender={gender}
                 />
@@ -437,6 +442,7 @@ export const RegisterPage: React.FC = () => {
             defaultAddOn={form.defaultAddOn}
             selectedAddOns={form.selectedAddOns}
             totalAmount={form.totalAmount}
+            amountDueNow={amountDueNow}
             paymentType={form.paymentType}
             onPaymentTypeChange={form.setPaymentType}
             termsAccepted={form.termsAccepted}

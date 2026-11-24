@@ -25,5 +25,5 @@ if not "%BUILD_RESULT%"=="0" (
     exit /b %BUILD_RESULT%
 )
 
-echo [OK] Build output: "%~dp0..\dist"
+echo [OK] Build published: "%~dp0..\pb_public"
 exit /b 0

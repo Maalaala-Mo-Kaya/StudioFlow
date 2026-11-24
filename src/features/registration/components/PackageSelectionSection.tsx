@@ -24,6 +24,7 @@ interface PackageSelectionSectionProps {
   paymentType: 'full' | 'downpayment';
   onPaymentTypeChange: (type: 'full' | 'downpayment') => void;
   totalAmount: number;
+  amountDueNow: number;
   errors: RegistrationErrors;
   /** Shown instead of the package list when it is empty. */
   emptyMessage?: string;
@@ -46,6 +47,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   paymentType,
   onPaymentTypeChange,
   totalAmount,
+  amountDueNow,
   errors,
   emptyMessage,
   gender,
@@ -362,8 +364,8 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       )}
 
       {/* Payment Preference & Live Total */}
-      <div className="mt-6 p-5 bg-obsidian text-white border-2 border-line flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="w-full sm:w-auto">
+      <div className="mt-6 p-4 sm:p-5 bg-obsidian text-white border-2 border-line flex flex-col sm:flex-row items-start justify-between gap-4">
+        <div className="w-full sm:w-auto shrink-0">
           <span className="font-mono text-[10px] text-gold uppercase font-bold tracking-widest block mb-2">
             COUNTER SETTLEMENT MODE
           </span>
@@ -371,8 +373,9 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
             <button
               type="button"
               disabled={!selectedPackageId}
+              aria-pressed={!!selectedPackageId && paymentType === 'full'}
               onClick={() => onPaymentTypeChange('full')}
-              className={`btn-tactile min-h-[40px] px-4 py-2 text-[11px] font-black uppercase tracking-wider border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`btn-tactile min-h-11 px-2 sm:px-4 py-2 text-[11px] font-black uppercase tracking-wider border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                 selectedPackageId && paymentType === 'full'
                   ? 'bg-gold text-on-gold border-gold'
                   : 'bg-transparent text-neutral-300 border-neutral-700 hover:border-neutral-500'
@@ -383,8 +386,9 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
             <button
               type="button"
               disabled={!selectedPackageId}
+              aria-pressed={!!selectedPackageId && paymentType === 'downpayment'}
               onClick={() => onPaymentTypeChange('downpayment')}
-              className={`btn-tactile min-h-[40px] px-4 py-2 text-[11px] font-black uppercase tracking-wider border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`btn-tactile min-h-11 px-2 sm:px-4 py-2 text-[11px] font-black uppercase tracking-wider border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                 selectedPackageId && paymentType === 'downpayment'
                   ? 'bg-gold text-on-gold border-gold'
                   : 'bg-transparent text-neutral-300 border-neutral-700 hover:border-neutral-500'
@@ -395,14 +399,22 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
           </div>
         </div>
 
-        <div className="w-full sm:w-auto sm:text-right border-t sm:border-t-0 border-neutral-800 pt-3 sm:pt-0 flex sm:block items-center justify-between">
-          <span className="font-mono text-[10px] text-neutral-400 uppercase font-bold tracking-widest block">
-            Total Job Order
-          </span>
-          <span className="font-mono text-2xl sm:text-3xl font-black text-gold">
-            {selectedPackageId ? formatCurrency(totalAmount, { exact: true }) : '₱0.00'}
-          </span>
-        </div>
+        <dl aria-live="polite" className="w-full min-w-0 space-y-3 border-t border-neutral-800 pt-3 font-mono sm:w-auto sm:border-t-0 sm:pt-0 sm:text-right">
+          <div>
+            <dt className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">Total Job Order</dt>
+            <dd className="text-2xl font-black text-gold [overflow-wrap:anywhere] sm:text-3xl">
+              {selectedPackageId ? formatCurrency(totalAmount, { exact: true }) : '₱0.00'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+              {paymentType === 'downpayment' ? 'Required Downpayment (50%)' : 'Amount Due at Cashier'}
+            </dt>
+            <dd className="text-xl font-black text-gold [overflow-wrap:anywhere] sm:text-2xl">
+              {selectedPackageId ? formatCurrency(amountDueNow, { exact: true }) : '₱0.00'}
+            </dd>
+          </div>
+        </dl>
       </div>
 
       </>)}
