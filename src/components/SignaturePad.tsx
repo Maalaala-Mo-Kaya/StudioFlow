@@ -74,7 +74,8 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
   const startDrawing = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
   ) => {
-    e.preventDefault();
+    // The canvas uses touch-action: none, so passive touch events need no cancellation.
+    if (!('touches' in e)) e.preventDefault();
     const coords = getCoordinates(e);
     if (!coords) return;
     const ctx = canvasRef.current?.getContext('2d');
@@ -88,7 +89,7 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
   const draw = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
   ) => {
-    e.preventDefault();
+    if (!('touches' in e)) e.preventDefault();
     if (!isDrawing) return;
     const coords = getCoordinates(e);
     if (!coords) return;
