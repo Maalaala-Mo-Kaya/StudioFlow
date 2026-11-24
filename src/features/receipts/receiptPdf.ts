@@ -213,7 +213,10 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   }
   if (hidden > 0) {
     put(doc, `+ ${hidden} more payment${hidden === 1 ? '' : 's'} on file (older or voided)`, x + 0.05, ty + 0.11, { size: 6, italic: true, color: GREY });
+    ty += 0.11;
   }
+  // Studio / MUA split: under the payment table (it used to sit on the Add-ons box's bottom border).
+  put(doc, receiptRevenueLine(data, undefined, false), x + 0.05, ty + 0.11, { size: 5.5, color: GREY, width: tableW - 0.1 });
 
   // Totals
   const bx = right - totalsW;
@@ -243,7 +246,6 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
     put(doc, value, right - 0.07, ly, { size, bold: true, mono: true, color, align: 'right' });
   };
   totalRows.forEach(([label, value, size, color], i) => line(label, value, y + 0.15 + i * step, size, color));
-  put(doc, receiptRevenueLine(data, undefined, false), x, y - 0.035, { size: 5.5, color: GREY, width: tableW });
   line('BALANCE', php(reg.balance), y + balanceY, 10, reg.balance > 0 ? RED : INK);
   // A cancelled order owes nothing; show what the studio still holds (refundable up to this).
   if (cancelled) {

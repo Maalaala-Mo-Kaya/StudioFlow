@@ -17,6 +17,7 @@ import { CameraSettings } from '../camera/CameraSettings';
 import { AdminClientTypesTab } from './components/AdminClientTypesTab';
 import { MuaTeamSettings } from './components/MuaTeamSettings';
 const AdminQrCodesTab = lazy(() => import('./qrCodes/AdminQrCodesTab').then((module) => ({ default: module.AdminQrCodesTab })));
+import { AdminDevConTab } from './components/AdminDevConTab';
 
 export const AdminPage: React.FC = () => {
   const admin = useAdminData();
@@ -174,6 +175,7 @@ export const AdminPage: React.FC = () => {
               <AdminQrCodesTab />
             </Suspense>
           )}
+          {admin.activeTab === 'devcon' && <AdminDevConTab />}
 
           {admin.activeTab === 'staff' && (
             <AdminStaffTab

@@ -821,11 +821,23 @@ export const PackageBuilder: React.FC<PackageBuilderProps> = ({ items, sets, pac
           {step === 'shoot' && (<>
           {/* ★ Unlimited shots */}
           <Card icon={Camera} title="★ Unlimited shots">
-            <label className="flex items-center gap-2 font-bold cursor-pointer">
-              <input type="checkbox" className="size-4 accent-gold" checked={structure.unlimited_shots}
-                onChange={(e) => patch({ unlimited_shots: e.target.checked })} />
-              This package includes unlimited shots
-            </label>
+            {/* Included / Not included: a clear pair instead of a small checkbox that is hard to read when off. */}
+            <div role="radiogroup" aria-label="Unlimited shots" className="grid grid-cols-2 gap-1.5 max-w-md">
+              {([[true, 'Included'], [false, 'Not included']] as const).map(([on, label]) => (
+                <button key={label} type="button" role="radio" aria-checked={structure.unlimited_shots === on}
+                  onClick={() => patch({ unlimited_shots: on })}
+                  className={`btn-tactile min-h-[42px] px-3 border text-[11px] font-black uppercase cursor-pointer ${
+                    structure.unlimited_shots === on ? 'bg-gold text-on-gold border-gold' : 'bg-canvas text-ink border-neutral-300 hover:border-gold'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] font-sans text-neutral-600">
+              {structure.unlimited_shots
+                ? 'Clients see "Unlimited shots" in this package, with how many photos they choose below.'
+                : 'No unlimited shots in this package: the line is left out and there is no photo choice limit.'}
+            </p>
             {structure.unlimited_shots && <PhotoLimitInput value={photoLimit} onChange={setPhotoLimit} />}
           </Card>
 

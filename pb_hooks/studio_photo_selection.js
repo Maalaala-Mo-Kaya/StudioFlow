@@ -32,10 +32,67 @@ function version(record, photos) {
 }
 
 // The limit the client bought (saved on the job order); older orders fall back to the package.
-function selectionLimit(app, record) {
+function packageLimit(app, record) {
   const sold = workflow.json(record, "package_snapshot")?.photo_selection_limit;
   if (Number.isInteger(sold) && sold >= 0) return sold;
   return workflow.catalogItem(app, "packages", record.getString("package"))?.getInt("photo_selection_limit") || 0;
+}
+
+// Admin → DEV CON override: the chooser may select any number of photos.
+function limitOverridden(app) {
+  return !!app.findRecordsByFilter("studio_settings", "key = 'main'", "", 1, 0)[0]?.getBool("chooser_unlimited");
+}
+
+// 0 = no limit.
+function selectionLimit(app, record) {
+  return limitOverridden(app) ? 0 : packageLimit(app, record);
+}
+
+const noteMax = 500;
+const notesFile = "EDITOR_NOTES.txt";
+
+// The chooser's notes ({ photo id: text }) for the chosen photos only, trimmed, blanks dropped.
+function cleanNotes(raw, chosen) {
+  const notes = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return notes;
+  for (const id of chosen) {
+    const value = raw[id];
+    if (typeof value !== "string") continue;
+    const text = value.replace(/\r\n?/g, "\n").replace(/[\x00-\x09\x0B-\x1F\x7F]/g, " ").trim();
+    if (text.length > noteMax) throw new BadRequestError("A photo note can be up to " + noteMax + " characters.");
+    if (text) notes[id] = text;
+  }
+  return notes;
+}
+
+// <selected folder>/EDITOR_NOTES.txt: what the client asked for, per photo, for the editor.
+// Removed when the selection has no notes. Best effort: the selection is saved either way.
+function writeNotesFile(app, root, folder, record, notes) {
+  try {
+    const dir = storage.photoDirectories(root, folder).selected;
+    const target = dir + "/" + notesFile;
+    if (!notes.length) {
+      if (storage.statEntry(root, target)) root.remove(target);
+      return;
+    }
+    const name = ["given_name", "middle_name", "family_name"].map((field) => record.getString(field)).filter(Boolean).join(" ");
+    const lines = [
+      "EDITOR NOTES - Job Order " + (record.getString("job_order_no") || "-") + " - " + name,
+      "Saved " + new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 16).replace("T", " ") + " (Manila time)",
+      "",
+    ];
+    for (const item of notes) {
+      lines.push(item.name);
+      for (const line of item.note.split("\n")) lines.push("    " + line);
+      lines.push("");
+    }
+    const partial = target + ".studioflow-partial";
+    root.writeFile(partial, lines.join("\r\n"), 0o640);
+    if (storage.statEntry(root, target)) root.remove(target);
+    root.rename(partial, target);
+  } catch (error) {
+    app.logger().warn("Editor notes file could not be written", "registration", record.id, "error", String(error));
+  }
 }
 
 function describe(record, photos) {
@@ -143,6 +200,10 @@ function recover(app, id) {
           delete plan.selectionReview;
           current.set("photography", plan);
         }
+        const notes = (Array.isArray(pending.notes) ? pending.notes : [])
+          .filter((item) => selected.some(([path]) => path === item.path));
+        current.set("photo_notes", notes);
+        writeNotesFile(app, root, folder, current, notes);
         current.set("photo_last_request", pending.request);
         current.set("photo_revision", current.getInt("photo_revision") + 1);
         current.set("photo_edit_until", 0);
@@ -163,8 +224,10 @@ function queueMoves(app, id, auth, input) {
     const account = workflow.staff(tx, auth, ["admin", "chooser"]);
     if (workflow.json(record, "photo_pending")) throw new ApiError(409, "Another photo transfer is running. Reopen this gallery to retry.");
     let request = null;
+    const notes = input ? cleanNotes(input.notes, input.selected) : {};
     if (input) {
-      const signature = $security.sha256(JSON.stringify([input.version, [...input.selected].sort()]));
+      const signature = $security.sha256(JSON.stringify([input.version, [...input.selected].sort(),
+        Object.keys(notes).sort().map((id) => [id, notes[id]])]));
       request = { id: input.requestId, actor: account.id, signature };
       const previous = workflow.json(record, "photo_last_request");
       if (previous?.id === input.requestId && previous.actor === account.id) {
@@ -197,7 +260,12 @@ function queueMoves(app, id, auth, input) {
           .map(({ path, fingerprint }) => [destinations.get(path) ?? path, fingerprint])
           .sort(([a], [b]) => a < b ? -1 : Number(a > b));
         const selectionReview = workflow.json(record, "photography")?.selectionReview;
-        record.set("photo_pending", { moves, selected, request, selectionReview });
+        // Notes follow the photo to its path after the move.
+        const noted = input ? photos.filter((photo) => notes[photo.id]).map((photo) => {
+          const path = destinations.get(photo.path) ?? photo.path;
+          return { path, name: path.split("/").pop(), note: notes[photo.id] };
+        }) : undefined;
+        record.set("photo_pending", { moves, selected, request, selectionReview, ...(noted ? { notes: noted } : {}) });
       }
       if (!input) {
         record.set("photo_edit_until", Date.now() + 15 * 60 * 1000);
@@ -226,11 +294,18 @@ function details(app, id) {
   return workflow.withRegistration(app, id, (tx, record) => gallery(tx, record, (root, folder) => {
     if (workflow.json(record, "photo_pending")) throw new ApiError(409, "The gallery is being updated.");
     const inventory = readInventory(root, folder);
+    const saved = workflow.json(record, "photo_notes");
+    const notes = new Map((Array.isArray(saved) ? saved : []).map((item) => [item.path, item.note]));
+    const override = limitOverridden(tx);
     return {
       student: workflow.summary(tx, record),
       version: version(record, inventory),
-      limit: selectionLimit(tx, record),
-      photos: inventory.map(({ id, name, group }) => ({ id, name, group, selected: group === "selected" })),
+      limit: override ? 0 : packageLimit(tx, record),
+      packageLimit: packageLimit(tx, record),
+      limitOverride: override,
+      photos: inventory.map(({ id, path, name, group }) => ({
+        id, name, group, selected: group === "selected", note: group === "selected" ? notes.get(path) || "" : "",
+      })),
     };
   }));
 }

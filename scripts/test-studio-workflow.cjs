@@ -670,6 +670,32 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.deepEqual(await readFile(join(plainFolder, 'other.png')), png);
   assert.deepEqual(await readFile(join(path, 'raw.cr3')), png);
 
+  // DEV CON chooser override lifts the package limit (2); notes for the editor follow the photo.
+  const override = (on, token = admin, status = 200) => send(api + '/devcon/chooser-override', { token, method: 'POST', status, body: { on } });
+  await override(true, chooser.token, 403);
+  await override(true);
+  const unlimited = await open();
+  assert.deepEqual([unlimited.limit, unlimited.packageLimit, unlimited.limitOverride], [0, 2, true]);
+  const notedPhoto = unlimited.photos.find((photo) => photo.name === 'second.png');
+  const withNotes = (snapshot, notes, status = 200) => send(route + '/confirm', {
+    token: chooser.token, method: 'POST', status,
+    body: { version: snapshot.version, requestId: randomUUID(), selected: snapshot.photos.map((photo) => photo.id), notes },
+  }).then((r) => r.payload);
+  await withNotes(unlimited, { [notedPhoto.id]: 'x'.repeat(501) }, 400);
+  const allChosen = await withNotes(unlimited, { [notedPhoto.id]: '  Remove the blemish\nbrighten  ', nosuchphoto: 'ignored' });
+  assert.equal(allChosen.photos.filter((photo) => photo.selected).length, 3);
+  assert.deepEqual(allChosen.photos.filter((photo) => photo.note).map((photo) => [photo.name, photo.note]),
+    [['second.png', 'Remove the blemish\nbrighten']]);
+  const notesText = await readFile(join(path, basename(path), 'EDITOR_NOTES.txt'), 'utf8');
+  assert.match(notesText, /second\.png\r\n {4}Remove the blemish\r\n {4}brighten/);
+  await override(false);
+  const limited = await open();
+  assert.deepEqual([limited.limit, limited.limitOverride], [2, false]);
+  await withNotes(limited, {}, 400);
+  // Back to the earlier selection (third.png only, no notes): the notes file is removed.
+  await choose(limited, limited.photos.filter((photo) => photo.name === 'third.png'));
+  assert.deepEqual(await readdir(join(path, basename(path))), ['third.png']);
+
   // Fixture for a process interrupted after the exclusive hard-link but before
   // source removal. Include a second move blocked by an unrelated destination.
   const source = join(path, 'Unselected', 'first.png');
@@ -2585,6 +2611,34 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     form.set('add_ons', '[]');
     form.delete('registration_version');
     await submit(409);
+  });
+
+  // Last: it wipes every client record.
+  await t.test('DEV CON deletes only client records, after a backup and the admin password', async () => {
+    const devcon = api + '/devcon';
+    const phrase = 'DELETE ALL CLIENTS';
+    await send(devcon + '/summary', { token: cashier, status: 403 });
+    const before = (await send(devcon + '/summary', { token: admin })).payload;
+    assert.ok(before.clients.registrations > 0 && before.clients.payments > 0);
+    await send(devcon + '/wipe-clients', { token: cashier, method: 'POST', status: 403, body: { password: 'password123', confirm: phrase } });
+    await send(devcon + '/wipe-clients', { token: admin, method: 'POST', status: 400, body: { password: 'wrong', confirm: phrase } });
+    await send(devcon + '/wipe-clients', { token: admin, method: 'POST', status: 400, body: { password: 'password123', confirm: 'delete' } });
+    assert.deepEqual((await send(devcon + '/summary', { token: admin })).payload.clients, before.clients);
+
+    const done = (await send(devcon + '/wipe-clients', { token: admin, method: 'POST', body: { password: 'password123', confirm: phrase, photos: true } })).payload;
+    assert.deepEqual(done.deleted, before.clients);
+    assert.ok(Object.values(done.after.clients).every((n) => n === 0), JSON.stringify(done.after.clients));
+    assert.deepEqual(done.after.kept, before.kept);
+    assert.ok((await readdir(join(data, 'backups'))).includes(done.backup));
+    assert.equal(done.photos.failed.length, 0);
+    assert.deepEqual(await readdir(photos), []);
+    assert.ok((await readdir(done.photos.movedTo)).length > 0);
+    const db = new DatabaseSync(join(data, 'data.db'), { readOnly: true });
+    try {
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM studio_number_sequences').get().n, 0);
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM camera_stations WHERE active_registration != ''").get().n, 0);
+    } finally { db.close(); }
+    await rm(done.photos.movedTo, { recursive: true, force: true });
   });
 
 });

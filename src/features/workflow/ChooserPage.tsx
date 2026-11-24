@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ImageOff, Images, Maximize2, X } from 'lucide-react';
+import { Check, ImageOff, Images, Maximize2, StickyNote, X } from 'lucide-react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
@@ -38,13 +38,22 @@ interface Photo {
   name: string;
   group: string;
   selected: boolean;
+  /** The chooser's note for the editor (selected photos only). */
+  note?: string;
 }
 interface Gallery {
   student: StationStudent;
   photos: Photo[];
   version: string;
+  /** 0 = no limit (none set, or the DEV CON override is on). */
   limit: number;
+  packageLimit?: number;
+  limitOverride?: boolean;
 }
+
+const NOTE_MAX = 500;
+const notesOf = (gallery: Gallery) =>
+  Object.fromEntries(gallery.photos.filter((photo) => photo.note).map((photo) => [photo.id, photo.note as string]));
 
 type Done = 'not_selected' | 'selected' | '';
 interface FilterSchool {
@@ -244,6 +253,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
 function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void }) {
   const [gallery, setGallery] = useState(initial);
   const [selected, setSelected] = useState(() => new Set(initial.photos.filter((item) => item.selected).map((item) => item.id)));
+  const [notes, setNotes] = useState<Record<string, string>>(() => notesOf(initial));
   const [preview, setPreview] = useState<{ url: string; name: string }>();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
@@ -255,7 +265,12 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
   const live = useWorkflowData<Gallery>(path);
   const stale = conflict || (!!live.data && live.data.version !== gallery.version);
   const limit = live.data?.limit ?? gallery.limit;
+  const packageLimit = live.data?.packageLimit ?? gallery.packageLimit ?? 0;
+  const override = live.data?.limitOverride ?? gallery.limitOverride ?? false;
   const overLimit = !!limit && selected.size > limit;
+  const savedNotes = notesOf(gallery);
+  const noteCount = [...selected].filter((id) => notes[id]?.trim()).length;
+  const notesChanged = [...selected].some((id) => (notes[id]?.trim() || '') !== (savedNotes[id] || ''));
 
   useEffect(() => {
     if (preview && !dialog.current?.open) dialog.current?.showModal();
@@ -264,6 +279,7 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
   function setCurrent(next: Gallery) {
     setGallery(next);
     setSelected(new Set(next.photos.filter((item) => item.selected).map((item) => item.id)));
+    setNotes(notesOf(next));
     setConflict(false);
     request.current = undefined;
     live.refresh();
@@ -278,7 +294,10 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
       request.current ??= Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
       const next = await pb.send<Gallery>(endpoint, {
         method: 'POST',
-        body: confirm ? { selected: [...selected], version: gallery.version, requestId: request.current } : undefined,
+        body: confirm ? {
+          selected: [...selected], version: gallery.version, requestId: request.current,
+          notes: Object.fromEntries([...selected].filter((id) => notes[id]?.trim()).map((id) => [id, notes[id].trim()])),
+        } : undefined,
       });
       setCurrent(next);
       if (confirm) setStatus('Photo selection saved.');
@@ -301,6 +320,12 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
     });
   }
 
+  function editNote(id: string, text: string) {
+    setStatus('');
+    request.current = undefined;
+    setNotes((current) => ({ ...current, [id]: text.slice(0, NOTE_MAX) }));
+  }
+
   return (
     <div className="space-y-5">
       <div className={`${stationCard} flex flex-wrap items-start justify-between gap-3`}>
@@ -308,20 +333,34 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
         <button type="button" className={stationButton} disabled={busy} onClick={close}>Back to students</button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p aria-live="polite" className="font-bold">{selected.size} selected{limit ? ` · Limit ${limit}` : ''}</p>
+        <div>
+          <p aria-live="polite" className="font-bold m-0">
+            {selected.size} selected{limit ? ` · Limit ${limit}` : ''}{noteCount ? ` · ${noteCount} with notes` : ''}
+          </p>
+          {override && (
+            <p className="m-0 mt-1 inline-block border border-amber-500 px-1.5 py-0.5 text-[11px] font-bold text-amber-700">
+              Limit override ON{packageLimit ? ` · package allows ${packageLimit}` : ''}: select as many as the client wants
+            </p>
+          )}
+          <p className="m-0 mt-1 text-[11px] text-neutral-600">Add a note under a selected photo to tell the editor what the client wants (e.g. remove pimple, brighten).</p>
+        </div>
         <div className="flex gap-2 flex-wrap">
           <button type="button" className={stationButton} disabled={busy} onClick={() => void update(false)}>Reload gallery</button>
           <button type="button" className={stationButton} disabled={busy || stale || !selected.size || overLimit}
             onClick={() => void update(true)}>{busy ? 'Working…' : 'Confirm selection'}</button>
         </div>
       </div>
+      {notesChanged && !busy && (
+        <p role="status" className="font-bold text-amber-700">Notes changed. Press Confirm selection to save them.</p>
+      )}
       {stale && <p role="alert" className="font-bold text-red-700">The gallery changed. Reload it to see the latest photos and saved selection.</p>}
       {(error || live.error) && <p role="alert" className="font-bold text-red-700">{error || live.error}</p>}
       {status && <p role="status" className="font-bold text-emerald-800">{status}</p>}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         {gallery.photos.map((photo) => (
           <PhotoTile key={gallery.version + photo.id} photo={photo} path={path} checked={selected.has(photo.id)}
-            onToggle={() => toggle(photo.id)} disabled={busy || stale} onPreview={(url) => setPreview({ url, name: photo.name })} />
+            onToggle={() => toggle(photo.id)} disabled={busy || stale} onPreview={(url) => setPreview({ url, name: photo.name })}
+            note={notes[photo.id] ?? ''} onNote={(text) => editNote(photo.id, text)} />
         ))}
       </div>
       <dialog ref={dialog} onClose={() => setPreview(undefined)} className="fixed inset-0 m-auto max-h-screen max-w-screen theme-night bg-black text-white p-3 backdrop:bg-black/90">
@@ -336,8 +375,9 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
   );
 }
 
-function PhotoTile({ photo, path, checked, disabled, onToggle, onPreview }: {
+function PhotoTile({ photo, path, checked, disabled, onToggle, onPreview, note, onNote }: {
   photo: Photo; path: string; checked: boolean; disabled: boolean; onToggle: () => void; onPreview: (url: string) => void;
+  note: string; onNote: (text: string) => void;
 }) {
   const tile = useRef<HTMLElement>(null);
   const [url, setUrl] = useState('');
@@ -385,6 +425,17 @@ function PhotoTile({ photo, path, checked, disabled, onToggle, onPreview }: {
         <button type="button" title="Full-screen preview" aria-label={`Preview ${photo.name}`} disabled={!url || failed}
           onClick={() => onPreview(url)} className="shrink-0 p-2 disabled:opacity-30"><Maximize2 size={15} /></button>
       </div>
+      {checked && (
+        <label className="block px-1.5 pb-1.5">
+          <span className="flex items-center gap-1 text-[10px] font-bold uppercase text-neutral-600">
+            <StickyNote size={12} /> Note for editor
+          </span>
+          <textarea value={note} maxLength={NOTE_MAX} rows={2} disabled={disabled}
+            onChange={(event) => onNote(event.target.value)} placeholder="e.g. remove blemish, brighten"
+            aria-label={`Note for editor about ${photo.name}`}
+            className="mt-0.5 w-full resize-y border border-neutral-400 bg-canvas px-1.5 py-1 text-xs" />
+        </label>
+      )}
     </article>
   );
 }
