@@ -3,11 +3,14 @@ import { BarChart3 } from 'lucide-react';
 import { DataTable, type DataTableColumn } from '../../components/common/DataTable';
 import { Modal } from '../../components/common/Modal';
 import { formatMuaAmount, muaEarningsTable, muaReportTable, type MuaPerformanceReport } from '../admin/muaPerformance';
+import { makeupSecondary, makeupTable } from './makeupStyles';
+import { stationCard } from './StationLayout';
 
-export function MuaAnalyticsTable({ report, earnings, renderDetails }: {
+export function MuaAnalyticsTable({ report, earnings, renderDetails, compact = false }: {
   report: MuaPerformanceReport;
   earnings: boolean;
   renderDetails?: (artist: MuaPerformanceReport['rows'][number]) => ReactNode;
+  compact?: boolean;
 }) {
   const matrix = earnings ? muaEarningsTable(report) : muaReportTable(report);
   // The artist whose breakdown is open in a popup.
@@ -28,6 +31,16 @@ export function MuaAnalyticsTable({ report, earnings, renderDetails }: {
     <DataTable label={earnings ? 'Daily MUA earnings' : 'Daily MUA counts'}
       rows={rows} columns={columns} getRowId={({ artist }) => artist.id} pagination={renderDetails ? false : undefined}
       emptyMessage="No completions recorded for this date." tableClassName="whitespace-nowrap" headerClassName="uppercase"
+      className={compact ? makeupTable : undefined}
+      renderCompactRow={compact ? ({ artist, values }) => (
+        <article className={`${stationCard} flex flex-wrap items-center justify-between gap-3`}>
+          <div className="min-w-0 wrap-break-word">
+            <h3 className="font-semibold">{artist.name}</h3>
+            <p className="text-sm text-ink/75">{earnings ? 'Total earnings' : 'Services completed'} · {valueText(values.at(-1) ?? 0)}</p>
+          </div>
+          <button type="button" className={makeupSecondary} onClick={() => setOpenId(artist.id)}>Details</button>
+        </article>
+      ) : undefined}
       footer={() => (
         <tr className="border-t border-line bg-gold-wash font-black">
           <th scope="row" className="px-3 py-2 text-left">TOTAL</th>
@@ -38,6 +51,9 @@ export function MuaAnalyticsTable({ report, earnings, renderDetails }: {
       )}
       onRowClick={({ artist }) => setOpenId(artist.id)}
     />
+    {compact && <p className="text-sm font-semibold md:hidden">
+      {earnings ? 'Team earnings' : 'Total completed services'} · {valueText(matrix.total.at(-1) ?? 0)}
+    </p>}
     {(() => {
       const artist = openId ? report.rows.find((row) => row.id === openId) : undefined;
       return artist && (

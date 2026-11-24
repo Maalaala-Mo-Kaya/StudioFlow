@@ -1,5 +1,6 @@
 import React from 'react';
-import { ShoppingBag, Check, ShieldCheck, ArrowRight, Loader2, Sparkles } from 'lucide-react';
+import { ShoppingBag, Check, ShieldCheck, ArrowRight, Loader2 } from 'lucide-react';
+import { JobOrderBreakdown } from '../../../components/common/JobOrderBreakdown';
 import type { Package, AddOn, Organization, Course } from '../../../types';
 import { formatCurrency } from '../../../utils/formatters';
 
@@ -56,8 +57,8 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
   const selectedCourse = courses.find((c) => c.id === selectedCourseId);
   const selectedPkg = packages.find((p) => p.id === selectedPackageId);
 
-  const activeAddOns = addOnsList.filter((a) => selectedAddOns.includes(a.id));
-  if (defaultAddOn) activeAddOns.push(defaultAddOn);
+  const activeAddOns = addOnsList.filter((a) => selectedAddOns.includes(a.id)).map((item) => ({ ...item, auto_applied: false }));
+  if (defaultAddOn) activeAddOns.push({ ...defaultAddOn, auto_applied: true });
 
   const remainingBalance = totalAmount - amountDueNow;
 
@@ -99,66 +100,8 @@ export const RegistrationSummarySidebar: React.FC<RegistrationSummarySidebarProp
         </div>
       </div>
 
-      {/* Selected Package Breakdown */}
-      <div className="space-y-2">
-        <span className="text-[9px] uppercase font-bold text-neutral-400 block tracking-widest">
-          Chosen Pictorial Package
-        </span>
-        {selectedPkg ? (
-          <div className="p-3 bg-obsidian-2 border border-gold/40 flex justify-between items-start">
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="px-1.5 py-0.5 bg-gold text-on-gold font-black text-[9px] uppercase">
-                  {selectedPkg.code}
-                </span>
-                <span className="font-black text-xs uppercase text-white truncate max-w-[170px]">
-                  {selectedPkg.name}
-                </span>
-              </div>
-            </div>
-            <span className="font-black text-gold text-sm shrink-0 ml-2">
-              {formatCurrency(selectedPkg.amount)}
-            </span>
-          </div>
-        ) : (
-          <div className="p-3 border border-dashed border-neutral-700 text-neutral-400 text-center italic text-[11px]">
-            Please select a package from Section 03
-          </div>
-        )}
-        {selectedPkg && optionLines.length > 0 && (
-          <ul className="space-y-1 text-[11px] text-neutral-300">
-            {optionLines.map((line) => (
-              <li key={line} className="flex items-start gap-1.5"><Check className="w-3 h-3 text-gold shrink-0 mt-0.5" />{line}</li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* Selected Add-ons Breakdown */}
-      {activeAddOns.length > 0 && (
-        <div className="space-y-1.5">
-          <span className="text-[9px] uppercase font-bold text-neutral-400 block tracking-widest">
-            Selected Add-Ons ({activeAddOns.length})
-          </span>
-          <div className="space-y-1 max-h-[120px] overflow-y-auto pr-1">
-            {activeAddOns.map((addon) => (
-              <div
-                key={addon.id}
-                className="flex justify-between items-center py-1 px-2 bg-obsidian-2 border border-neutral-800 text-[11px]"
-              >
-                <div className="flex items-center gap-1.5 text-neutral-300 truncate">
-                  <Sparkles className="w-3 h-3 text-gold shrink-0" />
-                  <span className="truncate">{addon.name}</span>
-                  {addon.id === defaultAddOn?.id && <span className="shrink-0 text-gold-soft">Automatic</span>}
-                </div>
-                <span className="font-black text-gold-soft shrink-0 ml-2">
-                  +{formatCurrency(addon.amount, { exact: true })}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <JobOrderBreakdown selectedPackage={selectedPkg} optionLines={optionLines} addOns={activeAddOns}
+        addOnsClassName="max-h-[120px] overflow-y-auto pr-1" />
 
       {/* Payment Mode Selection */}
       <div className="p-3 bg-obsidian-2 border border-neutral-800 space-y-2">

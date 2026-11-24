@@ -1,10 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { CalendarDays, Check, Clock3, UserPlus } from 'lucide-react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
+import { Modal } from '../../components/common/Modal';
 import { studioDate } from '../../utils/studioDay';
 import { clampDay, useStudioCalendar } from '../../hooks/useStudioCalendar';
 import type { MuaTeam } from './muaTeam';
@@ -12,15 +14,16 @@ import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWork
 import { MakeupClientsView, type MakeupTableView } from './MakeupTables';
 import { MuaTeamOverview } from './MuaTeamOverview';
 import { requiresConfirmation, type MakeupAssignment } from './makeupAssignment';
-import { stationButton, stationCard, StationLayout } from './StationLayout';
 import { StationTabs } from './StationTabs';
+import { StationLayout, stationCard } from './StationLayout';
+import { makeupField, makeupPrimary, makeupSecondary } from './makeupStyles';
 
 type Action = 'assign' | 'claim' | 'start' | 'complete' | 'release';
 const tabs = [
-  { id: 'team', label: 'MUA Team Overview' },
-  { id: 'waiting', label: 'Unassigned Clients' },
-  { id: 'assigned', label: 'Assigned Clients' },
-  { id: 'completed', label: 'Completed Services' },
+  { id: 'team', label: 'Team' },
+  { id: 'waiting', label: 'Unassigned' },
+  { id: 'assigned', label: 'Assigned' },
+  { id: 'completed', label: 'Completed' },
 ] as const;
 type MakeupTab = typeof tabs[number]['id'];
 const noRows: MakeupAssignment[] = [];
@@ -29,7 +32,6 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
   const { user } = useAuth();
   const { toast } = useToast();
   const [selection, setSelection] = useState<MakeupTab>();
-  const [selectedClientId, setSelectedClientId] = useState<string>();
   const [views, setViews] = useState<Partial<Record<MakeupTab, MakeupTableView>>>({});
   const [date, setDate] = useState(() => studioDate());
   // Completion dates from the studio's first day to today.
@@ -51,15 +53,18 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
   const [unavailable, setUnavailable] = useState<{ id: string; version?: number }>();
   const [release, setRelease] = useState<MakeupAssignment>();
   const [confirmCompletion, setConfirmCompletion] = useState<MakeupAssignment>();
-  const [assignment, setAssignment] = useState<{ row: MakeupAssignment; artistId: string }>();
+  const [assignment, setAssignment] = useState<MakeupAssignment>();
+  const [artistId, setArtistId] = useState('');
   const artists = useMemo(() => team?.artists.filter((artist) => !artist.disabled) ?? [], [team]);
   const targets = artists.filter((artist) => !artist.parent || team?.allowSelf);
-  const queueRows = useMemo(() => {
-    if (activeTab === 'waiting') return data?.filter((row) => row.state === 'waiting' &&
-      !(unavailable?.id === row.id && unavailable.version === row.version)) ?? noRows;
-    if (activeTab === 'assigned') return data?.filter((row) => row.state === 'claimed' || row.state === 'in_progress') ?? noRows;
-    return noRows;
-  }, [activeTab, data, unavailable]);
+  const waiting = useMemo(() => data?.filter((row) => row.state === 'waiting' &&
+    !(unavailable?.id === row.id && unavailable.version === row.version)), [data, unavailable]);
+  const assigned = useMemo(() => data?.filter((row) => row.state === 'claimed' || row.state === 'in_progress'), [data]);
+  const queueRows = activeTab === 'waiting' ? waiting : assigned;
+  const availableArtists = targets.filter((artist) => artist.id !== assignment?.artistId);
+  const selectedArtist = availableArtists.find((artist) => artist.id === artistId);
+  const activeError = activeTab === 'team' ? teamError : activeTab === 'completed' ? completedError : error;
+  const loading = !activeError && (activeTab === 'team' ? team?.date !== date : activeTab === 'completed' ? !completed : !data);
   const view = views[activeTab] ?? {};
 
   function updateView(change: MakeupTableView) {
@@ -86,9 +91,6 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
           ...(admin && (action === 'start' || action === 'complete') ? { onBehalf: true, artistId: row.artistId } : {}),
         },
       });
-      if (action === 'complete' || action === 'release') {
-        setSelectedClientId((current) => current === row.id ? undefined : current);
-      }
       if (action === 'complete') toast.success(requiresConfirmation(row)
         ? 'Service confirmed. The client is in the photography queue.'
         : 'Makeup or grooming completed. The client is in the photography queue.');
@@ -111,22 +113,23 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
 
   function assignControl(row: MakeupAssignment) {
     if (!manage || !row.eligible) return null;
-    const available = targets.filter((artist) => artist.id !== row.artistId);
+    const hasArtists = targets.some((artist) => artist.id !== row.artistId);
     return (
-      <select aria-label={`Assign ${row.name} to an artist`} className="min-h-10 max-w-full border border-line bg-panel px-2"
-        disabled={working || !available.length} value=""
-        onChange={(event) => setAssignment({ row, artistId: event.target.value })}>
-        <option value="">{!available.length ? 'No eligible artist' : row.artistId ? 'Reassign to…' : 'Assign to…'}</option>
-        {available.map((artist) => <option key={artist.id} value={artist.id}>
-          {artist.name}{artist.parent ? ' (Parent)' : ''}
-        </option>)}
-      </select>
+      <button type="button" aria-label={`${row.artistId ? 'Reassign' : 'Assign'} ${row.name}`}
+        className={row.artistId ? makeupSecondary : makeupPrimary} disabled={working || !hasArtists}
+        onClick={() => { setArtistId(''); setAssignment(row); }}>
+        <UserPlus className="size-4 shrink-0" aria-hidden="true" />
+        {teamError ? 'Artist list unavailable' : !team ? 'Loading artists…' : !hasArtists ? 'No eligible artist'
+          : row.artistId ? 'Reassign' : 'Assign artist'}
+      </button>
     );
   }
 
   function waitingActions(row: MakeupAssignment) {
     return manage ? assignControl(row) : team?.canClaim && (
-      <button type="button" className={stationButton} disabled={working} onClick={() => void update(row, 'claim')}>Select student</button>
+      <button type="button" className={makeupPrimary} disabled={working || !row.eligible} onClick={() => void update(row, 'claim')}>
+        <UserPlus className="size-4 shrink-0" aria-hidden="true" /> Claim client
+      </button>
     );
   }
 
@@ -135,37 +138,40 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
     const confirmation = requiresConfirmation(row);
     const starts = row.state === 'claimed' && !confirmation;
     return <>
-      {canPerform && <button type="button" className={stationButton} disabled={working || !row.eligible}
+      {canPerform && <button type="button" className={`${makeupPrimary} w-full sm:w-auto`} disabled={working || !row.eligible}
         onClick={() => admin && !starts ? setConfirmCompletion(row) : void update(row, starts ? 'start' : 'complete')}>
-        {confirmation ? 'Confirm service' : starts ? (admin ? 'Start on behalf of MUA' : 'Mark in progress')
-          : admin ? 'Record completion' : 'Complete makeup / grooming'}
+        {starts ? <Clock3 className="size-4" aria-hidden="true" /> : <Check className="size-4" aria-hidden="true" />}
+        {confirmation ? 'Confirm service' : starts ? (admin ? 'Start for artist' : 'Start service') : 'Mark complete'}
       </button>}
       {manage && row.artistId && <>
         {assignControl(row)}
-        <button type="button" className={stationButton} disabled={working} onClick={() => setRelease(row)}>Release assignment</button>
+        <button type="button" className={makeupSecondary} disabled={working} onClick={() => setRelease(row)}>Release</button>
       </>}
     </>;
   }
 
   return (
-    <StationLayout title="Makeup / Grooming" badge="MUA Station" liveLabel="Live Queue"
-      description="Manage MUA assignments and service confirmations." refresh={refreshTables} embedded={embedded}>
+    <StationLayout title={<>Makeup &amp; <span className="text-gold">Grooming</span></>} badge="MUA Station"
+      liveLabel={loading || activeError ? undefined : 'Live Queue'}
+      description={manage ? 'Assign clients and track makeup and grooming services.' : 'Manage your clients and confirm completed services.'}
+      refresh={refreshTables} embedded={embedded}>
       <StationTabs label="Makeup and grooming views" active={activeTab} onChange={setSelection}
-        tabs={availableTabs.map((tab) => ({
-          ...tab,
-          count: tab.id === 'team' && team?.date === date ? artists.length
-            : tab.id === 'completed' ? completed?.length
-              : tab.id === activeTab && data ? queueRows.length : undefined,
+        tabs={availableTabs.map(({ id, label }) => ({
+          id,
+          label: id === 'assigned' && !manage ? 'My clients' : label,
+          count: id === 'team' ? team && artists.length : id === 'completed' ? completed?.length
+            : id === 'waiting' ? waiting?.length : assigned?.length,
         }))}>
-        {teamError && activeTab !== 'completed' && <p role="alert" className="text-sm font-bold text-red-700">{teamError}</p>}
-        {queueTab && error && <p role="alert" className="text-sm font-bold text-red-700">{error}</p>}
-        {activeTab === 'completed' && completedError && <p role="alert" className="text-sm font-bold text-red-700">{completedError}</p>}
+        {(activeError || (queueTab && teamError)) && <p role="alert" className="border border-red-500/40 bg-red-500/10 p-3 text-sm text-ink">
+          {activeError || teamError} Use Sync to try again.
+        </p>}
         {activeTab === 'completed' && (
-          <label className="flex flex-wrap items-center gap-2 text-xs font-bold">
-            Completion date (Philippine time)
-            <input type="date" className="min-h-10 border border-line bg-panel px-2" value={date}
+          <label className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+            <CalendarDays className="size-4 text-gold-soft" aria-hidden="true" /> Completion date
+            <input type="date" className={makeupField} value={date}
               min={calendar.start || undefined} max={studioDate()}
               onChange={(event) => setDate(clampDay(event.target.value || studioDate(), calendar.start, studioDate()))} />
+            <span className="font-normal text-ink/70">Philippine time</span>
           </label>
         )}
         {activeTab === 'team' ? (
@@ -174,7 +180,7 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
               sort={view.sort ?? null} onSort={(sort) => updateView({ sort })} />
             {admin && teamSettings && (
               <details className="border border-line bg-panel">
-                <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-gold-soft">Makeup artist team settings</summary>
+                <summary className="min-h-11 cursor-pointer px-4 py-3 text-xs font-black uppercase tracking-wide text-gold-soft">Makeup artist team settings</summary>
                 {teamSettings}
               </details>
             )}
@@ -183,20 +189,17 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
           <MakeupClientsView key={activeTab} kind={activeTab} view={view} onViewChange={updateView}
             title={activeTab === 'completed' ? 'Completed services' : activeTab === 'waiting'
               ? 'Unassigned clients' : manage ? 'Assigned clients' : 'Your assignments'}
-            rows={activeTab === 'completed' ? completed ?? noRows : queueRows}
-            loading={activeTab === 'completed' ? !completed && !completedError : !data && !error}
-            empty={activeTab === 'completed' ? 'No completed services for this date.' : activeTab === 'waiting'
-              ? 'No unassigned clients waiting for MUA.' : 'No active assigned clients.'}
-            renderAction={activeTab === 'waiting' ? waitingActions : undefined}
-            assignmentSelection={{ id: selectedClientId, onChange: setSelectedClientId, disabled: working, renderActions: assignedActions }} />
+            rows={(activeTab === 'completed' ? completed : queueRows) ?? noRows}
+            loading={loading} failed={!!activeError}
+            renderAction={activeTab === 'waiting' ? waitingActions : activeTab === 'assigned' ? assignedActions : undefined} />
         )}
       </StationTabs>
       {conflict && (
         <div role="alertdialog" aria-modal="true" aria-labelledby="makeup-conflict" className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
           <div className={`${stationCard} max-w-sm space-y-4`}>
-            <h2 id="makeup-conflict" className="font-black uppercase">Student already assigned</h2>
-            <p>This student has already been selected by another makeup artist.</p>
-            <button autoFocus type="button" className={stationButton} onClick={() => { setConflict(false); refresh(); }}>Back to waiting queue</button>
+            <h2 id="makeup-conflict" className="text-sm font-black uppercase tracking-wide">Client already assigned</h2>
+            <p>Another artist already has this client. Refresh the queue to see who is available.</p>
+            <button autoFocus type="button" className={makeupPrimary} onClick={() => { setConflict(false); refresh(); }}>Back to queue</button>
           </div>
         </div>
       )}
@@ -208,13 +211,41 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
         onConfirm={async () => { if (release) await update(release, 'release'); }}
         onClose={() => setRelease(undefined)}
       />
-      <ConfirmModal isOpen={!!assignment}
-        title={assignment?.row.artistId ? 'Reassign client' : 'Assign client'}
-        message={assignment && `Assign ${assignment.row.name} to ${targets.find((artist) => artist.id === assignment.artistId)?.name ?? 'the selected MUA'}?${assignment.row.state === 'in_progress' ? ' The new artist will start from the pending queue.' : ''}`}
-        confirmText={assignment?.row.artistId ? 'Reassign' : 'Assign'}
-        onConfirm={async () => { if (assignment) await update(assignment.row, 'assign', assignment.artistId); }}
-        onClose={() => setAssignment(undefined)}
-      />
+      {assignment && (
+        <Modal title={assignment.artistId ? 'Reassign client' : 'Assign client'}
+          subtitle={assignment.name} icon={UserPlus} size="md" busy={working} onClose={() => setAssignment(undefined)}
+          footer={<>
+            <button type="button" className={makeupSecondary} disabled={working} onClick={() => setAssignment(undefined)}>Cancel</button>
+            <button type="button" className={`${makeupPrimary} flex-1 sm:flex-none`} disabled={working || !selectedArtist}
+              onClick={async () => {
+                if (!selectedArtist) return;
+                try {
+                  await update(assignment, 'assign', selectedArtist.id);
+                  setAssignment(undefined);
+                } catch { /* The update displays the error and keeps the selection available to retry. */ }
+              }}>
+              {working ? 'Saving…' : assignment.artistId ? 'Reassign client' : 'Assign client'}
+            </button>
+          </>}>
+          <fieldset className="space-y-2 font-sans text-sm" disabled={working}>
+            <legend className="mb-3 text-sm font-black uppercase tracking-wide">Choose an artist</legend>
+            {assignment.state === 'in_progress' && <p className="mb-3 text-ink/75">The new artist will start this service from the beginning.</p>}
+            {availableArtists.length === 0 && <p className="text-ink/75">There are no eligible artists right now.</p>}
+            {availableArtists.map((artist, index) => (
+              <label key={artist.id} className={`flex min-h-14 cursor-pointer items-center gap-3 border p-3 focus-within:outline-2 focus-within:outline-gold ${artist.id === artistId ? 'border-gold bg-gold-wash' : 'border-line bg-panel hover:border-gold'}`}>
+                <input type="radio" name="makeup-artist" value={artist.id} checked={artist.id === artistId}
+                  onChange={() => setArtistId(artist.id)} autoFocus={index === 0} className="size-4 shrink-0 accent-gold" />
+                <span className="min-w-0 wrap-break-word">
+                  <span className="block font-semibold text-ink">{artist.name}{artist.parent && ' · Team lead'}</span>
+                  {(!team?.report || team.date === team.today) && (
+                    <span className="block text-ink/70">{artist.pending} pending · {artist.inProgress} in progress</span>
+                  )}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        </Modal>
+      )}
       <ConfirmModal
         isOpen={!!confirmCompletion}
         title="Confirm performing MUA"

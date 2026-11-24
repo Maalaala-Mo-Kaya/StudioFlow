@@ -6,6 +6,7 @@ import { PAYMENT_METHOD_OPTIONS } from '../../../constants/studio';
 import { formatClientName, formatCurrency, formatJobOrderNo, formatQueueNumber } from '../../../utils/formatters';
 import { canUseCollectionMode, type CollectionMode } from '../useCashierState';
 import { discountCents, revenueTerms, toCentavos } from '../../../utils/revenue';
+import { CashierOrderSummary } from './CashierOrderSummary';
 
 export interface CashierPaymentIntent {
   balanceDue: number;
@@ -199,6 +200,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           });
         }} className="space-y-4 lg:space-y-0 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
           <div className="space-y-4 lg:space-y-3 min-w-0">
+          <CashierOrderSummary registration={selectedReg} originalCents={originalBilledCents}
+            discountCents={previewCredit} discountLabel={rateLabel} totalCents={totalCentavos}
+            paidCents={paidCents} balanceCents={balanceCentavos} />
           {!['cancelled', 'released'].includes(selectedReg.status) && (
             <fieldset disabled={isProcessing} className={`space-y-2 border p-3 ${discountOn || currentCredit > 0 ? 'border-gold' : 'border-line'}`}>
               <legend className="sr-only">Discount credit</legend>
@@ -275,37 +279,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               </>)}
             </fieldset>
           )}
-          {/* Breakdown Box */}
-          <div className="bg-obsidian text-white p-4 border border-line text-xs space-y-2 font-mono">
-            <div className="flex justify-between">
-              <span className="text-neutral-400 uppercase">Package:</span>
-              <span className="font-bold text-gold">
-                {selectedReg.expand?.package?.name || 'Pictorial Package'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-neutral-400 uppercase">Original Job Amount:</span>
-              <span className="font-black text-white">
-                {formatCurrency(originalBilledCents / 100)}
-              </span>
-            </div>
-            {previewCredit > 0 && <div className="flex justify-between">
-              <span className="text-neutral-400 uppercase">Discount ({rateLabel}):</span>
-              <span className="font-black text-amber-300">{formattedCredit}</span>
-            </div>}
-            <div className="flex justify-between">
-              <span className="text-neutral-400 uppercase">Previously Paid:</span>
-              <span className="font-bold text-emerald-400">
-                {formatCurrency(selectedReg.paid_amount)}
-              </span>
-            </div>
-            <div className="flex justify-between border-t border-neutral-800 pt-2">
-              <span className="text-gold uppercase font-black">Amount Due:</span>
-              <span className="font-black text-gold text-base">
-                {formatCurrency(balanceCentavos / 100, { exact: true })}
-              </span>
-            </div>
-          </div>
           </div>
 
           <div className="space-y-4 lg:space-y-3 min-w-0">

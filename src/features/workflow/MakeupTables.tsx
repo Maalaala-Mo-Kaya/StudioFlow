@@ -1,16 +1,16 @@
 import { useId, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Paintbrush } from 'lucide-react';
-import { DataTable, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
+import { ArrowUpRight, CircleCheck, ListFilter, Paintbrush, Search, UserRound, Users } from 'lucide-react';
+import { DataTable, type DataTableColumn } from '../../components/common/DataTable';
 import { Modal } from '../../components/common/Modal';
-import type { TableExpansion, TablePage, TableSort } from '../../components/common/dataTableModel';
+import type { TablePage, TableSort } from '../../components/common/dataTableModel';
 import { makeupLookLabel } from '../../constants/makeupLook';
 import { useWorkflowData } from '../../hooks/useWorkflowData';
 import { formatQueueNumber } from '../../utils/formatters';
 import { makeupStateLabels, requiresConfirmation, type MakeupAssignment } from './makeupAssignment';
 import type { MuaTeam } from './muaTeam';
-import { StationClientQueue } from './StationClientQueue';
-import { stationButton } from './StationLayout';
+import { stationCard } from './StationLayout';
+import { makeupField, makeupSecondary, makeupTable } from './makeupStyles';
 
 const serviceSources = {
   package: 'Selected package', add_on: 'Selected add-on', admin: 'Admin correction', legacy: 'Existing job order',
@@ -47,6 +47,7 @@ function serviceNames(row: MakeupAssignment) {
 }
 
 function status(row: MakeupAssignment) {
+  if (row.state === 'claimed') return 'Assigned';
   return row.state === 'completed' && requiresConfirmation(row) ? 'Confirmed' : makeupStateLabels[row.state];
 }
 
@@ -58,7 +59,6 @@ export interface MakeupTableView {
   state?: string;
   page?: TablePage;
   sort?: TableSort;
-  expansion?: TableExpansion;
 }
 
 const teamColumns: DataTableColumn<Artist>[] = [
@@ -74,10 +74,24 @@ export function MakeupTeamTable({ artists, loading, sort, onSort }: {
 }) {
   return (
     <section className="min-w-0 space-y-2">
-      <h2 className="text-sm font-black uppercase">MUA team status</h2>
+      <h3 className="text-sm font-black uppercase tracking-wide">Team workload</h3>
       <DataTable label="MUA team status" rows={artists} columns={teamColumns} getRowId={(artist) => artist.id}
         pagination={false} sorting={{ value: sort, onChange: onSort }} loading={loading} emptyMessage="No active MUA staff found."
-        tableClassName="min-w-[440px]" headerClassName="uppercase tracking-wide" />
+        className={makeupTable} tableClassName="min-w-[440px]"
+        renderCompactRow={(artist) => (
+          <article className={stationCard}>
+            <h4 className="font-black uppercase wrap-break-word">{artist.name}</h4>
+            <p className="text-sm text-ink/70">{artist.parent ? 'Team lead' : 'Artist'}</p>
+            <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3 text-sm">
+              {([['Pending', artist.pending], ['In progress', artist.inProgress], ['Completed', artist.completed]] as const).map(([label, count]) => (
+                <div key={label}>
+                  <dt className="text-ink/70">{label}</dt>
+                  <dd className="font-semibold tabular-nums">{count}</dd>
+                </div>
+              ))}
+            </dl>
+          </article>
+        )} />
     </section>
   );
 }
@@ -86,28 +100,25 @@ interface MakeupClientsViewProps {
   title: string;
   kind: 'waiting' | 'assigned' | 'completed';
   rows: MakeupAssignment[];
-  empty: string;
   loading?: boolean;
+  failed?: boolean;
   view: MakeupTableView;
   onViewChange: (change: MakeupTableView) => void;
   renderAction?: (row: MakeupAssignment) => ReactNode;
-  assignmentSelection: {
-    id: string | undefined;
-    onChange: (id: string | undefined) => void;
-    disabled: boolean;
-    renderActions: (row: MakeupAssignment) => ReactNode;
-  };
 }
 
 export function MakeupClientsView({
-  title, kind, rows, empty, loading, view, onViewChange, renderAction, assignmentSelection,
+  title, kind, rows, loading, failed, view, onViewChange, renderAction,
 }: MakeupClientsViewProps) {
   const heading = useId();
+  const filterId = useId();
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // The client whose details are open in a popup (by row key, so it shows the latest data).
   const [openKey, setOpenKey] = useState<string | null>(null);
   const { query = '', service = '', artist = '', state = '', page = firstPage,
     sort = kind === 'completed' ? completedSort : null } = view;
   const changeFilter = (change: MakeupTableView) => onViewChange({ ...change, page: { ...page, page: 1 } });
+  const clearFilters = () => changeFilter({ query: '', service: '', artist: '', state: '' });
   const serviceOptions = useMemo(() => [...new Set(rows.flatMap((row) => row.services?.length
     ? row.services.flatMap((item) => [item.name, ...(item.types?.map((type) => type.name) ?? [])])
     : [serviceNames(row)]))].filter(Boolean).sort((a, b) => a.localeCompare(b)), [rows]);
@@ -124,40 +135,14 @@ export function MakeupClientsView({
         [row.jobOrder, row.name, row.artistName, ...searchableService].join(' ').toLowerCase().includes(term)));
   }), [rows, queryText, service, artist, state]);
   const filtersActive = !!(queryText || service || artist || state);
-  const toolbar = (
-    <div className="flex flex-wrap items-center gap-2 p-2">
-      <input type="search" aria-label={`Search ${title.toLowerCase()}`} placeholder="Search job, client, service…" value={query}
-        onChange={(event) => changeFilter({ query: event.target.value })} className={`${tableFilterControl} w-full sm:w-56`} />
-      <TableFilter name="Service" value={service} onChange={(next) => changeFilter({ service: next })}
-        options={serviceOptions.map((name) => [name, name])} />
-      {kind !== 'waiting' && <>
-        <TableFilter name="Artist" value={artist} onChange={(next) => changeFilter({ artist: next })} options={artistOptions} />
-        <TableFilter name="Status" value={state} onChange={(next) => changeFilter({ state: next })} options={(kind === 'completed'
-          ? ['Completed', 'Confirmed'] : ['Claimed', 'In progress']).map((name) => [name, name])} />
-      </>}
-      {filtersActive && <button type="button" onClick={() => changeFilter({ query: '', service: '', artist: '', state: '' })}
-        className="min-h-10 px-2 text-xs font-bold text-gold-soft underline">Clear filters</button>}
-    </div>
+  const activeFilters = [service, artist, state].filter(Boolean).length;
+  const openDetails = (row: MakeupAssignment) => setOpenKey(row.rowKey ?? row.id);
+  const renderCard = (row: MakeupAssignment) => (
+    <MakeupClientCard row={row} onDetails={() => openDetails(row)}>{renderAction?.(row)}</MakeupClientCard>
   );
-
-  if (kind === 'assigned') {
-    if (loading) return <p role="status" className="border-2 border-line bg-panel p-5 text-center text-sm">Loading assigned clients…</p>;
-    const selected = rows.find((row) => row.id === assignmentSelection.id);
-    const unselected = filteredRows.filter((row) => row.id !== selected?.id);
-
-    return <StationClientQueue
-      placeholderIcon={<Paintbrush className="size-7 text-gold" aria-hidden="true" />}
-      totalUnselected={rows.length - (selected ? 1 : 0)}
-      tools={rows.length > 0 && <div className="mb-4 border border-line bg-panel">{toolbar}</div>}
-      empty={rows.length === 0 ? empty : filtersActive ? 'No unselected clients match the filters.' : 'No other assigned clients in the queue.'}
-      selected={selected && <MakeupAssignmentCard key={selected.id} row={selected} selected
-        disabled={assignmentSelection.disabled} onToggle={() => assignmentSelection.onChange(undefined)}>
-        {assignmentSelection.renderActions(selected)}
-      </MakeupAssignmentCard>}
-      unselected={unselected.map((row) => <MakeupAssignmentCard key={row.id} row={row}
-        disabled={assignmentSelection.disabled} onToggle={() => assignmentSelection.onChange(row.id)} />)}
-    />;
-  }
+  const orderedAssignments = kind === 'assigned' && [...filteredRows].sort((a, b) =>
+    Number(b.state === 'in_progress') - Number(a.state === 'in_progress'));
+  const open = openKey && rows.find((row) => (row.rowKey ?? row.id) === openKey);
 
   const columns: DataTableColumn<MakeupAssignment>[] = [
     { id: 'job', header: 'Job Order №', accessor: (row) => row.jobOrder, sortable: true, cellClassName: 'whitespace-nowrap font-mono font-bold' },
@@ -172,85 +157,150 @@ export function MakeupClientsView({
       sortable: true, visible: kind !== 'waiting' },
     { id: 'time', header: 'Completion time', accessor: (row) => instant(row.completedAt), sortable: true,
       visible: kind === 'completed', cell: (row) => dateTime(row.completedAt), cellClassName: 'whitespace-nowrap' },
-    { id: 'status', header: 'Status', accessor: status, sortable: true,
-      cell: (row) => <span className={`inline-block whitespace-nowrap border px-1.5 py-0.5 font-bold ${
-        row.state === 'completed' ? 'border-emerald-600/40 text-emerald-700'
-          : row.state === 'in_progress' ? 'border-gold bg-gold-wash text-gold-soft' : 'border-line text-ink'
-      }`}>{status(row)}</span> },
-    { id: 'actions', header: 'Assign to', visible: kind !== 'completed',
-      cell: renderAction ?? (() => null), minWidth: 140 },
+    { id: 'status', header: 'Status', accessor: status, sortable: true, cell: (row) => <MakeupStatus row={row} /> },
+    { id: 'actions', header: 'Action', visible: kind === 'waiting', cell: renderAction ?? (() => null), minWidth: 140 },
   ];
 
   return (
-    <section aria-labelledby={heading} className="min-w-0 space-y-2">
-      <h2 id={heading} className="text-sm font-black uppercase">{title} <span className="font-mono text-gold-soft">({rows.length})</span></h2>
-      <DataTable label={title} rows={filteredRows} columns={columns} getRowId={(row) => row.rowKey ?? row.id}
-        pagination={{ pageSizes, value: page, onChange: (next) => onViewChange({ page: next }) }}
-        sorting={{ value: sort, onChange: (next) => onViewChange({ sort: next }) }}
-        loading={loading} emptyMessage={empty} filtered={filtersActive}
-        headerClassName="uppercase tracking-wide" tableClassName="min-w-[650px]"
-        toolbar={toolbar}
-        onRowClick={(row) => setOpenKey(row.rowKey ?? row.id)}
-      />
-      {(() => {
-        const open = openKey ? rows.find((row) => (row.rowKey ?? row.id) === openKey) : undefined;
-        return open && (
-          <Modal title={open.name || 'Client'} subtitle={<>Job Order № {open.jobOrder || open.id} · {serviceNames(open)} · {status(open)}</>}
-            icon={Paintbrush} onClose={() => setOpenKey(null)}>
-            <MakeupClientDetails row={open}>{renderAction?.(open)}</MakeupClientDetails>
-          </Modal>
-        );
-      })()}
+    <section aria-labelledby={heading} className="min-w-0 space-y-3">
+      <div className="flex items-center gap-2 border-b-2 border-line pb-2">
+        <h2 id={heading} className="text-sm font-black uppercase tracking-wider">{title}</h2>
+        {!loading && !failed && <span className="border border-line bg-panel px-2 py-0.5 font-mono text-[11px] font-bold text-gold-soft">
+          {filtersActive ? `${filteredRows.length}/${rows.length}` : rows.length}
+        </span>}
+      </div>
+      {(rows.length > 0 || filtersActive) && (
+        <div className="flex flex-wrap items-center gap-2 border-2 border-line bg-panel p-2 sm:p-3">
+          <div className="relative min-w-0 flex-1 sm:basis-64">
+            <Search className="pointer-events-none absolute top-3.5 left-3 size-4 text-ink/65" aria-hidden="true" />
+            <input type="search" aria-label={`Search ${title.toLowerCase()}`} placeholder="Search clients" value={query}
+              onChange={(event) => changeFilter({ query: event.target.value })}
+              className={`${makeupField} w-full pl-9 font-mono placeholder:text-ink/65`} />
+          </div>
+          <button type="button" className={`${makeupSecondary} shrink-0 md:hidden`} aria-expanded={filtersOpen} aria-controls={filterId}
+            onClick={() => setFiltersOpen(!filtersOpen)}>
+            <ListFilter className="size-4" aria-hidden="true" /> Filters{activeFilters ? ` (${activeFilters})` : ''}
+          </button>
+          <div id={filterId} className={`${filtersOpen ? 'flex' : 'hidden'} min-w-0 basis-full flex-wrap items-center gap-2 md:flex md:basis-auto`}>
+            <TableFilter name="Service" value={service} onChange={(next) => changeFilter({ service: next })}
+              options={serviceOptions.map((name) => [name, name])} />
+            {kind !== 'waiting' && <>
+              <TableFilter name="Artist" value={artist} onChange={(next) => changeFilter({ artist: next })} options={artistOptions} />
+              <TableFilter name="Status" value={state} onChange={(next) => changeFilter({ state: next })} options={(kind === 'completed'
+                ? ['Completed', 'Confirmed'] : ['Assigned', 'In progress']).map((name) => [name, name])} />
+            </>}
+            {kind !== 'assigned' && (
+              <label className="flex flex-wrap items-center gap-2 text-sm md:hidden">
+                Sort by
+                <select className={makeupField} value={sort ? `${sort.column}:${sort.direction}` : ''}
+                  onChange={(event) => {
+                    const [column, direction] = event.target.value.split(':');
+                    onViewChange({ sort: direction === 'ascending' || direction === 'descending' ? { column, direction } : null,
+                      page: { ...page, page: 1 } });
+                  }}>
+                  <option value="">Default order</option>
+                  {columns.filter((column) => column.visible !== false && column.sortable).map((column) => (
+                    <optgroup key={column.id} label={String(column.header)}>
+                      <option value={`${column.id}:ascending`}>{column.header} ↑</option>
+                      <option value={`${column.id}:descending`}>{column.header} ↓</option>
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          {filtersActive && <button type="button" onClick={clearFilters} className={makeupSecondary}>Clear filters</button>}
+        </div>
+      )}
+      {loading || filteredRows.length === 0 ? (
+        <div role="status" className={`${stationCard} text-sm`}>
+          {loading ? <p className="p-4 text-center">Loading clients…</p>
+            : <MakeupEmptyState kind={kind} failed={failed} filtered={filtersActive} />}
+        </div>
+      ) : orderedAssignments ? (
+        <ul className="grid items-start gap-3 md:grid-cols-2">
+          {orderedAssignments.map((row) => <li key={row.id}>{renderCard(row)}</li>)}
+        </ul>
+      ) : (
+        <DataTable label={title} rows={filteredRows} columns={columns} getRowId={(row) => row.rowKey ?? row.id}
+          pagination={filteredRows.length > pageSizes[0] ? { pageSizes, value: page, onChange: (next) => onViewChange({ page: next }) } : false}
+          sorting={{ value: sort, onChange: (next) => onViewChange({ sort: next }) }}
+          tableClassName="min-w-[650px]" className={makeupTable}
+          onRowClick={openDetails} renderCompactRow={renderCard}
+        />
+      )}
+      {open && (
+        <Modal title={open.name || 'Client'} subtitle={<>Job order {open.jobOrder || open.id} · {serviceNames(open)} · {status(open)}</>}
+          icon={Paintbrush} onClose={() => setOpenKey(null)} footer={renderAction?.(open)}>
+          <MakeupClientDetails row={open} />
+        </Modal>
+      )}
     </section>
   );
 }
 
-function MakeupAssignmentCard({ row, selected = false, disabled, onToggle, children }: {
-  row: MakeupAssignment; selected?: boolean; disabled: boolean; onToggle: () => void; children?: ReactNode;
+function MakeupStatus({ row }: { row: MakeupAssignment }) {
+  const highlight = row.state === 'in_progress' || row.state === 'completed';
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1.5 border px-2 py-0.5 font-mono text-[11px] font-bold uppercase ${
+      highlight ? 'border-gold bg-gold-wash text-gold-soft' : 'border-line bg-canvas text-ink/80'
+    }`}>
+      {row.state === 'completed' && <CircleCheck className="size-3.5" aria-hidden="true" />}
+      {row.state === 'in_progress' && <span className="size-1.5 bg-gold" aria-hidden="true" />}
+      {status(row)}
+    </span>
+  );
+}
+
+function MakeupEmptyState({ kind, failed, filtered }: { kind: MakeupClientsViewProps['kind']; failed?: boolean; filtered?: boolean }) {
+  const Icon = failed ? Paintbrush : filtered ? Search : kind === 'completed' ? CircleCheck : kind === 'waiting' ? Users : Paintbrush;
+  const title = failed ? 'Clients could not be loaded' : filtered ? 'No matching clients' : kind === 'completed'
+    ? 'No completed services' : kind === 'waiting' ? 'No clients waiting' : 'No active assignments';
+  const message = failed ? 'Use Refresh to try again.' : filtered ? 'Try a different search or clear the filters.'
+    : kind === 'completed' ? 'Choose another date to review completed services.'
+      : kind === 'waiting' ? 'Clients appear here when they are ready for makeup or grooming.'
+        : 'New assignments will appear here as they are made.';
+  return (
+    <div className="mx-auto flex max-w-sm flex-col items-center gap-2 px-2 py-5 text-center">
+      <Icon className="size-6 text-gold" aria-hidden="true" />
+      <p className="text-sm font-black uppercase tracking-wide text-ink">{title}</p>
+      <p className="text-sm text-ink/75">{message}</p>
+    </div>
+  );
+}
+
+function MakeupClientCard({ row, onDetails, children }: {
+  row: MakeupAssignment; onDetails: () => void; children?: ReactNode;
 }) {
   const look = makeupLookLabel(row.look) || row.look;
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const active = row.state === 'claimed' || row.state === 'in_progress';
   return (
-    <article className={`flex min-w-0 flex-col gap-4 border-2 bg-panel p-4 text-ink sm:p-5 ${
-      selected ? 'border-gold shadow-lux-gold' : 'border-line shadow-lux'
-    }`}>
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
-        <span className="font-mono text-xs font-black text-gold-soft">{row.jobOrder || row.id}</span>
-        <span className={`border px-2 py-0.5 font-mono text-[10px] font-black uppercase tracking-wider ${
-          row.state === 'in_progress' ? 'border-gold bg-gold text-on-gold' : 'border-line text-ink'
-        }`}>{status(row)}</span>
-      </header>
-      <div className="min-w-0 space-y-1 wrap-break-word">
-        <h3 className="text-lg font-black uppercase">{row.name}</h3>
-        <p className="text-sm font-bold">{serviceNames(row)}</p>
-        <p className="text-xs text-neutral-500">{row.artistName || 'Unassigned'}</p>
-        {requiresConfirmation(row) && <p className="text-xs font-bold text-gold-soft">Confirmation required</p>}
-        {(look || (!selected && row.lookNote)) && <div className="border border-gold bg-gold-wash px-3 py-2 text-xs text-gold-soft">
-          {look && <p className="font-bold">{look}</p>}
-          {!selected && row.lookNote && <p>Client note</p>}
-        </div>}
-        {selected && row.lookNote && (
-          <dl className="space-y-1 pt-2">
-            <dt className="text-xs font-bold text-ink">Client Note:</dt>
-            <dd className="whitespace-pre-wrap border border-gold bg-gold-wash px-3 py-2 text-sm text-ink">{row.lookNote}</dd>
-          </dl>
-        )}
+    <article className={`${stationCard} min-w-0 space-y-3 text-ink ${row.state === 'in_progress' ? 'outline outline-gold/60' : ''}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-mono text-xs text-ink/75">Job order <span className="font-bold text-gold-soft">{row.jobOrder || row.id}</span></p>
+        <MakeupStatus row={row} />
       </div>
-      {selected && <button type="button" onClick={() => setDetailsOpen(true)}
-        className="self-start min-h-9 px-3 border border-line bg-canvas text-xs font-bold text-gold-soft cursor-pointer hover:border-gold">
-        Client details
-      </button>}
-      {detailsOpen && (
-        <Modal title={row.name || 'Client'} subtitle={<>Job Order № {row.jobOrder || row.id} · {serviceNames(row)} · {status(row)}</>}
-          icon={Paintbrush} onClose={() => setDetailsOpen(false)}>
-          <MakeupClientDetails row={row} />
-        </Modal>
+      <div className="space-y-1 wrap-break-word">
+        <h3 className="text-lg leading-tight font-black uppercase">{row.name || 'Client'}</h3>
+        <p className="text-sm">{serviceNames(row)}</p>
+        {row.state === 'waiting' && row.packageName && <p className="text-sm text-ink/75">{row.packageName}</p>}
+        {row.artistName && <p className="flex items-center gap-2 text-sm text-ink/75">
+          <UserRound className="size-4 shrink-0 text-gold-soft" aria-hidden="true" /> {row.artistName}
+        </p>}
+        {row.state === 'completed' && <p className="text-sm text-ink/75">{dateTime(row.completedAt)}</p>}
+        {row.state !== 'completed' && requiresConfirmation(row) && <p className="text-sm font-semibold text-gold-soft">Confirmation required</p>}
+      </div>
+      {row.state !== 'completed' && (look || row.lookNote) && (
+        <div className="space-y-1 border border-gold bg-gold-wash px-3 py-2 text-sm wrap-break-word">
+          <p className="font-semibold text-gold-soft">{look || 'Client note'}</p>
+          {row.lookNote && <p className={active ? 'whitespace-pre-wrap' : 'line-clamp-2'}>{row.lookNote}</p>}
+        </div>
       )}
-      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line pt-3">
+      {active && !row.eligible && <p className="text-sm text-ink/75">Registration or payment is no longer eligible.</p>}
+      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
         {children}
-        <button type="button" disabled={disabled} onClick={onToggle} className={selected
-          ? 'min-h-10 px-3 text-xs font-bold text-gold-soft underline disabled:opacity-40' : `${stationButton} w-full`}>
-          {selected ? 'Deselect' : 'Select'}
+        <button type="button" onClick={onDetails} aria-label={`View details for ${row.name || 'client'}`} className={makeupSecondary}>
+          Details <ArrowUpRight className="size-4" aria-hidden="true" />
         </button>
       </div>
     </article>
@@ -262,7 +312,7 @@ function TableFilter({ name, value, onChange, options }: {
 }) {
   return (
     <select aria-label={`Filter by ${name.toLowerCase()}`} value={value} onChange={(event) => onChange(event.target.value)}
-      className={`${tableFilterControl} ${value ? 'border-gold bg-gold-wash' : ''}`}>
+      className={`${makeupField} max-w-full ${value ? 'border-gold bg-gold-wash' : ''}`}>
       <option value="">All {name === 'Status' ? 'statuses' : name.toLowerCase() + 's'}</option>
       {value && !options.some(([id]) => value === id) && <option value={value}>{value}</option>}
       {options.map(([id, label]) => <option value={id} key={id}>{label}</option>)}
@@ -270,14 +320,13 @@ function TableFilter({ name, value, onChange, options }: {
   );
 }
 
-function MakeupClientDetails({ row, children }: { row: MakeupAssignment; children?: ReactNode }) {
+function MakeupClientDetails({ row }: { row: MakeupAssignment }) {
   const { data, error } = useWorkflowData<MakeupDetails>(`/makeup/${encodeURIComponent(row.id)}/details`);
   const details = data?.details;
   const look = row.look || details?.look;
   const note = row.lookNote || details?.lookNote;
   return (
-    <div className="space-y-3 break-words text-sm">
-      <h3 className="font-black">{row.name}</h3>
+    <div className="space-y-4 font-sans text-sm wrap-break-word">
       <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
         <div><dt className="font-bold">Job Order №</dt><dd>{row.jobOrder || row.id}</dd></div>
         {row.studentId && <div><dt className="font-bold">Student ID</dt><dd>{row.studentId}</dd></div>}
@@ -310,7 +359,6 @@ function MakeupClientDetails({ row, children }: { row: MakeupAssignment; childre
       </div>
       {row.state !== 'waiting' && row.state !== 'completed' && !row.eligible
         && <p className="font-bold text-red-700">Registration or payment is no longer eligible.</p>}
-      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
       {error && <p role="alert" className="text-red-700">{error}</p>}
       {!data && !error && <p role="status" className="text-neutral-600">Loading client details…</p>}
       {!!data?.history.length && <div>
