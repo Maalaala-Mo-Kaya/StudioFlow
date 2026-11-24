@@ -16,6 +16,8 @@ interface CashierTableProps {
   loading: boolean;
   filtered: boolean;
   onOpenPayment: (reg: Registration) => void;
+  onOpenEdit?: (reg: Registration) => void;
+  editableIds: ReadonlySet<string>;
   onOpenDelete?: (reg: Registration) => void;
   deletableIds: ReadonlySet<string>;
   onOpenPrint: (reg: Registration) => void;
@@ -30,7 +32,7 @@ interface CashierTableProps {
 }
 
 export function CashierTable({
-  registrations, loading, filtered, onOpenPayment, onOpenDelete, deletableIds, onOpenPrint, onOpenRelease, onOpenAddOn,
+  registrations, loading, filtered, onOpenPayment, onOpenEdit, editableIds, onOpenDelete, deletableIds, onOpenPrint, onOpenRelease, onOpenAddOn,
   pickupMode = false, onOpenNotify, visibleColumns,
 }: CashierTableProps) {
   const columns: DataTableColumn<Registration>[] = [
@@ -135,6 +137,8 @@ export function CashierTable({
               <MessageSquare className="w-3.5 h-3.5" /> Notify
             </button>
           )}
+          {onOpenEdit && <RecordActionButton variant="edit" recordName={`client ${formatClientName(reg)}`}
+            disabled={!editableIds.has(reg.id) || !!reg.job_order_no || reg.paid_amount !== 0} onClick={() => onOpenEdit(reg)} />}
           {reg.status === 'pending_payment' ? (
             <button
               type="button"
@@ -217,6 +221,7 @@ export function CashierTable({
       renderCompactRow={(reg) => (
         <CashierMobileCard registration={reg} onOpenPayment={onOpenPayment}
           onOpenPrint={onOpenPrint} onOpenRelease={onOpenRelease} onOpenAddOn={onOpenAddOn}
+          onOpenEdit={onOpenEdit} canEdit={editableIds.has(reg.id) && !reg.job_order_no && reg.paid_amount === 0}
           onOpenDelete={deletableIds.has(reg.id) ? onOpenDelete : undefined}
           onOpenNotify={pickupMode ? onOpenNotify : undefined} />
       )}

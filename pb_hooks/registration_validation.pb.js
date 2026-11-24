@@ -133,7 +133,9 @@ onRecordCreateRequest((e) => {
 onRecordUpdateRequest((e) => {
   const before = e.record.original();
   const changed = (field) => e.record.getString(field) !== before.getString(field);
-  if (changed("gender") && e.record.getString("gender") && !["male", "female"].includes(e.record.getString("gender"))) {
+  const gender = e.record.getString("gender");
+  const cashierEdit = Object.hasOwn(e.requestInfo().body || {}, "cashier_edit_version");
+  if (changed("gender") && (gender || cashierEdit) && !["male", "female"].includes(gender)) {
     throw new BadRequestError("Gender must be Male or Female.");
   }
   if (changed("mobile_number")) {
@@ -161,7 +163,9 @@ onRecordUpdateRequest((e) => {
   const before = e.record.original();
   const changed = (field) => e.record.getString(field) !== before.getString(field);
   const packageChanged = changed("package");
-  if (!packageChanged && !changed("package_options")) return e.next();
+  const body = e.requestInfo().body || {};
+  const cashierGenderChanged = Object.hasOwn(body, "cashier_edit_version") && changed("gender");
+  if (!packageChanged && !changed("package_options") && !cashierGenderChanged) return e.next();
   const status = before.getString("status");
   if (["released", "cancelled"].includes(status)) {
     throw new BadRequestError(status === "released"
@@ -170,7 +174,13 @@ onRecordUpdateRequest((e) => {
   }
   const packageId = e.record.getString("package");
   const pkg = packageId ? e.app.findFirstRecordByFilter("packages", "id = {:id}", { id: packageId }) : null;
-  const sent = changed("package_options") ? e.record.getString("package_options") : "[]";
+  let sent = "[]";
+  if (changed("package_options") || (cashierGenderChanged && Object.hasOwn(body, "package_options"))) {
+    sent = e.record.getString("package_options");
+  } else if (cashierGenderChanged && !packageChanged) {
+    const saved = require(__hooks + "/studio_workflow.js").json(before, "package_options");
+    if (Array.isArray(saved)) sent = saved.map((group) => ({ group: group.group_id, choices: group.choices }));
+  }
   const result = pkg
     ? require(__hooks + "/studio_package_options.js").check(pkg, e.record.getString("gender"), sent)
     : { value: [] };

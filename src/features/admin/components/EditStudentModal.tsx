@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { createPortal } from 'react-dom';
 import { RecordActionButton } from '../../../components/common/RecordActionButton';
+import { Modal } from '../../../components/common/Modal';
+import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import type {
   AddOn,
   RegistrationAddOn,
@@ -12,6 +13,8 @@ import type {
   FramingStatus,
   PhotoStatus,
   Gender,
+  Level,
+  SchoolCourse,
 } from '../../../types';
 import { formatCurrency } from '../../../utils/formatters';
 import { getRegistrationAddOns, sumAddOnAmounts } from '../../../utils/registrationAddOns';
@@ -21,6 +24,8 @@ import { MAKEUP_LOOKS, MAKEUP_LOOK_NOTE_MAX } from '../../../constants/makeupLoo
 import { discountCents, revenueTerms } from '../../../utils/revenue';
 import { PackageOptionsPicker } from '../../../components/common/PackageOptionsPicker';
 import { PhotographyProgress } from '../../photographer/components/PhotographyProgress';
+import { CashierEditHistory } from './CashierEditHistory';
+import { mobilePattern, registrationNameLimit } from '../../registration/registrationValidation';
 import {
   chosenOptionLines, keepValidPicks, missingPicks, optionGroups, picksFromSaved, picksPayload, type OptionPicks,
 } from '../../../utils/packageOptions';
@@ -41,6 +46,7 @@ interface EditStudentModalProps {
   organizations: Organization[];
   courses: Course[];
   packages: Package[];
+  cashierCatalog?: { levels: Level[]; schoolCourses: SchoolCourse[] };
   /** Add-on catalog: active items can be added to the order. */
   addOnCatalog?: AddOn[];
   onClose: () => void;
@@ -52,6 +58,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   organizations,
   courses,
   packages,
+  cashierCatalog,
   addOnCatalog = [],
   onClose,
   onSave,
@@ -65,6 +72,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [mobileNumber, setMobileNumber] = useState(reg.mobile_number || '');
   const [email, setEmail] = useState(reg.email || '');
   const [organizationId, setOrganizationId] = useState(reg.organization || '');
+  const [levelId, setLevelId] = useState(reg.level || '');
   const [courseId, setCourseId] = useState(reg.course || '');
   const [packageId, setPackageId] = useState(reg.package || '');
   const [optionPicks, setOptionPicks] = useState<OptionPicks>(() => picksFromSaved(reg.package_options));
@@ -89,6 +97,9 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [makeupLook, setMakeupLook] = useState(reg.makeup_look || '');
   const [makeupLookNote, setMakeupLookNote] = useState(reg.makeup_look_note || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [reviewAmount, setReviewAmount] = useState('');
   const [reviewReason, setReviewReason] = useState('');
   const [studioDiscount, setStudioDiscount] = useState((reg.revenue_discount?.studio ?? 0) / 100);
@@ -131,8 +142,9 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   // sale stay as they are, even if the package's options were edited since.
   const groups = optionGroups(selectedPkg);
   const validPicks = keepValidPicks(groups, gender, optionPicks);
-  const sendOptions = packageChanged || optionsTouched;
-  const optionsProblem = sendOptions && gender ? missingPicks(groups, gender, validPicks) : null;
+  const sendOptions = packageChanged || optionsTouched || (!!cashierCatalog && groups.length > 0 && gender !== (reg.gender || ''));
+  const optionsProblem = sendOptions && gender ? missingPicks(groups, gender, validPicks)
+    : cashierCatalog && sendOptions && groups.length ? 'Select a gender to choose the package options.' : null;
   const savedOptionLines = chosenOptionLines(reg.package_options);
 
   // Same rule as the server: when the package or add-ons change, the automatic add-on for clients
@@ -167,10 +179,37 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const refundDue = priceChanged && !isCancelled ? Math.max(0, paid - currentTotal) : 0;
   const beforePhotography = ['pending_payment', 'paid'].includes(reg.status);
   const canCorrectMua = beforePhotography && !reg.makeup_state;
+  const assignedCourses = cashierCatalog?.schoolCourses.filter((assignment) => assignment.school_id === organizationId && assignment.level === levelId);
+  const schoolChoices = cashierCatalog ? organizations.filter((org) => org.is_active || org.id === reg.organization) : organizations;
+  const levelChoices = cashierCatalog?.levels.filter((level) => level.organization === organizationId) ?? [];
+  const courseChoices = assignedCourses ? courses.filter((course) => assignedCourses.some((assignment) => assignment.course_id === course.id)
+    || (organizationId === reg.organization && levelId === reg.level && course.id === reg.course)) : courses;
+  const academicChanged = organizationId !== (reg.organization || '') || levelId !== (reg.level || '') || courseId !== (reg.course || '');
+  const session = sessionTypes.find((type) => type.id === sessionTypeId);
+  const requireEvent = !!cashierCatalog && !!session?.on_location
+    && (sessionTypeId !== (reg.session_type || '') || eventDate !== (reg.event_date?.slice(0, 10) || '') || eventVenue !== (reg.event_venue || ''));
+
+  function requestClose() {
+    if (isSubmitting) return;
+    if (cashierCatalog && dirty) setConfirmDiscard(true);
+    else onClose();
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (optionsProblem) return;
+    setSaveError('');
+    if (cashierCatalog) {
+      const names = [familyName.trim(), givenName.trim(), middleName.trim()];
+      if (!names[0] || !names[1] || names.some((name) => Array.from(name).length > registrationNameLimit)) {
+        setSaveError(`Enter the client's given and family names. Names can be up to ${registrationNameLimit} characters each.`);
+        return;
+      }
+      if (mobileNumber.trim() !== (reg.mobile_number || '') && !mobilePattern.test(mobileNumber.trim().replace(/[ -]/g, ''))) {
+        setSaveError('Enter a valid Philippine mobile number, such as 0917-000-0000.');
+        return;
+      }
+    }
     setIsSubmitting(true);
     try {
       await onSave(reg.id, {
@@ -189,51 +228,38 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
           student_id: studentId.trim(),
           section: section.trim(),
           organization: organizationId,
+          ...(cashierCatalog ? { level: levelId } : {}),
           course: courseId,
         }),
         package: packageId,
         ...(sendOptions ? { package_options: picksPayload(validPicks) } : {}),
-        ...(!itemsChanged && reviewAmount !== '' ? { review_mua_amount: Number(reviewAmount), review_revenue_reason: reviewReason.trim() } : {}),
-        ...(canEditAddOns && discountChanged ? { order_discount: { studio: studioDiscount, mua: muaDiscount, reason: discountReason.trim() } } : {}),
+        ...(!cashierCatalog && !itemsChanged && reviewAmount !== '' ? { review_mua_amount: Number(reviewAmount), review_revenue_reason: reviewReason.trim() } : {}),
+        ...(!cashierCatalog && canEditAddOns && discountChanged ? { order_discount: { studio: studioDiscount, mua: muaDiscount, reason: discountReason.trim() } } : {}),
         ...(addOnsChanged ? { add_ons: addOns.map((item) => (item.id ? { id: item.id } : { code: item.code, name: item.name })) } : {}),
-        pictorial_date: pictorialDate ? `${pictorialDate} 00:00:00.000Z` : '',
-        status,
-        framing_status: framingStatus,
-        photo_status: photoStatus,
+        ...(!cashierCatalog ? {
+          pictorial_date: pictorialDate ? `${pictorialDate} 00:00:00.000Z` : '',
+          status, framing_status: framingStatus, photo_status: photoStatus,
+          mua_correction: canCorrectMua && muaCorrection ? muaCorrection : undefined,
+        } : {}),
         notes: notes.trim(),
         makeup_look: makeupLook,
         makeup_look_note: makeupLookNote.trim(),
-        mua_correction: canCorrectMua && muaCorrection ? muaCorrection : undefined,
       });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not save this registration.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-obsidian/80 backdrop-blur-xs animate-modal">
-      <div className="w-full max-w-2xl lg:max-w-4xl bg-canvas border-2 border-line shadow-lux p-6 sm:p-8 max-h-[90vh] overflow-y-auto space-y-6 font-mono text-xs transition-all">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b-2 border-line">
-          <div>
-            <h3 className="font-mono text-sm font-black uppercase tracking-wider text-ink">
-              Edit {walkIn ? 'Walk-in Client' : 'Student'} Record // JO № {reg.job_order_no}
-            </h3>
-            <p className="text-[11px] text-neutral-500">
-              Update participant details, academic affiliations, package selection, and status.
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center font-bold text-sm bg-panel border border-line hover:bg-gold hover:text-on-gold transition-colors cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-
-        <PhotographyProgress registration={reg} audit />
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <fieldset className="border border-line p-3 space-y-2">
+  return (
+    <>
+      <Modal title={cashierCatalog ? 'Edit Client' : `Edit ${walkIn ? 'Walk-in Client' : 'Student'} Record`}
+        subtitle={reg.job_order_no ? `JO № ${reg.job_order_no}` : `Registration ${reg.id}`}
+        onClose={requestClose} busy={isSubmitting} size="xl">
+        {!cashierCatalog && <PhotographyProgress registration={reg} audit />}
+        <form onSubmit={handleSubmit} onChange={() => setDirty(true)} className="space-y-4">
+          {!cashierCatalog && <fieldset className="border border-line p-3 space-y-2">
             <legend className="px-1 font-black uppercase">Revenue review and discounts</legend>
             {reg.revenue_review && <p>Verified by {reg.revenue_review.by} · {reg.revenue_review.reason}</p>}
             {(revenueTerms(reg).unallocated > 0 || reg.revenue_review) && !itemsChanged && <>
@@ -258,40 +284,40 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
               </label>}
               {priceChanged && <p>New total {formatCurrency(currentTotal, { exact: true })} · Balance {formatCurrency(currentBalance, { exact: true })}</p>}
             </>}
-          </fieldset>
+          </fieldset>}
           {/* Row 1: Name Fields */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block font-black uppercase text-ink mb-1">
+              <label htmlFor="edit-student-family" className="block font-black uppercase text-ink mb-1">
                 Family Name <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 required
-                value={familyName}
+                id="edit-student-family" value={familyName}
                 onChange={(e) => setFamilyName(e.target.value)}
                 className="w-full p-2 bg-panel border border-line uppercase"
               />
             </div>
             <div>
-              <label className="block font-black uppercase text-ink mb-1">
+              <label htmlFor="edit-student-given" className="block font-black uppercase text-ink mb-1">
                 Given Name <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 required
-                value={givenName}
+                id="edit-student-given" value={givenName}
                 onChange={(e) => setGivenName(e.target.value)}
                 className="w-full p-2 bg-panel border border-line uppercase"
               />
             </div>
             <div>
-              <label className="block font-black uppercase text-ink mb-1">
+              <label htmlFor="edit-student-middle" className="block font-black uppercase text-ink mb-1">
                 Middle Name
               </label>
               <input
                 type="text"
-                value={middleName}
+                id="edit-student-middle" value={middleName}
                 onChange={(e) => setMiddleName(e.target.value)}
                 className="w-full p-2 bg-panel border border-line uppercase"
               />
@@ -300,7 +326,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
               <label htmlFor="edit-student-gender" className="block font-black uppercase text-ink mb-1">Gender</label>
               <select id="edit-student-gender" value={gender} onChange={(e) => setGender(e.target.value as Gender | '')}
                 className="w-full p-2 bg-panel border border-line">
-                <option value="">Unset (legacy record)</option>
+                <option value="" disabled={!!cashierCatalog && !!reg.gender}>Unset (legacy record)</option>
                 <option value="male">Male</option>
                 <option value="female">Female</option>
               </select>
@@ -311,23 +337,23 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
           <div className={`grid grid-cols-1 gap-3 ${walkIn ? 'sm:grid-cols-2' : 'sm:grid-cols-4'}`}>
             {!walkIn && <>
             <div>
-              <label className="block font-black uppercase text-ink mb-1">
+              <label htmlFor="edit-student-id" className="block font-black uppercase text-ink mb-1">
                 Student ID
               </label>
               <input
                 type="text"
-                value={studentId}
+                id="edit-student-id" value={studentId}
                 onChange={(e) => setStudentId(e.target.value)}
                 className="w-full p-2 bg-panel border border-line"
               />
             </div>
             <div>
-              <label className="block font-black uppercase text-ink mb-1">
+              <label htmlFor="edit-student-section" className="block font-black uppercase text-ink mb-1">
                 Section
               </label>
               <input
                 type="text"
-                value={section}
+                id="edit-student-section" value={section}
                 onChange={(e) => setSection(e.target.value)}
                 className="w-full p-2 bg-panel border border-line uppercase"
               />
@@ -340,18 +366,19 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
               <input
                 id="edit-student-mobile"
                 type="tel"
+                required={!!cashierCatalog && mobileNumber !== (reg.mobile_number || '')}
                 value={mobileNumber}
                 onChange={(e) => setMobileNumber(e.target.value)}
                 className="w-full p-2 bg-panel border border-line"
               />
             </div>
             <div>
-              <label className="block font-black uppercase text-ink mb-1">
+              <label htmlFor="edit-student-email" className="block font-black uppercase text-ink mb-1">
                 Email Address <span className="font-normal text-neutral-500">(Optional)</span>
               </label>
               <input
                 type="email"
-                value={email}
+                id="edit-student-email" value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full p-2 bg-panel border border-line"
               />
@@ -377,13 +404,17 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                   className="w-full p-2 bg-panel border border-line" />
               </div>
               <div>
-                <label htmlFor="edit-walkin-date" className="block font-black uppercase text-ink mb-1">Event Date</label>
-                <input id="edit-walkin-date" type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)}
+                <label htmlFor="edit-walkin-date" className="block font-black uppercase text-ink mb-1">
+                  Event Date {requireEvent && <span aria-hidden="true" className="text-red-600">*</span>}
+                </label>
+                <input id="edit-walkin-date" type="date" required={requireEvent} value={eventDate} onChange={(e) => setEventDate(e.target.value)}
                   className="w-full p-2 bg-panel border border-line" />
               </div>
               <div>
-                <label htmlFor="edit-walkin-venue" className="block font-black uppercase text-ink mb-1">Venue</label>
-                <input id="edit-walkin-venue" value={eventVenue} maxLength={200} onChange={(e) => setEventVenue(e.target.value)}
+                <label htmlFor="edit-walkin-venue" className="block font-black uppercase text-ink mb-1">
+                  Venue {requireEvent && <span aria-hidden="true" className="text-red-600">*</span>}
+                </label>
+                <input id="edit-walkin-venue" value={eventVenue} required={requireEvent} maxLength={200} onChange={(e) => setEventVenue(e.target.value)}
                   className="w-full p-2 bg-panel border border-line" />
               </div>
             </div>
@@ -393,31 +424,53 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
           <div className={`grid grid-cols-1 gap-3 ${walkIn ? '' : 'sm:grid-cols-3'}`}>
             {!walkIn && <>
             <div>
-              <label className="block font-black uppercase text-ink mb-1">
-                School / Organization
+              <label htmlFor="edit-student-school" className="block font-black uppercase text-ink mb-1">
+                School / Organization {cashierCatalog && academicChanged && <span aria-hidden="true" className="text-red-600">*</span>}
               </label>
               <select
                 value={organizationId}
-                onChange={(e) => setOrganizationId(e.target.value)}
+                id="edit-student-school"
+                required={!!cashierCatalog && academicChanged}
+                onChange={(e) => {
+                  setOrganizationId(e.target.value);
+                  if (cashierCatalog) { setLevelId(''); setCourseId(''); }
+                }}
                 className="w-full p-2 bg-panel border border-line"
               >
-                {organizations.map((org) => (
+                {cashierCatalog && <option value="">Choose a school</option>}
+                {schoolChoices.map((org) => (
                   <option key={org.id} value={org.id}>
                     {org.code ? `${org.code} - ${org.name}` : org.name}
                   </option>
                 ))}
               </select>
             </div>
+            {cashierCatalog && (
+              <div>
+                <label htmlFor="edit-student-level" className="block font-black uppercase text-ink mb-1">
+                  Academic Level {academicChanged && <span aria-hidden="true" className="text-red-600">*</span>}
+                </label>
+                <select id="edit-student-level" className="w-full p-2 bg-panel border border-line"
+                  value={levelId} required={academicChanged}
+                  onChange={(event) => { setLevelId(event.target.value); setCourseId(''); }}>
+                  <option value="">Choose a level</option>
+                  {levelChoices.map((level) => <option key={level.id} value={level.id}>{level.name}</option>)}
+                </select>
+              </div>
+            )}
             <div>
-              <label className="block font-black uppercase text-ink mb-1">
-                Degree Program / Course
+              <label htmlFor="edit-student-course" className="block font-black uppercase text-ink mb-1">
+                Degree Program / Course {cashierCatalog && academicChanged && <span aria-hidden="true" className="text-red-600">*</span>}
               </label>
               <select
                 value={courseId}
+                id="edit-student-course"
+                required={!!cashierCatalog && academicChanged}
                 onChange={(e) => setCourseId(e.target.value)}
                 className="w-full p-2 bg-panel border border-line"
               >
-                {courses.map((c) => (
+                {cashierCatalog && <option value="">Choose a course</option>}
+                {courseChoices.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.code ? `${c.code} - ${c.name}` : c.name}
                   </option>
@@ -425,7 +478,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
               </select>
             </div>
             </>}
-            <div>
+            {!cashierCatalog && <div>
               <label htmlFor="edit-student-pictorial-date" className="block font-black uppercase text-ink mb-1">
                 Scheduled Pictorial Date
               </label>
@@ -436,23 +489,26 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 onChange={(e) => setPictorialDate(e.target.value)}
                 className="w-full p-2 bg-panel border border-line"
               />
-            </div>
+            </div>}
           </div>
 
           {/* Row 4: Package Selection & Amounts */}
           <div className="p-3 bg-panel border border-line space-y-2">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
               <div>
-                <label className="block font-black uppercase text-ink mb-1">
-                  Assigned Package
+                <label htmlFor="edit-student-package" className="block font-black uppercase text-ink mb-1">
+                  Assigned Package {cashierCatalog && <span aria-hidden="true" className="text-red-600">*</span>}
                 </label>
                 <select
                   value={packageId}
+                  id="edit-student-package"
+                  required={!!cashierCatalog}
                   onChange={(e) => setPackageId(e.target.value)}
                   disabled={!canEditAddOns}
                   title={!canEditAddOns ? (isCancelled ? 'Restore the job order to change its package.' : 'Released orders can\'t change package.') : undefined}
                   className="w-full p-2 bg-canvas border border-line font-bold disabled:opacity-60"
                 >
+                  {cashierCatalog && <option value="">Choose a package</option>}
                   {packageChoices.map((pkg) => (
                     <option key={pkg.id} value={pkg.id}>
                       {pkg.code} - {pkg.name} ({formatCurrency(pkg.amount)})
@@ -484,7 +540,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                   <p className="text-neutral-600">Set the client's gender to choose options.</p>
                 ) : (
                   <PackageOptionsPicker groups={groups} gender={gender} picks={validPicks} disabled={!canEditAddOns}
-                    onChange={(picks) => { setOptionPicks(picks); setOptionsTouched(true); }}
+                    onChange={(picks) => { setOptionPicks(picks); setOptionsTouched(true); setDirty(true); }}
                     error={optionsProblem ?? undefined} />
                 )}
               </div>
@@ -517,7 +573,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                           <span title={isNew ? 'Today\'s catalog price' : 'Price it was sold at'}>{formatCurrency(item.amount, { exact: true })}</span>
                           {canEditAddOns && (
                             <RecordActionButton variant="delete" recordName={item.name}
-                              onClick={() => setAddOns((current) => current.filter((_, i) => i !== index))} />
+                              onClick={() => { setDirty(true); setAddOns((current) => current.filter((_, i) => i !== index)); }} />
                           )}
                         </span>
                       </li>
@@ -537,7 +593,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                         </option>
                       ))}
                     </select>
-                    <button type="button" onClick={addAddOn} disabled={!addOnToAdd}
+                    <button type="button" onClick={() => { addAddOn(); setDirty(true); }} disabled={!addOnToAdd}
                       className="btn-tactile px-4 py-2 bg-gold text-on-gold border border-line font-black uppercase cursor-pointer disabled:opacity-40">
                       Add
                     </button>
@@ -572,7 +628,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 </p>
               )}
             </div>
-            {beforePhotography && (
+            {!cashierCatalog && beforePhotography && (
               <div className="space-y-1 border-t border-neutral-200 pt-2">
                 <p>Saved MUA requirement: {reg.makeup_service || 'No MUA required'}</p>
                 {canCorrectMua ? (
@@ -593,7 +649,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 )}
               </div>
             )}
-            {(reg.makeup_service || reg.makeup_look || muaCorrection === 'required') && (
+            {(reg.makeup_service || reg.makeup_look || muaCorrection === 'required' || (!!cashierCatalog && bringsMakeup)) && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 border-t border-neutral-200 pt-2">
                 <label className="block">
                   <span className="font-black uppercase">Preferred look</span>
@@ -613,7 +669,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
           </div>
 
           {/* Row 5: Operational & Floor Statuses */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {!cashierCatalog && <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className="block font-black uppercase text-ink mb-1">
                 Queue Status
@@ -679,16 +735,16 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                 <option value="ready_to_print">Ready to Print</option>
               </select>
             </div>
-          </div>
+          </div>}
 
           {/* Notes */}
           <div>
-            <label className="block font-black uppercase text-ink mb-1">
-              Admin Notes / Special Instructions
+            <label htmlFor="edit-student-notes" className="block font-black uppercase text-ink mb-1">
+              {cashierCatalog ? 'Notes / Special Instructions' : 'Admin Notes / Special Instructions'}
             </label>
             <input
               type="text"
-              value={notes}
+              id="edit-student-notes" value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="e.g. VIP express shoot, custom frame sizing requested"
               className="w-full p-2 bg-panel border border-line"
@@ -704,11 +760,14 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
             </p>
           )}
 
-          {/* Action Buttons */}
+          {!cashierCatalog && <CashierEditHistory registrationId={reg.id} />}
+          {optionsProblem && <p role="alert" className="font-bold text-red-600">{optionsProblem}</p>}
+          {saveError && <p role="alert" className="font-bold text-red-600">{saveError}</p>}
           <div className="flex gap-3 pt-3 border-t-2 border-line">
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
+              disabled={isSubmitting}
               className="flex-1 py-2.5 font-bold uppercase tracking-wider bg-panel text-ink border-2 border-line shadow-lux hover:bg-neutral-100 transition-colors btn-tactile cursor-pointer"
             >
               Cancel
@@ -718,12 +777,14 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
               disabled={isSubmitting || !!optionsProblem}
               className="flex-1 py-2.5 font-bold uppercase tracking-wider bg-obsidian text-gold border-2 border-line shadow-lux hover:bg-neutral-800 disabled:opacity-50 transition-all btn-tactile cursor-pointer"
             >
-              {isSubmitting ? 'Saving Changes...' : 'Save Student Record'}
+              {isSubmitting ? 'Saving Changes...' : cashierCatalog ? 'Save Changes' : 'Save Student Record'}
             </button>
           </div>
         </form>
-      </div>
-    </div>,
-    document.body
+      </Modal>
+      <ConfirmModal isOpen={confirmDiscard} title="Discard unsaved changes?"
+        message="Your changes to this registration will be lost." confirmText="Discard Changes"
+        cancelText="Keep Editing" onClose={() => setConfirmDiscard(false)} onConfirm={onClose} />
+    </>
   );
 };

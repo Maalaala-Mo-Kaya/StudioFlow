@@ -1,22 +1,22 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useEffectEvent, useLayoutEffect, useCallback, useRef } from 'react';
 import { ClientResponseError } from 'pocketbase';
 // The kiosk talks to the server as a guest, whoever is signed in on this browser.
 import { kioskPb as pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import type {
-  Organization,
-  Level,
-  SchoolCourse,
-  Package,
-  AddOn,
   Registration,
   MasterListItem,
 } from '../../types';
 import type { ClientKind } from '../../types';
 import { splitFullName } from '../../utils/formatters';
-import { useStudioSettings } from '../../hooks/useStudioSettings';
 import { useWorkflowData } from '../../hooks/useWorkflowData';
+import { randomId } from '../../utils/randomId';
+import {
+  activeKind, availableKinds as kindsIn, clearRegistrationDraft, readRegistrationDraft,
+  registrationDraftLifetime, saveRegistrationDraft, textFields, type RegistrationConfiguration, type RegistrationDraft, type RegistrationStepId,
+} from './registrationDraft';
 import { registrationAddOns } from './registrationAddOns';
+import { makeRegistrationQuote, recaptureSignature, reconcileRegistration, registrationTerms, termsKey } from './registrationRecovery';
 import { keepValidPicks, missingPicks, optionGroups, picksPayload, type OptionPicks } from '../../utils/packageOptions';
 import {
   emailPattern, mobilePattern, packageRequiredMessage, registrationFields, registrationNameLimit, validationProps,
@@ -25,59 +25,56 @@ import {
 
 export function useRegistrationForm() {
   const { toast } = useToast();
-  const studio = useStudioSettings();
-
-  // Client type. With only one type switched on it is chosen automatically.
-  const [chosenKind, setChosenKind] = useState<ClientKind | ''>('');
-  const availableKinds: ClientKind[] = [
-    ...(studio.schoolEnabled ? ['school' as const] : []),
-    ...(studio.walkinEnabled ? ['walkin' as const] : []),
-  ];
-  const clientKind: ClientKind | '' = availableKinds.length === 1
-    ? availableKinds[0]
-    : availableKinds.includes(chosenKind as ClientKind) ? chosenKind : '';
+  const [initial] = useState(readRegistrationDraft);
+  const [requestId, setRequestId] = useState(() => initial?.requestId ?? randomId());
+  const [stepId, setStepId] = useState<RegistrationStepId>(initial?.step ?? 'package');
+  const [reachedId, setReachedId] = useState<RegistrationStepId>(initial?.reached ?? 'package');
+  const [notices, setNotices] = useState(initial?.notices ?? []);
+  const [reviewNeeded, setReviewNeeded] = useState(initial?.reviewNeeded ?? false);
+  const [dismissedVersion, setDismissedVersion] = useState('');
+  const [refreshRequired, setRefreshRequired] = useState(false);
+  const [draftStored, setDraftStored] = useState(true);
+  const [registrationCatalog, setRegistrationCatalog] = useState<RegistrationConfiguration | null>(null);
+  const { data: published, error: catalogError, refresh: refreshCatalog } =
+    useWorkflowData<RegistrationConfiguration>('/registration-catalog', 8_000, false, 'studioflow-registration-catalog');
+  const pendingUpdate = !!registrationCatalog && !!published && registrationCatalog.version !== published.version;
+  const [chosenKind, setChosenKind] = useState<ClientKind | ''>(initial?.chosenKind ?? '');
+  const availableKinds = kindsIn(registrationCatalog);
+  const clientKind = activeKind(availableKinds, chosenKind);
   const isWalkIn = clientKind === 'walkin';
-  const [sessionTypeId, setSessionTypeId] = useState('');
-  const [eventDate, setEventDate] = useState('');
-  const [eventVenue, setEventVenue] = useState('');
-  const [clientOrg, setClientOrg] = useState('');
-  const [notes, setNotes] = useState('');
-  const selectedSession = studio.activeSessionTypes.find((type) => type.id === sessionTypeId);
-
-  // Reference Master Data
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [schoolCatalog, setSchoolCatalog] = useState<{
-    schoolId: string;
-    levels: Level[];
-    assignments: SchoolCourse[];
-    failed?: boolean;
-  } | null>(null);
-  const { data: registrationCatalog, error: catalogError, refresh: refreshCatalog } =
-    useWorkflowData<{ packages: Package[]; addOns: AddOn[] }>('/registration-catalog');
+  const [sessionTypeId, setSessionTypeId] = useState(initial?.sessionTypeId ?? '');
+  const [eventDate, setEventDate] = useState(initial?.eventDate ?? '');
+  const [eventVenue, setEventVenue] = useState(initial?.eventVenue ?? '');
+  const [clientOrg, setClientOrg] = useState(initial?.clientOrg ?? '');
+  const [notes, setNotes] = useState(initial?.notes ?? '');
+  const sessionTypes = registrationCatalog?.sessionTypes ?? [];
+  const selectedSession = sessionTypes.find((type) => type.id === sessionTypeId);
+  const walkinTerms = registrationTerms(registrationCatalog, 'walkin');
+  const organizations = registrationCatalog?.organizations ?? [];
   const packages = registrationCatalog?.packages ?? [];
   const addOnsList = registrationCatalog?.addOns ?? [];
   const [masterList, setMasterList] = useState<MasterListItem[]>([]);
 
   // Form Fields
-  const [familyName, setFamilyName] = useState('');
-  const [givenName, setGivenName] = useState('');
-  const [middleName, setMiddleName] = useState('');
-  const [gender, setGender] = useState('');
-  const [studentId, setStudentId] = useState('');
-  const [selectedOrgId, setSelectedOrgId] = useState('');
-  const [preferredLevelId, setPreferredLevelId] = useState('');
-  const [preferredCourseId, setPreferredCourseId] = useState('');
-  const [section, setSection] = useState('');
-  const [department, setDepartment] = useState('');
-  const [mobileNumber, setMobileNumber] = useState('');
-  const [email, setEmail] = useState('');
+  const [familyName, setFamilyName] = useState(initial?.familyName ?? '');
+  const [givenName, setGivenName] = useState(initial?.givenName ?? '');
+  const [middleName, setMiddleName] = useState(initial?.middleName ?? '');
+  const [gender, setGender] = useState(initial?.gender ?? '');
+  const [studentId, setStudentId] = useState(initial?.studentId ?? '');
+  const [selectedOrgId, setSelectedOrgId] = useState(initial?.selectedOrgId ?? '');
+  const [preferredLevelId, setPreferredLevelId] = useState(initial?.preferredLevelId ?? '');
+  const [preferredCourseId, setPreferredCourseId] = useState(initial?.preferredCourseId ?? '');
+  const [section, setSection] = useState(initial?.section ?? '');
+  const [department, setDepartment] = useState(initial?.department ?? '');
+  const [mobileNumber, setMobileNumber] = useState(initial?.mobileNumber ?? '');
+  const [email, setEmail] = useState(initial?.email ?? '');
 
-  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
-  const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
-  const [optionPicks, setOptionPicks] = useState<OptionPicks>({});
-  const [makeupLookNote, setMakeupLookNote] = useState('');
-  const [paymentType, setPaymentType] = useState<'full' | 'downpayment'>('full');
-  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(initial?.selectedPackageId ?? null);
+  const [selectedAddOns, setSelectedAddOns] = useState<string[]>(initial?.selectedAddOns ?? []);
+  const [optionPicks, setOptionPicks] = useState<OptionPicks>(initial?.optionPicks ?? {});
+  const [makeupLookNote, setMakeupLookNote] = useState(initial?.makeupLookNote ?? '');
+  const [paymentType, setPaymentType] = useState<'full' | 'downpayment'>(initial?.paymentType ?? 'full');
+  const [termsAccepted, setTermsAccepted] = useState(initial?.termsAccepted ?? false);
   const [signatureBlob, setSignatureBlob] = useState<Blob | null>(null);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
@@ -91,71 +88,21 @@ export function useRegistrationForm() {
   const submitting = useRef(false);
   const [submittedRecord, setSubmittedRecord] = useState<Registration | null>(null);
 
-  // 1. Initial Load of Reference Data
   useEffect(() => {
-    async function loadReferenceData() {
-      try {
-        const orgsRes = await pb.collection('organizations').getFullList<Organization>({
-          filter: 'is_active = true',
-          requestKey: null,
-        });
-        setOrganizations(orgsRes);
-
-        // Fetch master list safely (protected under staff auth / RA 10173)
-        try {
-          const masterRes = await pb.collection('master_lists').getFullList<MasterListItem>({
-            requestKey: null,
-          });
-          setMasterList(masterRes);
-        } catch {
-          setMasterList([]);
-        }
-      } catch (err) {
-        console.error('Failed to load initial form data:', err);
-      }
-    }
-    loadReferenceData();
+    let active = true;
+    void pb.collection('master_lists').getFullList<MasterListItem>().then((items) => {
+      if (active) setMasterList(items);
+    }).catch(() => { /* The staff-only roster may be unavailable on the kiosk. */ });
+    return () => { active = false; };
   }, []);
 
-  // Fetch the selected school's levels and assignments together. Ignore late results
-  // after switching schools so an old response cannot repopulate the dropdowns.
-  useEffect(() => {
-    if (!selectedOrgId) return;
-    let current = true;
-    async function loadSchoolCatalog() {
-      try {
-        const [levels, assignments] = await Promise.all([
-          pb.collection('levels').getFullList<Level>({
-            filter: pb.filter('organization = {:schoolId}', { schoolId: selectedOrgId }),
-            sort: 'order,name',
-          }),
-          pb.collection('school_courses').getFullList<SchoolCourse>({
-            filter: pb.filter('school_id = {:schoolId}', { schoolId: selectedOrgId }),
-            expand: 'course_id',
-            sort: 'course_id.name',
-          }),
-        ]);
-        if (current) setSchoolCatalog({ schoolId: selectedOrgId, levels, assignments });
-      } catch (err) {
-        if (current) {
-          console.error('Failed to load school courses:', err);
-          setSchoolCatalog({ schoolId: selectedOrgId, levels: [], assignments: [], failed: true });
-        }
-      }
-    }
-    loadSchoolCatalog();
-    return () => { current = false; };
-  }, [selectedOrgId]);
-
-  const catalog = schoolCatalog?.schoolId === selectedOrgId ? schoolCatalog : null;
-  const levels = catalog?.levels ?? [];
-  const preferredLevel = levels.find((level) => level.id === preferredLevelId);
-  const selectedLevelId = preferredLevel?.id ?? '';
-  const courses = catalog?.assignments.flatMap((assignment) =>
-    assignment.level === selectedLevelId && assignment.expand?.course_id ? [assignment.expand.course_id] : []
+  const levels = registrationCatalog?.levels.filter((level) => level.organization === selectedOrgId) ?? [];
+  const selectedLevelId = levels.find((level) => level.id === preferredLevelId)?.id ?? '';
+  const courses = registrationCatalog?.schoolCourses.flatMap((assignment) =>
+    assignment.school_id === selectedOrgId && assignment.level === selectedLevelId && assignment.expand?.course_id
+      ? [assignment.expand.course_id] : []
   ) ?? [];
-  const selectedCourseId = courses.some((course) => course.id === preferredCourseId)
-    ? preferredCourseId : '';
+  const selectedCourseId = courses.some((course) => course.id === preferredCourseId) ? preferredCourseId : '';
 
   const clearErrors = useCallback((...fields: (keyof RegistrationErrors)[]) => {
     setErrors((previous) => {
@@ -174,7 +121,6 @@ export function useRegistrationForm() {
 
   const changeSchool = (schoolId: string) => {
     if (schoolId === selectedOrgId) return;
-    setSchoolCatalog(null);
     setSelectedOrgId(schoolId);
     setPreferredLevelId('');
     setPreferredCourseId('');
@@ -198,7 +144,6 @@ export function useRegistrationForm() {
     if (item.mobile_number) setMobileNumber(item.mobile_number.replace(/\D/g, '').replace(/^63(?=9)/, '0').slice(0, 11));
     if (item.section) setSection(item.section);
     if (item.organization && organizations.some((school) => school.id === item.organization)) {
-      if (item.organization !== selectedOrgId) setSchoolCatalog(null);
       setSelectedOrgId(item.organization);
       setPreferredLevelId(item.level || '');
       setPreferredCourseId(item.course || '');
@@ -231,11 +176,86 @@ export function useRegistrationForm() {
   const clientGender = gender === 'male' || gender === 'female' ? gender : '';
   const validPicks = keepValidPicks(packageOptionGroups, clientGender, optionPicks);
 
+  const draft: RegistrationDraft = {
+    requestId, chosenKind: clientKind || chosenKind, selectedPackageId, selectedAddOns, optionPicks, paymentType,
+    familyName, givenName, middleName, gender, studentId, selectedOrgId, preferredLevelId, preferredCourseId,
+    section, department, mobileNumber, email, sessionTypeId, eventDate, eventVenue, clientOrg, notes, makeupLookNote,
+    termsAccepted, hadSignature: !!signatureBlob, step: stepId, reached: reachedId, notices, reviewNeeded,
+    quote: registrationCatalog ? makeRegistrationQuote(selectedPackage, { selected, defaultAddOn }, termsKey(registrationCatalog, clientKind)) : undefined,
+  };
+  const hasProgress = !!(draft.selectedPackageId || draft.selectedAddOns.length || draft.chosenKind && availableKinds.length > 1
+    || textFields.some((field) => draft[field]) || draft.step !== 'package' || draft.notices.length);
+  const serialized = hasProgress ? JSON.stringify(draft) : '';
+  const draftReady = !!registrationCatalog && !submittedRecord;
+  const expireDraft = useEffectEvent(() => {
+    if (submitting.current) clearRegistrationDraft();
+    else resetForm();
+  });
+  useLayoutEffect(() => {
+    if (!draftReady) return;
+    if (!serialized) {
+      clearRegistrationDraft();
+      return;
+    }
+    const saved = saveRegistrationDraft(serialized);
+    setDraftStored(saved);
+    if (saved) {
+      const expiration = window.setTimeout(() => expireDraft(), registrationDraftLifetime);
+      return () => window.clearTimeout(expiration);
+    }
+  }, [serialized, draftReady]);
+
+  function applyConfiguration(config: RegistrationConfiguration, saved: RegistrationDraft | null) {
+    if (saved) {
+      const next = reconcileRegistration(saved, config);
+      setSelectedPackageId(next.selectedPackageId);
+      setSelectedAddOns(next.selectedAddOns);
+      setOptionPicks(next.optionPicks);
+      setSelectedOrgId(next.selectedOrgId);
+      setPreferredLevelId(next.preferredLevelId);
+      setPreferredCourseId(next.preferredCourseId);
+      setSessionTypeId(next.sessionTypeId);
+      setTermsAccepted(next.termsAccepted);
+      setNotices(next.notices);
+      setReviewNeeded(next.reviewNeeded);
+      setStepId(next.step);
+      setReachedId(next.reached);
+      setSignatureBlob(null);
+      setSignatureDataUrl(null);
+    }
+    setRegistrationCatalog(config);
+    setRefreshRequired(false);
+    setDismissedVersion('');
+  }
+
+  const applyInitialConfiguration = useEffectEvent((config: RegistrationConfiguration) => applyConfiguration(config, initial));
+  const initialized = useRef(false);
+  useEffect(() => {
+    if (!published || initialized.current) return;
+    initialized.current = true;
+    applyInitialConfiguration(published);
+  }, [published]);
+
+  function refreshAndContinue() {
+    if (submitting.current) return;
+    if (!hasProgress || saveRegistrationDraft(JSON.stringify(draft))) {
+      window.location.reload();
+    } else if (published && pendingUpdate) {
+      applyConfiguration(published, draft);
+    } else {
+      refreshCatalog();
+      toast.error('Draft storage is unavailable. Keep this page open while StudioFlow checks for updates.');
+    }
+  }
+
   // Signature Handler
   const handleSignatureChange = (blob: Blob | null, dataUrl?: string | null) => {
     setSignatureBlob(blob);
     setSignatureDataUrl(dataUrl || null);
-    if (blob) clearErrors('signature');
+    if (blob) {
+      clearErrors('signature');
+      setNotices((current) => current.filter((message) => message !== recaptureSignature));
+    }
   };
 
   const showErrors = (fieldErrors: RegistrationErrors) => {
@@ -279,7 +299,7 @@ export function useRegistrationForm() {
         if (!eventVenue.trim()) fieldErrors.event_venue = 'Enter the event venue.';
       }
     } else {
-      if (!selectedOrgId) fieldErrors.organization = 'Select your school, campus, or organization.';
+      if (!organizations.some((school) => school.id === selectedOrgId)) fieldErrors.organization = 'Select your school, campus, or organization.';
       if (!selectedLevelId) fieldErrors.level = 'Select your academic level.';
       if (!selectedCourseId) fieldErrors.course = 'Select a course or strand for this school and academic level.';
     }
@@ -301,6 +321,15 @@ export function useRegistrationForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting.current) return;
+    if (!registrationCatalog || pendingUpdate || refreshRequired) {
+      setRefreshRequired(true);
+      refreshCatalog();
+      return;
+    }
+    if (reviewNeeded) {
+      document.getElementById('registration-review-changes')?.focus();
+      return;
+    }
 
     const cleanEmail = email.trim();
     const cleanMobile = mobileNumber.trim();
@@ -315,6 +344,8 @@ export function useRegistrationForm() {
     setIsSubmitting(true);
     try {
       const formData = new FormData();
+      formData.append('registration_version', registrationCatalog.version);
+      formData.append('registration_request_id', requestId);
       formData.append('family_name', familyName.trim());
       formData.append('given_name', givenName.trim());
       formData.append('middle_name', middleName.trim());
@@ -362,6 +393,7 @@ export function useRegistrationForm() {
         created.signatureDataUrl = signatureDataUrl;
       }
 
+      clearRegistrationDraft();
       toast.success('Registration submitted. Show your reference to the cashier.');
       setSubmittedRecord(created);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -369,6 +401,10 @@ export function useRegistrationForm() {
       refreshCatalog();
       console.error('Registration submission failed:', err);
       if (err instanceof ClientResponseError) {
+        if (err.status === 409) {
+          setRefreshRequired(true);
+          return;
+        }
         const fieldErrors: RegistrationErrors = {};
         for (const field of registrationFields) {
           const message = err.response.data?.[field]?.message;
@@ -390,7 +426,16 @@ export function useRegistrationForm() {
     }
   };
 
-  const resetForm = () => {
+  function resetForm() {
+    clearRegistrationDraft();
+    setRequestId(randomId());
+    setStepId('package');
+    setReachedId('package');
+    setNotices([]);
+    setReviewNeeded(false);
+    setRefreshRequired(false);
+    setDismissedVersion('');
+    if (published) setRegistrationCatalog(published);
     setFamilyName('');
     setGivenName('');
     setMiddleName('');
@@ -399,7 +444,6 @@ export function useRegistrationForm() {
     setSelectedOrgId('');
     setPreferredLevelId('');
     setPreferredCourseId('');
-    setSchoolCatalog(null);
     setSection('');
     setDepartment('');
     setChosenKind('');
@@ -418,27 +462,32 @@ export function useRegistrationForm() {
     setTermsAccepted(false);
     setSignatureBlob(null);
     setSignatureDataUrl(null);
+    setSearchName('');
+    setIsSearching(false);
     setSubmittedRecord(null);
     setErrors({});
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }
 
   const changeKind = (kind: ClientKind) => {
     setChosenKind(kind);
     setSelectedPackageId(null);
     setSelectedAddOns([]);
     setOptionPicks({});
+    setTermsAccepted(false);
+    setSignatureBlob(null);
+    setSignatureDataUrl(null);
     clearErrors('client_kind', 'package', 'package_options');
   };
 
   return {
     // Client type & walk-in details
-    studioLoaded: studio.loaded,
+    studioLoaded: !!registrationCatalog,
     availableKinds,
     clientKind,
     setClientKind: changeKind,
     isWalkIn,
-    sessionTypes: studio.activeSessionTypes,
+    sessionTypes,
     sessionTypeId,
     setSessionTypeId: (id: string) => { setSessionTypeId(id); clearErrors('session_type', 'event_date', 'event_venue'); },
     selectedSession,
@@ -450,7 +499,7 @@ export function useRegistrationForm() {
     setClientOrg,
     notes,
     setNotes,
-    walkinTerms: studio.walkinTerms,
+    walkinTerms,
     // Master Data
     organizations,
     levels,
@@ -478,8 +527,8 @@ export function useRegistrationForm() {
     setSelectedLevelId: changeLevel,
     selectedCourseId,
     setSelectedCourseId: changeField('course', setPreferredCourseId),
-    schoolCatalogLoading: !!selectedOrgId && !catalog,
-    schoolCatalogFailed: !!catalog?.failed,
+    schoolCatalogLoading: !registrationCatalog,
+    schoolCatalogFailed: !registrationCatalog && !!catalogError,
     section,
     setSection,
     mobileNumber,
@@ -487,7 +536,9 @@ export function useRegistrationForm() {
     email,
     setEmail: changeField('email', setEmail),
     selectedPackageId: selectedPackage?.id ?? null,
-    setSelectedPackageId: changeField('package', (id: string) => setSelectedPackageId(id)),
+    setSelectedPackageId: changeField('package', (id: string) => {
+      if (id !== selectedPackageId) { setSelectedPackageId(id); setOptionPicks({}); }
+    }),
     selectedAddOns: selected.map(({ id }) => id),
     toggleAddOn,
     packageOptionGroups,
@@ -521,5 +572,13 @@ export function useRegistrationForm() {
     collectErrors,
     showErrors,
     resetForm,
+    stepId, setStepId, reachedId, setReachedId, hasProgress,
+    notices, reviewNeeded,
+    confirmReview: () => { setReviewNeeded(false); setNotices((current) => current.filter((message) => message === recaptureSignature)); },
+    showUpdate: refreshRequired || (pendingUpdate && dismissedVersion !== published?.version),
+    deferredUpdate: pendingUpdate && dismissedVersion === published?.version,
+    dismissUpdate: () => { setDismissedVersion(published?.version ?? ''); setRefreshRequired(false); },
+    refreshAndContinue,
+    draftStored,
   };
 }

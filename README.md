@@ -129,7 +129,11 @@ StudioFlow includes pre-built batch scripts to simplify studio operations:
 
 Create staff accounts in **Admin → Staff Accounts**. In **Packages & Add-ons**, classify a standalone makeup or grooming charge as **Other Payment — MUA**, then enable **This is an MUA Service**. Price makeup in a portrait bundle as its own add-on. Catalog edits apply to new purchases. To correct an existing order before photography, use **Clients Directory → Edit Client → Correct MUA requirement**. Release any active MUA assignment first. Set **Photo selection limit** to the allowed number of photographs. A value of `0` allows any number.
 
+The public form groups optional add-ons using their existing Studio or MUA classification and shows automatic services separately. Draft answers stay in the registration tab for up to two hours after the last saved change. **Refresh & Continue** loads the latest catalog while retaining compatible answers. A refreshed form asks for a new signature. **Start Over** and successful submission clear the draft.
+
 **Analytics & Overview → MUA Performance Analytics** shows completed service counts and earnings by catalog item for the selected Asia/Manila date. Select an artist to inspect their completions, recorded adjustments, and refunds or voids awaiting review. CSV exports match the daily totals. The Earnings Excel export includes an audit sheet. Historical completions with ambiguous catalog references retain their original column and earnings with a review flag.
+
+In **Cashier → Pending**, use the pencil to correct an unpaid client’s details or package before a job order is issued. StudioFlow recalculates the balance when you save. Administrators can review the changes under **Clients Directory → Edit Client → Cashier Edit History**.
 
 ### QR Code Generator
 

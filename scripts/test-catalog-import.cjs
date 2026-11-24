@@ -291,7 +291,9 @@ test('save: imported packages and add-ons reach the database and the kiosk', asy
     for (const [key, value] of Object.entries({
       family_name: 'Dela Cruz', given_name: 'Juan', middle_name: 'D', gender: 'male', organization: school.id, level: level.id, course,
       package: packageId, student_id: 'IMPORT-' + ++students, terms_accepted: 'true', mobile_number: '0917-000-0000',
-      makeup_look: 'full', add_ons: JSON.stringify(addOns), ...extra,
+      makeup_look: 'full', add_ons: JSON.stringify(addOns),
+      registration_version: (await kiosk.send('/api/studioflow/registration-catalog', {})).version,
+      registration_request_id: require('node:crypto').randomUUID(), ...extra,
     })) form.set(key, value);
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');
     return kiosk.collection('registrations').create(form);

@@ -12,6 +12,8 @@ import { RecordActionButton } from '../../../components/common/RecordActionButto
 interface CashierMobileCardProps {
   registration: Registration;
   onOpenPayment: (reg: Registration) => void;
+  onOpenEdit?: (reg: Registration) => void;
+  canEdit?: boolean;
   onOpenDelete?: (reg: Registration) => void;
   onOpenPrint: (reg: Registration) => void;
   onOpenRelease: (reg: Registration) => void;
@@ -24,6 +26,8 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
   registration: reg,
   onOpenPayment,
   onOpenDelete,
+  onOpenEdit,
+  canEdit,
   onOpenPrint,
   onOpenRelease,
   onOpenAddOn,
@@ -109,6 +113,8 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
       )}
 
       <div className="flex flex-wrap items-center gap-2 pt-1">
+        {onOpenEdit && <RecordActionButton variant="edit" recordName={`client ${formatClientName(reg)}`}
+          disabled={!canEdit} onClick={() => onOpenEdit(reg)} />}
         {reg.status === 'pending_payment' ? (
           <button
             type="button"
@@ -126,8 +132,9 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
             <Banknote className="w-4 h-4" /> Settle Balance
           </button>
         ) : null}
-
-{onOpenAddOn && !['released', 'cancelled'].includes(reg.status) && (
+        {onOpenDelete &&
+          <RecordActionButton variant="delete" recordName={`unpaid registration for ${formatClientName(reg)}`} onClick={() => onOpenDelete(reg)} />}
+        {onOpenAddOn && !['released', 'cancelled'].includes(reg.status) && (
           <button
             type="button"
             onClick={() => onOpenAddOn(reg)}
@@ -147,8 +154,6 @@ export const CashierMobileCard: React.FC<CashierMobileCardProps> = ({
 
         {reg.balance === 0 && reg.revenue_discount && !['cancelled', 'released'].includes(reg.status) &&
           <RecordActionButton variant="edit" recordName={`discount for ${formatClientName(reg)}`} onClick={() => onOpenPayment(reg)} />}
-        {onOpenDelete &&
-          <RecordActionButton variant="delete" recordName={`unpaid registration for ${formatClientName(reg)}`} onClick={() => onOpenDelete(reg)} />}
         {reg.status !== 'pending_payment' && reg.status !== 'released' && reg.status !== 'cancelled' && (
           <button
             type="button"

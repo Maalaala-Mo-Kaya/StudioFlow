@@ -5,14 +5,16 @@ import { formatCurrency } from '../../../utils/formatters';
 import { revenueLabels } from '../packageLabels';
 import type { PackageKind } from '../useAdminData';
 
-export function RevenueInput({ value, onChange }: { value: RevenueCategory | ''; onChange: (value: RevenueCategory | '') => void }) {
+export function RevenueInput({ value, onChange, addOn = false }: {
+  value: RevenueCategory | ''; onChange: (value: RevenueCategory | '') => void; addOn?: boolean;
+}) {
   return <label className="block text-xs font-bold">
-    Revenue classification <span className="text-red-600">*</span>
+    {addOn ? 'Revenue classification and registration section' : 'Revenue classification'} <span className="text-red-600">*</span>
     <select required className={`mt-1 block min-h-10 w-full border bg-panel px-2 ${value ? 'border-line' : 'border-red-500'}`}
       value={value} onChange={(event) => onChange(event.target.value as RevenueCategory | '')}>
       {!value && <option value="" disabled>Choose Studio or MUA…</option>}
-      <option value="studio">{revenueLabels.studio}</option>
-      <option value="mua">{revenueLabels.mua}</option>
+      <option value="studio">{revenueLabels.studio}{addOn ? ' · Studio Add-ons' : ''}</option>
+      <option value="mua">{revenueLabels.mua}{addOn ? ' · MUA Services' : ''}</option>
     </select>
   </label>;
 }

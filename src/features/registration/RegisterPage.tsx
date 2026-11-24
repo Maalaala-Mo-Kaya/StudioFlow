@@ -17,8 +17,9 @@ import { RegistrationFieldError } from './components/RegistrationFieldError';
 import { genderOptions, validationProps, type RegistrationErrors } from './registrationValidation';
 import { availableChoices, chosenOptionLines } from '../../utils/packageOptions';
 import { formatCurrency } from '../../utils/formatters';
+import { ConfirmModal } from '../../components/common/ConfirmModal';
+import type { RegistrationStepId as StepId } from './registrationDraft';
 
-type StepId = 'package' | 'options' | 'about' | 'school' | 'extras' | 'sign';
 type Field = keyof RegistrationErrors;
 
 /**
@@ -48,8 +49,8 @@ export const RegisterPage: React.FC = () => {
     sign: ['terms_accepted', 'signature'] as Field[],
   })[id];
 
-  const [stepId, setStepId] = useState<StepId>('package');
-  const [reachedId, setReachedId] = useState<StepId>('package');
+  const { stepId, setStepId, reachedId, setReachedId } = form;
+  const [confirmReset, setConfirmReset] = useState(false);
   // A step that no longer exists (the options step after choosing a package without options) falls back.
   const index = Math.max(0, stepIds.indexOf(stepId) >= 0 ? stepIds.indexOf(stepId)
     : stepIds.indexOf(stepId === 'options' ? 'about' : 'package'));
@@ -84,11 +85,7 @@ export const RegisterPage: React.FC = () => {
 
   if (form.submittedRecord) {
     // The next client starts over at step 1 with no steps done.
-    return <RegistrationConfirmation record={form.submittedRecord} onReset={() => {
-      setStepId('package');
-      setReachedId('package');
-      form.resetForm();
-    }} />;
+    return <RegistrationConfirmation record={form.submittedRecord} onReset={form.resetForm} />;
   }
 
   const selectedPackage = form.packages.find((pkg) => pkg.id === form.selectedPackageId);
@@ -137,15 +134,49 @@ export const RegisterPage: React.FC = () => {
               Client <span className="text-gold">Registration</span>
             </h1>
           </div>
-          <span className="font-mono text-[11px] text-neutral-400 uppercase tracking-widest">
-            Step {index + 1} of {stepIds.length} · {labels[current]}
-          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-mono text-[11px] text-neutral-400 uppercase tracking-widest">
+              Step {index + 1} of {stepIds.length} · {labels[current]}
+            </span>
+            {form.hasProgress && <button type="button" disabled={form.isSubmitting} onClick={() => setConfirmReset(true)}
+              className="min-h-9 border border-line px-3 text-xs font-bold text-gold hover:bg-gold-wash disabled:opacity-40">Start Over</button>}
+            {form.deferredUpdate && !form.showUpdate && <button type="button" disabled={form.isSubmitting} onClick={form.refreshAndContinue}
+              className="min-h-9 border border-gold px-3 text-xs font-bold text-gold hover:bg-gold-wash disabled:opacity-40">Load Form Update</button>}
+          </div>
         </div>
         <p className="text-xs sm:text-sm text-neutral-300 mt-4 max-w-3xl leading-relaxed">
           Choose your package, tell us about you, then review and sign. One step at a time.
         </p>
       </div>
       <RegistrationStepBar steps={stepIds.map((id) => ({ id, label: labels[id] }))} current={index} reached={reached} onSelect={goTo} />
+
+      {form.showUpdate && (
+        <section aria-labelledby="registration-update-heading" className="mb-5 border-2 border-gold bg-obsidian p-4 shadow-lux sm:p-5">
+          <h2 id="registration-update-heading" className="text-sm font-black uppercase tracking-wide text-gold">Registration Form Updated</h2>
+          <p role="status" className="mt-1 text-sm text-ink">A newer version of this form is available. {form.draftStored
+            ? 'Your answers have been saved in this tab. Refresh to load the latest changes.'
+            : 'Browser storage is unavailable. Use Refresh & Continue to apply the changes in this tab.'}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" disabled={form.isSubmitting} onClick={form.refreshAndContinue}
+              className="btn-tactile min-h-10 border border-line bg-gold px-3 text-xs font-black uppercase text-on-gold disabled:opacity-40">Refresh &amp; Continue</button>
+            <button type="button" onClick={form.dismissUpdate}
+              className="btn-tactile min-h-10 border border-line bg-canvas px-3 text-xs font-black uppercase text-ink">Continue Editing</button>
+          </div>
+        </section>
+      )}
+      {form.notices.length > 0 && (
+        <section aria-labelledby="registration-notices-heading" className="mb-5 border border-gold bg-panel p-4 text-sm">
+          <h2 id="registration-notices-heading" className="font-black text-ink">{form.reviewNeeded ? 'Review changes to your registration' : 'Registration draft restored'}</h2>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-neutral-700">
+            {form.notices.map((message) => <li key={message}>{message}</li>)}
+          </ul>
+          {form.reviewNeeded && <button id="registration-review-changes" type="button" onClick={form.confirmReview}
+            className="mt-3 min-h-10 border border-line bg-gold px-3 text-xs font-black uppercase text-on-gold">I’ve reviewed the changes</button>}
+        </section>
+      )}
+      <ConfirmModal isOpen={confirmReset} title="Start a new registration?"
+        message="This clears the current answers and selections from this tab." confirmText="Start Over"
+        cancelText="Keep Editing" onClose={() => setConfirmReset(false)} onConfirm={form.resetForm} />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         <div className="min-w-0 lg:col-span-8 space-y-6">
@@ -155,7 +186,10 @@ export const RegisterPage: React.FC = () => {
             </div>
           )}
 
-          {!closed && <form
+          {!form.studioLoaded && <p role="status" className="border border-line bg-panel p-5 text-sm text-ink">
+            {form.catalogError ? 'Could not load the registration form. StudioFlow will try again.' : 'Loading the registration form…'}
+          </p>}
+          {!closed && form.studioLoaded && <form
             id="client-registration-form"
             noValidate
             onSubmit={(event) => { if (isLast) void form.handleSubmit(event); else { event.preventDefault(); next(); } }}

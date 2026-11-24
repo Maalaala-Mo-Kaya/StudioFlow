@@ -12,12 +12,30 @@ onRecordCreateRequest((e) => {
   try { selections = JSON.parse(e.record.getString("add_ons") || "null") ?? []; } catch (_) { throw new BadRequestError("Invalid add-on selection."); }
   // Runs before registration_validation sets the default client type: empty means a school client.
   const clientKind = e.record.getString("client_kind") === "walkin" ? "walkin" : "school";
-  const quote = e.requestInfo().body?.no_mua_default_quote;
+  const body = e.requestInfo().body || {};
+  const quote = body.no_mua_default_quote;
   const app = e.app;
   return app.runInTransaction((tx) => {
     // Use one catalog snapshot for the quote, service requirements and sold prices.
     e.app = tx;
     try {
+      if (!e.auth) {
+        const requestId = body.registration_request_id;
+        if (typeof requestId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestId)) {
+          throw new ApiError(409, "Refresh the registration form before submitting.");
+        }
+        // Acquire the write lock before checking the published configuration or a retried submission.
+        tx.db().newQuery("UPDATE studio_settings SET id = id WHERE key = 'main'").execute();
+        const [existing] = tx.findRecordsByFilter("registrations", "kiosk_request_id = {:requestId}", "", 1, 0, { requestId });
+        if (existing) return e.json(200, { id: existing.id });
+        const version = require(__hooks + "/studio_registration_catalog.js").configuration(tx).version;
+        if (body.registration_version !== version) {
+          throw new ApiError(409, "The registration form was updated. Load the latest configuration and review your answers.");
+        }
+        e.record.set("kiosk_request_id", requestId);
+      } else {
+        e.record.set("kiosk_request_id", "");
+      }
       const workflow = require(__hooks + "/studio_workflow.js");
       const [defaultAddOn] = pricing.defaultAddOns(tx, clientKind);
       const addOns = pricing.priceAddOns(tx, selections, [], clientKind)
@@ -54,6 +72,10 @@ onRecordUpdateRequest((e) => {
   const pricing = require(__hooks + "/studio_pricing.js");
   const { cents } = pricing;
   const original = e.record.original();
+  const body = e.requestInfo().body || {};
+  const cashierEdits = require(__hooks + "/studio_cashier_edits.js");
+  const cashierEdit = Object.hasOwn(body, cashierEdits.versionField);
+  if (cashierEdit) cashierEdits.validateRequest(e, body, original);
   const isAdmin = e.hasSuperuserAuth() || e.auth?.getString("role") === "admin";
   if (e.record.getString("pictorial_date") !== original.getString("pictorial_date") && !isAdmin) {
     throw new ForbiddenError("Only administrators can schedule pictorial dates.");
@@ -84,12 +106,12 @@ onRecordUpdateRequest((e) => {
   // what is already on the order; package, fees and removals stay with administrators.
   const isCashier = e.auth?.getString("role") === "cashier";
   const itemKey = (item) => item.id ?? item.name;
-  if (addOnsChanged && isCashier) {
+  if (addOnsChanged && isCashier && !cashierEdit) {
     const kept = new Map(addOns.map((item) => [itemKey(item), item]));
     if (previousAddOns.some((item) => !kept.has(itemKey(item)) || cents(kept.get(itemKey(item)).amount) !== cents(item.amount))) {
       throw new ForbiddenError("The cashier can only add add-ons. Ask an administrator to remove or change one.");
     }
-  } else if (addOnsChanged && !isAdmin) throw new ForbiddenError("Only administrators can change add-ons.");
+  } else if (addOnsChanged && !isAdmin && !cashierEdit) throw new ForbiddenError("Only administrators can change add-ons.");
 
   // A released order is closed, and a cancelled one owes nothing until it is restored.
   const status = original.getString("status");
@@ -132,7 +154,6 @@ onRecordUpdateRequest((e) => {
     }
   }
   const itemsChanged = packageChanged || addOnsChanged || feesChanged;
-  const body = e.requestInfo().body || {};
   // Server-written history (below): never taken from the request.
   e.record.set("order_changes", original.get("order_changes"));
   if ("order_discount" in body && !isAdmin) throw new ForbiddenError("Use the cashier discount action.");
@@ -152,6 +173,15 @@ onRecordUpdateRequest((e) => {
 
   if (itemsChanged) {
     const workflow = require(__hooks + "/studio_workflow.js");
+    if (cashierEdit) {
+      // An unpaid client stays pending. Derive their MUA services from the priced selections.
+      const saved = workflow.makeupServices(original);
+      const services = workflow.purchasedServices(e.app, e.record, original);
+      if (JSON.stringify(saved) !== JSON.stringify(services)) {
+        workflow.saveMakeupServices(e.record, services);
+        e.record.set("makeup_version", original.getInt("makeup_version") + 1);
+      }
+    }
     // What changed, for the order's history and the next payment receipt ("Added · Extra 8R Frame ₱350").
     const priceOf = (item) => cents(item.amount) / 100;
     const line = (item) => ({ name: item.name, amount: priceOf(item) });
@@ -306,12 +336,9 @@ onRecordDeleteRequest((e) => {
 }, "add_ons");
 
 routerAdd("GET", "/api/studioflow/registration-catalog", (e) => {
-  const workflow = require(__hooks + "/studio_workflow.js");
   let catalog;
   e.app.runInTransaction((tx) => {
-    const list = (collection, source) => tx.findRecordsByFilter(collection, "is_active = true", "created,id", 0, 0)
-      .map((item) => ({ ...item.publicExport(), requires_mua: !!workflow.serviceRequirement(item, source) }));
-    catalog = { packages: list("packages", "package"), addOns: list("add_ons", "add_on") };
+    catalog = require(__hooks + "/studio_registration_catalog.js").configuration(tx);
   });
   e.response.header().set("Cache-Control", "no-store");
   return e.json(200, catalog);

@@ -301,15 +301,18 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       </>)}
 
       {part !== 'cards' && (<>
-      {/* Optional add-ons, then single items sold on their own (switched on by the admin) */}
+      {part === 'extras' && <h2 id="sec-packages" className="mb-5 border-b-2 border-line pb-2.5 text-sm font-black uppercase tracking-widest text-ink">Add-ons &amp; Payment</h2>}
       {([
-        ['ADDONS (Optional)', addOnsList.filter((addon) => !addon.catalog_item)],
-        ['EXTRA PRINTS & ITEMS (Optional, price each)', addOnsList.filter((addon) => addon.catalog_item)],
-      ] as const).map(([title, list]) => list.length > 0 && (
-        <div key={title} className={part === 'extras' ? 'mb-6' : 'mt-6 pt-5 border-t border-neutral-200'}>
-          <h4 className="font-mono text-[11px] font-black text-ink uppercase tracking-widest mb-3">
+        ['Studio Add-ons', 'Add prints, frames, or other studio products to your package.',
+          addOnsList.filter((addon) => addon.revenue_category !== 'mua' && !addon.requires_mua)],
+        ['MUA Services', 'Choose optional makeup and grooming services for your pictorial.',
+          addOnsList.filter((addon) => addon.revenue_category === 'mua' || addon.requires_mua)],
+      ] as const).map(([title, description, list]) => list.length > 0 && (
+        <section key={title} aria-label={title} className="mb-6 mt-5 border-t border-line pt-4">
+          <h3 className="font-mono text-[11px] font-black text-ink uppercase tracking-widest">
             {title}
-          </h4>
+          </h3>
+          <p className="mb-3 mt-1 text-xs text-neutral-600">{description}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {list.map((addon) => {
               const isChecked = selectedAddOns.includes(addon.id);
@@ -317,6 +320,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                 <button
                   type="button"
                   key={addon.id}
+                  aria-pressed={isChecked}
                   onClick={() => onToggleAddOn(addon.id)}
                   className={`btn-tactile min-h-[48px] flex items-center justify-between p-3.5 border text-left cursor-pointer ${
                     isChecked
@@ -343,12 +347,12 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
               );
             })}
           </div>
-        </div>
+        </section>
       ))}
 
       {defaultAddOn && (
         <div className="mt-4 border border-gold bg-gold-wash p-3.5" aria-live="polite">
-          <p className="text-[10px] font-black uppercase tracking-wider text-gold-soft">Default service applied</p>
+          <p className="text-[10px] font-black uppercase tracking-wider text-gold-soft">Automatically applied services</p>
           <div className="flex items-start justify-between gap-3 text-sm font-bold text-ink">
             <span>{defaultAddOn.name}</span>
             <span className="shrink-0 font-mono">{formatCurrency(defaultAddOn.amount, { exact: true })}</span>

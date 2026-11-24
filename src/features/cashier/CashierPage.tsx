@@ -13,6 +13,7 @@ import { PrintReceiptModal } from './components/PrintReceiptModal';
 import { ReleaseDeliverableModal } from './components/ReleaseDeliverableModal';
 import { NotifyPickupModal } from './components/NotifyPickupModal';
 import { DeleteRegistrationModal } from './components/DeleteRegistrationModal';
+import { CashierRegistrationEditor } from './components/CashierRegistrationEditor';
 import { useStudioSettings } from '../../hooks/useStudioSettings';
 
 export const CashierPage: React.FC = () => {
@@ -20,6 +21,7 @@ export const CashierPage: React.FC = () => {
   const { deleteReg } = cashier;
   const { pickupMessage } = useStudioSettings();
   const { toast } = useToast();
+  const [editId, setEditId] = useState('');
   // Add-ons the client asks for at the counter, then: print the updated job order or collect now.
   const [addOnReg, setAddOnReg] = useState<Registration | null>(null);
   const [afterAdd, setAfterAdd] = useState<{ reg: Registration; added: string[] } | null>(null);
@@ -64,6 +66,8 @@ export const CashierPage: React.FC = () => {
         loading={cashier.loading}
         filtered={Boolean(cashier.searchQuery.trim()) || cashier.registrations.length > 0}
         onOpenPayment={cashier.openPaymentModal}
+        onOpenEdit={cashier.activeTab === 'pending' ? (reg) => setEditId(reg.id) : undefined}
+        editableIds={cashier.editableIds}
         onOpenDelete={cashier.activeTab === 'pending' ? cashier.openDeleteModal : undefined}
         deletableIds={cashier.deletableIds}
         onOpenPrint={(reg) => cashier.openPrintModal(reg)}
@@ -72,6 +76,15 @@ export const CashierPage: React.FC = () => {
         pickupMode={cashier.activeTab === 'ready'}
         onOpenNotify={cashier.openNotifyModal}
       />
+
+      {editId && (
+        <CashierRegistrationEditor key={editId} id={editId} onClose={() => setEditId('')}
+          onSaved={(saved) => {
+            cashier.applyRegistrationEdit(saved);
+            setEditId('');
+            toast.success('Client registration updated successfully.');
+          }} />
+      )}
 
       {deleteReg && (
         <DeleteRegistrationModal

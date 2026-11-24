@@ -373,7 +373,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
             <PackageKindInput value={newAddonKind} onChange={setNewAddonKind} />
           </div>
           <div className="sm:col-span-4">
-            <RevenueInput value={newAddonRevenue} onChange={(value) => {
+            <RevenueInput addOn value={newAddonRevenue} onChange={(value) => {
               setNewAddonRevenue(value);
               if (value !== 'mua') setNewAddonRequiresMua(false);
             }} />
@@ -473,7 +473,7 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
                     </div>
                   </div>
                   <PackageKindInput value={editAddonKind} onChange={setEditAddonKind} />
-                  <RevenueInput value={editAddonRevenue} onChange={(value) => {
+                  <RevenueInput addOn value={editAddonRevenue} onChange={(value) => {
                     setEditAddonRevenue(value);
                     if (value !== 'mua') setEditAddonRequiresMua(false);
                   }} />

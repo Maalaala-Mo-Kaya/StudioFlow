@@ -1,5 +1,6 @@
 import type { PaymentRecord, RefundRecord, Registration } from '../../types';
 import { isPhotographed } from '../../utils/releaseReadiness';
+import { toCentavos } from '../../utils/revenue';
 import { buildAudit } from './auditData';
 
 export interface OverviewMetrics {
@@ -20,6 +21,8 @@ export interface OverviewMetrics {
   totalRefundDue: number;
   /** Still to collect from the active orders counted. */
   totalOutstandingBalances: number;
+  /** Still to collect from pending registrations awaiting a job order. */
+  totalPendingRegistrationBalances: number;
   /** Active orders' totals, plus money already received from cancelled ones. */
   totalGrossInvoiced: number;
   cancelledCount: number;
@@ -44,6 +47,9 @@ export function overviewMetrics(
     totalRefunds: audit.totals.refunds,
     totalRefundDue: audit.totals.overpaid,
     totalOutstandingBalances: audit.totals.outstanding,
+    totalPendingRegistrationBalances: registrations
+      .filter((reg) => reg.status === 'pending_payment' && !reg.job_order_no && (!since || reg.created >= since))
+      .reduce((sum, reg) => sum + toCentavos(reg.balance), 0) / 100,
     totalGrossInvoiced: audit.totals.gross,
     cancelledCount: audit.totals.cancelledOrders,
   };

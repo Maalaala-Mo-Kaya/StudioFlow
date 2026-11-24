@@ -306,16 +306,22 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const chooser = await createStaff('testchooser', 'chooser');
   const otherChooser = await createStaff('otherchooser', 'chooser');
   let sequence = 0;
-  async function register(pkg, addOns = [], expected = 200, fields = {}) {
+  const registrationCatalog = async () => (await send(api + '/registration-catalog')).payload;
+  async function registrationForm(pkg, addOns, fields) {
     const studentId = 'WF-' + ++sequence;
     const form = new FormData();
     for (const [key, value] of Object.entries({
       family_name: 'Dela Cruz', given_name: 'Juan Carlos', middle_name: 'D', gender: 'male', mobile_number: '09170000000',
       organization: school.id, level: level.id, course: course.id, package: pkg.id, student_id: studentId,
       terms_accepted: 'true', email: 'person@example.test', mobile_number: '0917-000-0000', add_ons: JSON.stringify(addOns),
-      status: 'shooting', paid_amount: '1000', makeup_look: 'full', ...fields,
+      status: 'shooting', paid_amount: '1000', makeup_look: 'full',
+      registration_version: (await registrationCatalog()).version, registration_request_id: randomUUID(), ...fields,
     })) form.set(key, value);
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');
+    return form;
+  }
+  async function register(pkg, addOns = [], expected = 200, fields = {}) {
+    const form = await registrationForm(pkg, addOns, fields);
     const { payload } = await send(records('registrations'), { method: 'POST', body: form, status: expected });
     if (expected !== 200) return payload;
     assert.equal(payload.status, 'pending_payment');
@@ -1052,7 +1058,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const form = new FormData();
     for (const [key, value] of Object.entries({
       client_kind: 'walkin', family_name: 'Reyes', given_name: 'Family', gender: 'female', email: 'family@example.test', mobile_number: '09170000000',
-      terms_accepted: 'true', add_ons: '[]', package: walkinPackage.id, session_type: family.id, ...fields,
+      terms_accepted: 'true', add_ons: '[]', package: walkinPackage.id, session_type: family.id,
+      registration_version: (await registrationCatalog()).version, registration_request_id: randomUUID(), ...fields,
     })) form.set(key, value);
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');
     return (await send(records('registrations'), { method: 'POST', body: form, status })).payload;
@@ -2438,6 +2445,146 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const cents = await load(await register(oddPackage));
     const refusedCents = await confirm(cents, { ...request(cents, 'pos-cents', 3845, null, 100), payment: { amount: 100.5, type: 'full', method: 'cash', cash: 101, cashierName: 'Test Cashier' } }, 400);
     assert.doesNotMatch(refusedCents.message, /Something went wrong/);
+  });
+
+  await t.test('cashiers edit and audit only unpaid registrations without an issued job order', async () => {
+    const eligible = async () => (await send(api + '/cashier-editable-registrations', { token: cashier })).payload;
+    const load = async (client) => (await registrations(client, cashier)).payload;
+    const edit = async (client, fields, status = 200, token = cashier) => (await registrations(client, token, {
+      cashier_edit_version: client.updated, ...fields,
+    }, status)).payload;
+    const history = async (client) => (await send(records('cashier_registration_edits') +
+      '?filter=' + encodeURIComponent(`registration = "${client.id}"`), { token: admin })).payload.items;
+    const replacement = await create('packages', {
+      code: 'CASHIER-EDIT', name: 'Corrected Package', amount: 4600, is_active: true, revenue_category: 'studio',
+      option_groups: [{ id: 'attire', name: 'Attire', pick: 1, choices: [
+        { id: 'formal', label: 'Formal' }, { id: 'casual', label: 'Casual' },
+      ] }],
+    });
+    const extra = await create('add_ons', { code: 'CASHIER-EXTRA', name: 'Extra Print', amount: 500, is_active: true, revenue_category: 'studio' });
+    const client = await load(await register(standard, [{ id: makeup.id }]));
+    assert.ok((await eligible()).includes(client.id));
+    await edit(client, { notes: 'No access' }, 403, photographer);
+    await registrations(client, cashier, { family_name: 'No authorization marker' }, 403);
+    await edit(client, { other_fees: 1 }, 403);
+    await edit(client, { paid_amount: 1000 }, 403);
+    await edit(client, { job_order_no: '90000' }, 403);
+    await edit(client, { level: '' }, 400);
+    await edit(client, { mobile_number: 'wrong' }, 400);
+    await edit(client, { package: replacement.id }, 400);
+    assert.deepEqual(await history(client), []);
+
+    const saved = await edit(client, {
+      family_name: 'Corrected', section: 'B', package: replacement.id,
+      package_options: [{ group: replacement.option_groups[0].id, choices: ['casual'] }],
+      add_ons: [{ id: extra.id, amount: 1 }],
+    });
+    assert.equal(saved.id, client.id);
+    assert.deepEqual([saved.status, saved.paid_amount, saved.job_order_no, saved.payment_status], ['pending_payment', 0, null, 'unpaid']);
+    assert.equal(saved.package_snapshot.amount, 4600);
+    assert.equal(saved.add_ons.find(({ id }) => id === extra.id).amount, 500);
+    assert.ok(!saved.add_ons.some(({ id }) => id === makeup.id));
+    assert.equal(saved.makeup_service, '');
+    assert.equal(saved.total_amount, 4600 + saved.add_ons.reduce((sum, item) => sum + item.amount, 0));
+    assert.equal(saved.balance, saved.total_amount);
+    assert.equal(saved.package_options[0].choices[0].label, 'Casual');
+    assert.deepEqual(await load(client), saved);
+    const [entry] = await history(client);
+    assert.equal(entry.role, 'cashier');
+    assert.ok(entry.actor_id && entry.actor_name && entry.created);
+    assert.deepEqual(entry.changes.find(({ field }) => field === 'family_name'),
+      { field: 'family_name', before: client.family_name, after: 'Corrected' });
+    assert.deepEqual(entry.changes.find(({ field }) => field === 'total_amount'),
+      { field: 'total_amount', before: client.total_amount, after: saved.total_amount });
+    assert.equal(entry.changes.find(({ field }) => field === 'add_ons').after.find(({ id }) => id === extra.id).amount, 500);
+    await send(records('cashier_registration_edits'), { token: cashier, status: 200 })
+      .then(({ payload }) => assert.equal(payload.totalItems, 0));
+    await send(records('cashier_registration_edits', entry.id), { token: cashier, status: 404 });
+    await edit(client, { notes: 'Stale form' }, 409);
+    assert.equal((await history(client)).length, 1);
+
+    const fullPayment = await pay(saved, saved.balance);
+    assert.equal(fullPayment.balance_before, saved.balance);
+    const fullyPaid = await load(client);
+    assert.ok(fullyPaid.job_order_no);
+    await edit(saved, { family_name: 'Stale form after payment' }, 409);
+    await edit(fullyPaid, { given_name: 'Still restricted' }, 409);
+    assert.equal((await load(client)).family_name, 'Corrected');
+    assert.equal((await registrations(fullyPaid, admin, { notes: 'Admin correction' })).payload.notes, 'Admin correction');
+
+    const partial = await load(await register(standard));
+    await pay(partial, Math.round(partial.balance / 2), 'initial');
+    const partiallyPaid = await load(partial);
+    assert.equal(partiallyPaid.payment_status, 'downpayment');
+    await edit(partiallyPaid, { notes: 'Still restricted' }, 409);
+
+    const issued = await load(await register(standard));
+    const db = new DatabaseSync(join(data, 'data.db'));
+    try {
+      db.prepare("UPDATE registrations SET job_order_no = '99999' WHERE id = ?").run(issued.id);
+    } finally { db.close(); }
+    const issuedOnly = await load(issued);
+    assert.deepEqual([issuedOnly.paid_amount, issuedOnly.job_order_no], [0, '99999']);
+    await edit(issuedOnly, { notes: 'Still restricted' }, 409);
+    assert.ok(!(await eligible()).some((id) => [client.id, partial.id, issued.id].includes(id)));
+
+    const competing = await load(await register(standard));
+    const change = { cashier_edit_version: competing.updated, notes: 'Concurrent cashier correction' };
+    const confirmation = { clientKey: 'cashier-edit-race', updated: competing.updated, balanceDue: Math.round(competing.balance * 100),
+      payment: { amount: competing.balance, type: 'full', method: 'cash', cash: competing.balance, cashierName: 'Test Cashier' } };
+    const competingResults = await Promise.all([
+      registrations(competing, cashier, change, 0),
+      send(`${api}/registrations/${competing.id}/confirm-payment`, { method: 'POST', token: cashier, body: confirmation, status: 0 }),
+    ]);
+    assert.deepEqual(competingResults.map(({ status }) => status).sort(), [200, 409]);
+  });
+
+  await t.test('the public form rejects stale configuration and retries a submission exactly once', async () => {
+    const before = await registrationCatalog();
+    assert.match(before.version, /^[a-f0-9]{64}$/);
+    assert.equal((await registrationCatalog()).version, before.version);
+    assert.ok(before.schoolCourses.some((assignment) => assignment.school_id === school.id
+      && assignment.level === level.id && assignment.expand.course_id.id === course.id));
+    const kioskAddOn = await create('add_ons', {
+      code: 'KIOSK-VERSION', name: 'Kiosk Custom Service', amount: 200, is_active: true,
+      revenue_category: 'mua', requires_mua: true,
+    });
+    const added = await registrationCatalog();
+    assert.notEqual(added.version, before.version);
+    assert.equal(added.addOns.find(({ id }) => id === kioskAddOn.id).revenue_category, 'mua');
+    assert.equal(added.addOns.find(({ id }) => id === kioskAddOn.id).requires_mua, true);
+    const studioSettings = (await send(records('studio_settings') + "?filter=key='main'")).payload.items[0];
+    await send(records('studio_settings', studioSettings.id), {
+      token: admin, method: 'PATCH', body: { pickup_message: 'Pickup-only edit for the version regression test.' },
+    });
+    assert.equal((await registrationCatalog()).version, added.version);
+
+    const form = await registrationForm(standard, [{ id: kioskAddOn.id }], { registration_version: added.version });
+    const submit = (status = 200) => send(records('registrations'), { method: 'POST', body: form, status });
+    await patchCatalog('add_ons', kioskAddOn, { amount: 250 });
+    const priced = await registrationCatalog();
+    assert.notEqual(priced.version, added.version);
+    assert.match((await submit(409)).payload.message, /updated/i);
+    form.set('registration_version', priced.version);
+    const [first, retry] = await Promise.all([submit(), submit()]);
+    assert.equal(first.payload.id, retry.payload.id);
+    const registration = [first.payload, retry.payload].find((payload) => Array.isArray(payload.add_ons));
+    assert.equal(registration.add_ons.find(({ id }) => id === kioskAddOn.id).amount, 250);
+    assert.equal(registration.makeup_service, kioskAddOn.name);
+    assert.equal([first, retry].filter(({ payload }) => Object.hasOwn(payload, 'total_amount')).length, 1);
+
+    await patchCatalog('add_ons', kioskAddOn, { is_active: false });
+    const disabled = await registrationCatalog();
+    assert.notEqual(disabled.version, priced.version);
+    assert.ok(!disabled.addOns.some(({ id }) => id === kioskAddOn.id));
+    assert.deepEqual((await submit()).payload, { id: registration.id });
+    form.set('registration_request_id', randomUUID());
+    await submit(409);
+    form.set('registration_version', disabled.version);
+    await submit(400);
+    form.set('add_ons', '[]');
+    form.delete('registration_version');
+    await submit(409);
   });
 
 });

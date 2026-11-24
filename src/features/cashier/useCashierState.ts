@@ -50,6 +50,7 @@ export function useCashierState() {
   const { toast } = useToast();
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [deletableIds, setDeletableIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [editableIds, setEditableIds] = useState<ReadonlySet<string>>(() => new Set());
   const [deleteReg, setDeleteReg] = useState<Registration | null>(null);
   const fetchGeneration = useRef(0);
   const [collectedTodayCentavos, setCollectedTodayCentavos] = useState(0);
@@ -103,7 +104,7 @@ export function useCashierState() {
     const generation = ++fetchGeneration.current;
     try {
       if (!background) setLoading(true);
-      const [records, todaysPayments, todaysRefunds, lastPayment, eligibleIds] = await Promise.all([
+      const [records, todaysPayments, todaysRefunds, lastPayment, eligibleIds, editIds] = await Promise.all([
         pb.collection('registrations').getFullList<Registration>({
           sort: '-created',
           expand: 'organization,level,course,package,session_type',
@@ -129,10 +130,12 @@ export function useCashierState() {
           requestKey: null,
         }),
         pb.send<string[]>('/api/studioflow/deletable-registrations', { requestKey: null, cache: 'no-store' }).catch(() => []),
+        pb.send<string[]>('/api/studioflow/cashier-editable-registrations', { requestKey: null, cache: 'no-store' }).catch(() => []),
       ]);
       if (generation !== fetchGeneration.current) return;
       setRegistrations(records);
       setDeletableIds(new Set(Array.isArray(eligibleIds) ? eligibleIds : []));
+      setEditableIds(new Set(Array.isArray(editIds) ? editIds : []));
       const refundedToday = todaysRefunds.reduce((sum, refund) => sum + toCentavos(refund.amount), 0);
       setCollectedTodayCentavos(todaysPayments.reduce((sum, payment) => sum + toCentavos(payment.amount), 0) - refundedToday);
       setRefundedTodayCentavos(refundedToday);
@@ -399,6 +402,11 @@ export function useCashierState() {
 
   return {
     registrations,
+    editableIds,
+    applyRegistrationEdit: (saved: Registration) => {
+      setRegistrations((current) => current.map((reg) => reg.id === saved.id ? saved : reg));
+      void fetchRegistrations(true);
+    },
     deletableIds,
     deleteReg,
     openDeleteModal: setDeleteReg,

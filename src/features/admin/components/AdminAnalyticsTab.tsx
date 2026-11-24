@@ -456,6 +456,9 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           </div>
           <p className="text-[11px] text-neutral-500 mt-1">
             {period === 'all' ? 'Still to collect from active orders' : `Still unpaid on the job orders made ${periodWords}`}
+            <span className="block mt-1">
+              Includes pending registration balances of <strong className="text-ink">{formatCurrency(shown.totalPendingRegistrationBalances, { exact: true })}</strong>
+            </span>
             {shown.totalRefundDue > 0 && (
               <span className="block text-red-600 font-bold">Refund due to clients: {formatCurrency(shown.totalRefundDue, { exact: true })} (ledger filter “Refund Due”)</span>
             )}

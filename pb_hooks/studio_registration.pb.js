@@ -68,6 +68,11 @@ onRecordUpdateRequest((e) => {
   const before = e.record.original();
   const changed = (key) => e.record.getString(key) !== before.getString(key);
   const body = e.requestInfo().body || {};
+  if (Object.hasOwn(body, "kiosk_request_id") || changed("kiosk_request_id")) {
+    throw new ForbiddenError("The registration submission identifier is managed by StudioFlow.");
+  }
+  const cashierEdits = require(__hooks + "/studio_cashier_edits.js");
+  const cashierEdit = Object.hasOwn(body, cashierEdits.versionField);
   if (["deleted_by_id", "had_discount_credit"].some((field) => Object.hasOwn(body, field) || changed(field))) {
     throw new ForbiddenError("Deletion and discount history are managed by the studio workflow.");
   }
@@ -85,7 +90,10 @@ onRecordUpdateRequest((e) => {
     // Server-owned pickup tracking (see studio_production.pb.js).
     "ready_at", "pickup_notified_at", "pickup_notified_by", "pickup_notify_count",
   ];
-  if (fields.some(changed)) throw new ForbiddenError("Use the studio workflow to update station assignments or selections.");
+  const billingFields = ["makeup_service", "makeup_services", "makeup_version"];
+  if (fields.some((field) => changed(field) && !(cashierEdit && billingFields.includes(field)))) {
+    throw new ForbiddenError("Use the studio workflow to update station assignments or selections.");
+  }
   // Money and cancellation records are server-owned: payments, refunds, Cancel and Restore set them.
   const owned = ["paid_amount", "balance", "payment_status", "refunded_amount", "cancelled_at", "cancelled_by",
     "cancel_reason", "status_before_cancel", "restored_at", "restored_by"];
@@ -96,7 +104,7 @@ onRecordUpdateRequest((e) => {
     && (e.record.getString("status") === "cancelled" || before.getString("status") === "cancelled")) {
     throw new BadRequestError("Use the Cancel or Restore button so the reason and the person are recorded.");
   }
-  if (role === "photographer" || role === "cashier") {
+  if (role === "photographer" || (role === "cashier" && !cashierEdit)) {
     // The cashier may also add add-ons at the counter (registration_billing.pb.js: additions only).
     // registration_billing.pb.js's hook has already run by now and re-priced the order, so the fields it
     // computes (never taken from the request) and its production reset (status) are expected then.
@@ -126,6 +134,7 @@ onRecordUpdateRequest((e) => {
   // PocketBase loaded this PATCH before the hook. Check that its original row
   // is still current while holding the same lock used by the station APIs.
   return workflow.withRegistration(app, e.record.id, (tx, current) => {
+    if (cashierEdit) cashierEdits.assertEligible(tx, current);
     if (current.collection().fields.fieldNames().some((field) => current.getString(field) !== before.getString(field))) {
       throw new ApiError(409, "This registration changed. Refresh the student and try again.");
     }
@@ -141,13 +150,14 @@ onRecordUpdateRequest((e) => {
     }
     e.app = tx;
     try {
+      if (cashierEdit) cashierEdits.validateAcademicAndSession(tx, e.record, current);
       const beforePhotography = ["pending_payment", "paid"];
       const status = current.getString("status");
       const canCorrect = beforePhotography.includes(status) && !current.getBool("shoot_completed");
       // A client in the middle of the shoot can still get makeup: they go back to the MUA queue.
       const inShoot = status === "shooting" && !current.getBool("shoot_completed");
       if (correction && !canCorrect) throw new ApiError(409, "The MUA requirement can only be corrected before photography starts.");
-      if (correction || changed("package") || changed("add_ons")) {
+      if (!cashierEdit && (correction || changed("package") || changed("add_ons"))) {
         // Route makeup from the add-ons as they will be saved (with the automatic add-on adjusted).
         if (changed("package") || changed("add_ons")) {
           require(__hooks + "/studio_pricing.js").applyAutoAddOn(tx, e.record,
@@ -194,7 +204,9 @@ onRecordUpdateRequest((e) => {
           require(__hooks + "/studio_numbering.js").handoffToPhotography(tx, e.record);
         }
       }
-      return e.next();
+      const response = e.next();
+      if (cashierEdit) cashierEdits.audit(tx, tx.findRecordById("registrations", current.id), current, account);
+      return response;
     } finally { e.app = app; }
   });
 }, "registrations");
