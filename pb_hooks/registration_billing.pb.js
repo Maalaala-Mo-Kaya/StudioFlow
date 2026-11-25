@@ -158,9 +158,6 @@ onRecordUpdateRequest((e) => {
   e.record.set("order_changes", original.get("order_changes"));
   if ("order_discount" in body && !isAdmin) throw new ForbiddenError("Use the cashier discount action.");
   if (itemsChanged || "review_mua_amount" in body || "order_discount" in body) {
-    if (("order_discount" in body) && ["cancelled", "released"].includes(original.getString("status"))) {
-      throw new BadRequestError("Discounts can only be changed on active, unreleased orders.");
-    }
     const final = require(__hooks + "/studio_revenue.js").changes(e, original, total, itemsChanged);
     e.record.set("total_amount", final / 100);
     // Balance and payment status from the receipts and refunds (a cancelled order still owes nothing).

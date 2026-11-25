@@ -5,7 +5,7 @@ import type { Registration } from '../../../types';
 import { PAYMENT_METHOD_OPTIONS } from '../../../constants/studio';
 import { formatClientName, formatCurrency, formatJobOrderNo, formatQueueNumber } from '../../../utils/formatters';
 import { canUseCollectionMode, type CollectionMode } from '../useCashierState';
-import { discountCents, revenueTerms, toCentavos } from '../../../utils/revenue';
+import { canEditOrderDiscount, discountCents, revenueTerms, toCentavos } from '../../../utils/revenue';
 import { CashierOrderSummary } from './CashierOrderSummary';
 
 export interface CashierPaymentIntent {
@@ -53,6 +53,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   onCashReceivedChange,
 }) => {
   const savedDiscount = selectedReg.revenue_discount;
+  const canEditDiscount = canEditOrderDiscount(selectedReg);
   const currentCredit = discountCents(selectedReg);
   const originalBilledCents = toCentavos(selectedReg.total_amount) + currentCredit;
   const originalPercentage = savedDiscount?.percentage ?? (currentCredit ? currentCredit * 100 / originalBilledCents : 0);
@@ -82,16 +83,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   // Percent
   const percentageNumber = Number(percentage);
   const validPercentage = percentage === String(savedPercentage) || (/^\d+$/.test(percentage) && percentageNumber <= 100);
-  const replacingRate = kind === 'percent' && validPercentage && (percentageNumber !== savedPercentage || savedFixed);
+  const replacingRate = canEditDiscount && kind === 'percent' && validPercentage && (percentageNumber !== savedPercentage || savedFixed);
   const removingCredit = replacingRate && percentageNumber === 0;
   // Whole pesos, rounded to the nearest peso (as the server does): payments are whole pesos.
   const studioCredit = Math.round(eligibleBaseCents * percentageNumber / 10000) * 100;
   // Fixed amount (whole pesos)
   const fixedCents = /^\d+$/.test(fixedInput) ? Number(fixedInput) * 100 : NaN;
-  const replacingFixed = kind === 'amount' && Number.isFinite(fixedCents) && fixedCents >= 100
+  const replacingFixed = canEditDiscount && kind === 'amount' && Number.isFinite(fixedCents) && fixedCents >= 100
     && (!savedFixed || fixedCents !== (savedDiscount?.studio ?? 0));
   const rateChanged = replacingRate || replacingFixed;
-  const discountChanged = rateChanged || (currentCredit > 0 && reasonText !== savedDiscount?.reason);
+  const discountChanged = canEditDiscount && (rateChanged || (currentCredit > 0 && reasonText !== savedDiscount?.reason));
   const previewCredit = removingCredit ? 0
     : replacingRate ? studioCredit + (savedDiscount?.mua ?? 0)
     : replacingFixed ? fixedCents + (savedDiscount?.mua ?? 0)
@@ -114,10 +115,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     : !Number.isFinite(fixedCents) || fixedCents < 100 ? 'Enter a whole peso amount of at least ₱1.'
     : fixedCents > eligibleBaseCents ? `The discount can't be more than the Studio charges (${formatCurrency(eligibleBaseCents / 100, { exact: true })}).`
     : overpaid ? 'This discount would leave the order overpaid.' : '';
-  const discountError = percentError || amountDiscountError;
+  const discountError = canEditDiscount ? percentError || amountDiscountError : '';
   const reasonError = discountChanged && !removingCredit && reasonText.length < 3
     ? 'Enter a discount reason (at least 3 characters).' : '';
-  const rateLabel = kind === 'amount' && (replacingFixed || (savedFixed && !rateChanged)) ? 'Fixed amount'
+  const rateLabel = replacingFixed || (savedFixed && !rateChanged) ? 'Fixed amount'
     : `${replacingRate ? percentageNumber : savedPercentage}%`;
   const totalCentavos = originalBilledCents - previewCredit;
   const balanceCentavos = Math.max(0, totalCentavos - paidCents);
@@ -203,7 +204,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           <CashierOrderSummary registration={selectedReg} originalCents={originalBilledCents}
             discountCents={previewCredit} discountLabel={rateLabel} totalCents={totalCentavos}
             paidCents={paidCents} balanceCents={balanceCentavos} />
-          {!['cancelled', 'released'].includes(selectedReg.status) && (
+          {canEditDiscount && (
             <fieldset disabled={isProcessing} className={`space-y-2 border p-3 ${discountOn || currentCredit > 0 ? 'border-gold' : 'border-line'}`}>
               <legend className="sr-only">Discount credit</legend>
               {/* Always visible: whether this order has a discount, and the switch to add or change one. */}

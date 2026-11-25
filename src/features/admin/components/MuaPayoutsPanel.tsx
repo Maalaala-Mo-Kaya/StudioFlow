@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Ban, FileSpreadsheet, HandCoins, Users, Wallet } from 'lucide-react';
+import { Ban, HandCoins, Users, Wallet } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
 import { useToast } from '../../../context/ToastContext';
 import { useWorkflowData, workflowError } from '../../../hooks/useWorkflowData';
@@ -25,7 +25,6 @@ const peso = (value: number) => formatCurrency(value, { exact: true });
  * MUA team splits outside the system. Recording a payout ("Mark as paid") is optional.
  */
 export const MuaPayoutsPanel: React.FC = () => {
-  const { toast } = useToast();
   const today = manilaDay();
   const [range, setRange] = useState({ from: monthStart(today), to: today });
   // From the studio's first day to today.
@@ -37,24 +36,12 @@ export const MuaPayoutsPanel: React.FC = () => {
   const [openArtist, setOpenArtist] = useState<string | null>(null);
   const [paying, setPaying] = useState<MuaArtistTotals | null>(null);
   const [voiding, setVoiding] = useState<MuaPayout | null>(null);
-  const [exporting, setExporting] = useState(false);
 
   const artists = report ? artistTotals(report.lines) : [];
   const pool = report ? sharedTotals(report.shared) : null;
   const open = artists.find((artist) => artist.artistId === openArtist);
   const period = periodLabel(range.from, range.to);
   const sum = (key: 'earned' | 'paid' | 'unpaid' | 'clientPaid') => artists.reduce((total, artist) => total + artist[key], 0);
-
-  const exportExcel = async () => {
-    if (!report || exporting) return;
-    setExporting(true);
-    try {
-      const { downloadMuaPayoutWorkbook } = await import('../muaPayoutSheets');
-      await downloadMuaPayoutWorkbook(report, `${period} · services completed / orders made in this period`);
-    } catch (err) {
-      toast.error(workflowError(err));
-    } finally { setExporting(false); }
-  };
 
   return (
     <section className={`${stationCard} space-y-4`} aria-label="MUA payouts">
@@ -77,9 +64,6 @@ export const MuaPayoutsPanel: React.FC = () => {
           <button type="button" className={`${stationButton} !bg-panel !text-ink`} onClick={() => setRange(within(monthStart(today), today))}>This month</button>
           <button type="button" className={`${stationButton} !bg-panel !text-ink`} disabled={!!start && lastMonth().to < start} onClick={() => { const last = lastMonth(); setRange(within(last.from, last.to)); }}>Last month</button>
           <button type="button" className={`${stationButton} !bg-panel !text-ink`} disabled={!start} onClick={() => setRange({ from: start, to: today })}>All time</button>
-          <button type="button" className={stationButton} disabled={!report || exporting} onClick={() => void exportExcel()}>
-            <FileSpreadsheet className="w-4 h-4" /> {exporting ? 'Exporting…' : 'Export Excel'}
-          </button>
         </div>
       </div>
 

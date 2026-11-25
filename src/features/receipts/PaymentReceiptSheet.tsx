@@ -95,7 +95,7 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
           <p className="line-clamp-2 break-words text-[8px] leading-[9px]">Added · {additions.join(', ')}</p>
         )}
         <Row label="Method" value={method} />
-        <Row label="Previous Balance" value={peso(payment.balance_before)} />
+        <Row label={discount ? 'Balance After Discount' : 'Previous Balance'} value={peso(payment.balance_before)} />
         {discount && <>
           <Row label={`Discount Credit (${discount.rate})`} value={peso(-discount.amount)} />
           <p className="break-words text-[8px] leading-[9px]">Reason · {discount.reason}</p>

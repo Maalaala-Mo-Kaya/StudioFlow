@@ -15,22 +15,9 @@ const sourceLabels: Record<string, string> = {
 
 export function MuaPerformancePanel() {
   const [date, setDate] = useState('');
-  const [exporting, setExporting] = useState(false);
   const [tab, setTab] = useState<'performance' | 'earnings'>('performance');
   const { start, today } = useStudioCalendar();
-  const { toast } = useToast();
   const { data: report, error, refresh } = useWorkflowData<MuaPerformanceReport>(`/mua-performance?date=${encodeURIComponent(date)}`);
-
-  async function exportReport(format: 'csv' | 'xlsx') {
-    if (!report || exporting) return;
-    setExporting(true);
-    try {
-      const { downloadMuaReport } = await import('../muaPerformanceExport');
-      await downloadMuaReport(report, format, tab);
-    } catch (failure) {
-      toast.error(workflowError(failure));
-    } finally { setExporting(false); }
-  }
 
   return (
     <section className={`${stationCard} space-y-4`} aria-label="MUA Performance Analytics">
@@ -44,17 +31,6 @@ export function MuaPerformancePanel() {
               className="min-h-10 border border-line bg-panel px-2" />
           </label>
           {date && <button type="button" className={stationButton} onClick={() => setDate('')}>Today</button>}
-          {report && (
-            <details className="relative">
-              <summary className={stationButton}>{exporting ? 'Exporting…' : 'Export Report ▾'}</summary>
-              <div className="absolute right-0 z-10 min-w-28 border border-line bg-panel p-1 shadow-lux">
-                <button type="button" className="block w-full p-2 text-left text-xs font-bold hover:bg-gold-wash"
-                  disabled={exporting} onClick={() => void exportReport('csv')}>CSV</button>
-                <button type="button" className="block w-full p-2 text-left text-xs font-bold hover:bg-gold-wash"
-                  disabled={exporting} onClick={() => void exportReport('xlsx')}>Excel</button>
-              </div>
-            </details>
-          )}
         </div>
       </div>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}

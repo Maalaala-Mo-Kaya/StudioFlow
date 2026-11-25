@@ -18,6 +18,29 @@ routerAdd("GET", "/api/studioflow/mua-performance", (e) => {
   return e.json(200, report);
 }, $apis.requireAuth("users"));
 
+routerAdd("GET", "/api/studioflow/mua-export", (e) => {
+  const workflow = require(__hooks + "/studio_workflow.js");
+  const reporting = require(__hooks + "/studio_mua_reporting.js");
+  const payouts = require(__hooks + "/studio_mua_payouts.js");
+  workflow.staff(e.app, e.auth, ["admin"]);
+  const query = e.request.url.query();
+  const from = query.get("from");
+  const to = query.get("to");
+  const today = reporting.studioDate(Date.now());
+  if (!payouts.validDay(from) || !payouts.validDay(to) || from > to || to > today) {
+    throw new BadRequestError("Choose a valid MUA report period ending on or before today.");
+  }
+  let data;
+  e.app.runInTransaction((tx) => {
+    data = {
+      performance: reporting.periodReport(tx, from, to, today, true),
+      payouts: payouts.periodReport(tx, from, to),
+    };
+  });
+  e.response.header().set("Cache-Control", "private, no-store");
+  return e.json(200, data);
+}, $apis.requireAuth("users"));
+
 function validateCatalogService(e) {
   const record = e.record;
   if ("mua_service_types" in (e.requestInfo().body || {})) {

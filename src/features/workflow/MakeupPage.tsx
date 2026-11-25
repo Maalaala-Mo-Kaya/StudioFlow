@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { CalendarDays, Check, Clock3, UserPlus } from 'lucide-react';
+import { CalendarDays, Check, ChevronDown, Clock3, Settings2, UserPlus } from 'lucide-react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useAuth } from '../../context/AuthContext';
@@ -151,9 +151,9 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
   }
 
   return (
-    <StationLayout title={<>Makeup &amp; <span className="text-gold">Grooming</span></>} badge="MUA Station"
+    <StationLayout title={<>Makeup &amp; <span className={embedded ? 'text-gold-soft' : 'text-gold'}>Grooming</span></>} badge="MUA Station" compactHeader={embedded}
       liveLabel={loading || activeError ? undefined : 'Live Queue'}
-      description={manage ? 'Assign clients and track makeup and grooming services.' : 'Manage your clients and confirm completed services.'}
+      description={embedded ? undefined : manage ? 'Assign clients and track makeup and grooming services.' : 'Manage your clients and confirm completed services.'}
       refresh={refreshTables} embedded={embedded}>
       <StationTabs label="Makeup and grooming views" active={activeTab} onChange={setSelection}
         tabs={availableTabs.map(({ id, label }) => ({
@@ -176,11 +176,15 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
         )}
         {activeTab === 'team' ? (
           <>
-            <MuaTeamOverview team={team} date={date} onDateChange={setDate} failed={!!teamError}
+            <MuaTeamOverview team={team} date={date} onDateChange={setDate} failed={!!teamError} embedded={embedded}
               sort={view.sort ?? null} onSort={(sort) => updateView({ sort })} />
             {admin && teamSettings && (
-              <details className="border border-line bg-panel">
-                <summary className="min-h-11 cursor-pointer px-4 py-3 text-xs font-black uppercase tracking-wide text-gold-soft">Makeup artist team settings</summary>
+              <details className="group border border-line bg-panel">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2.5 px-4 py-3 text-sm font-semibold text-ink hover:bg-gold-wash focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold [&::-webkit-details-marker]:hidden">
+                  <Settings2 className="size-4 shrink-0 text-gold-soft" aria-hidden="true" />
+                  Makeup artist team settings
+                  <ChevronDown className="ml-auto size-4 shrink-0 text-gold-soft group-open:rotate-180" aria-hidden="true" />
+                </summary>
                 {teamSettings}
               </details>
             )}

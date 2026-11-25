@@ -31,10 +31,6 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/discount", (e) => {
       reg.set("status", "paid");
       numbered = numbering.issueJobOrder(tx, reg);
       reg.set("prepared_by", ledger.actorName(actor));
-    } else if (status === "paid" && !workflow.paymentEligible(reg)) {
-      reg.set("status", "pending_payment");
-      reg.set("queue_number", 0);
-      reg.set("queue_issued_at", "");
     }
     numbering.handoffToPhotography(tx, reg);
     if (numbered) storage.assignFolder(tx, reg, true);

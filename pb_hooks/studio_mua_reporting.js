@@ -57,13 +57,14 @@ function artistRow(id) {
   return { id, jobs: new Set(), counts: {}, earnings: {}, totalEarnings: 0, totalServices: 0, details: [] };
 }
 
-function dailyReport(app, date, today, includeAudit = false, roster) {
+function periodReport(app, from, to, today, includeAudit = false, roster) {
   const columns = new Map();
   const artists = new Map();
   const allJobs = new Set();
   const totals = {};
   const eventCache = new Map();
-  const logs = app.findRecordsByFilter("mua_completions", "local_date = {:date}", "completed_at,id", 0, 0, { date });
+  const logs = app.findRecordsByFilter("mua_completions", "local_date >= {:from} && local_date <= {:to}",
+    "completed_at,id", 0, 0, { from, to });
   for (const log of logs) {
     const id = log.getString("artist_id");
     if (roster && !roster.has(id)) continue;
@@ -98,7 +99,7 @@ function dailyReport(app, date, today, includeAudit = false, roster) {
     allJobs.add(jobId);
     totals[serviceId] = (totals[serviceId] || 0) + basis.quantity;
   }
-  if (date === today) {
+  if (to === today) {
     for (const [collection, source] of [["packages", "package"], ["add_ons", "add_on"]]) {
       const eligible = "requires_mua = true";
       for (const item of app.findRecordsByFilter(collection, "is_active = true && " + eligible, "name", 0, 0)) {
@@ -113,7 +114,7 @@ function dailyReport(app, date, today, includeAudit = false, roster) {
     }
   }
   return {
-    date, today, columns: Array.from(columns, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
+    date: to, today, columns: Array.from(columns, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
     rows: Array.from(artists.values(), ({ jobs, ...row }) => ({
       ...row, totalClients: jobs.size, totalEarnings: row.totalEarnings / 100,
       earnings: Object.fromEntries(Object.entries(row.earnings).map(([key, amount]) => [key, amount / 100])),
@@ -123,4 +124,8 @@ function dailyReport(app, date, today, includeAudit = false, roster) {
   };
 }
 
-module.exports = { dailyReport, logCompletion, studioDate, uncreditedServices };
+function dailyReport(app, date, today, includeAudit = false, roster) {
+  return periodReport(app, date, date, today, includeAudit, roster);
+}
+
+module.exports = { dailyReport, logCompletion, periodReport, studioDate, uncreditedServices };

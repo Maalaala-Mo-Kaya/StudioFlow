@@ -379,8 +379,8 @@ function drawReceiptSlip(doc: jsPDF, data: ReceiptData, payment: PaymentRecord, 
     for (const line of lines) put(doc, line, x, y += 6 * PT + 0.01, { size: 6, color: GREY });
   }
   row('METHOD', methodLabel(payment.payment_method) + (payment.remarks ? ` · ${payment.remarks}` : ''), y += 0.14);
-  row('PREVIOUS BALANCE', php(payment.balance_before), y += 0.14);
   const discount = paymentDiscount(payment);
+  row(discount ? 'BALANCE AFTER DISCOUNT' : 'PREVIOUS BALANCE', php(payment.balance_before), y += 0.14);
   if (discount) {
     row(`DISCOUNT CREDIT (${discount.rate.toUpperCase()})`, php(-discount.amount), y += 0.13);
     doc.setFont('helvetica', 'normal');
