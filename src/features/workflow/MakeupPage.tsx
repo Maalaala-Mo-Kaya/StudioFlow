@@ -155,6 +155,16 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
       liveLabel={loading || activeError ? undefined : 'Live Queue'}
       description={embedded ? undefined : manage ? 'Assign clients and track makeup and grooming services.' : 'Manage your clients and confirm completed services.'}
       refresh={refreshTables} embedded={embedded}>
+      {admin && teamSettings && (
+        <details className="group border border-line bg-panel">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2.5 px-4 py-3 text-sm font-semibold text-ink hover:bg-gold-wash focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold [&::-webkit-details-marker]:hidden">
+            <Settings2 className="size-4 shrink-0 text-gold-soft" aria-hidden="true" />
+            Makeup artist team settings
+            <ChevronDown className="ml-auto size-4 shrink-0 text-gold-soft group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          {teamSettings}
+        </details>
+      )}
       <StationTabs label="Makeup and grooming views" active={activeTab} onChange={setSelection}
         tabs={availableTabs.map(({ id, label }) => ({
           id,
@@ -175,20 +185,8 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
           </label>
         )}
         {activeTab === 'team' ? (
-          <>
-            <MuaTeamOverview team={team} date={date} onDateChange={setDate} failed={!!teamError} embedded={embedded}
-              sort={view.sort ?? null} onSort={(sort) => updateView({ sort })} />
-            {admin && teamSettings && (
-              <details className="group border border-line bg-panel">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2.5 px-4 py-3 text-sm font-semibold text-ink hover:bg-gold-wash focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold [&::-webkit-details-marker]:hidden">
-                  <Settings2 className="size-4 shrink-0 text-gold-soft" aria-hidden="true" />
-                  Makeup artist team settings
-                  <ChevronDown className="ml-auto size-4 shrink-0 text-gold-soft group-open:rotate-180" aria-hidden="true" />
-                </summary>
-                {teamSettings}
-              </details>
-            )}
-          </>
+          <MuaTeamOverview team={team} date={date} onDateChange={setDate} failed={!!teamError} embedded={embedded}
+            sort={view.sort ?? null} onSort={(sort) => updateView({ sort })} />
         ) : (
           <MakeupClientsView key={activeTab} kind={activeTab} view={view} onViewChange={updateView}
             title={activeTab === 'completed' ? 'Completed services' : activeTab === 'waiting'
