@@ -1836,11 +1836,14 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await send(records('add_ons', groomingAddOn.id), { token: admin, method: 'DELETE', status: 409 }); // sold on `mixed`
     assert.deepEqual((await auditFor(mixed)).totals.revenue, settled.totals.revenue);
     await registrations(mixed, cashier, { order_discount: { studio: 0, mua: 50, reason: 'staff discount' } }, 403);
-    await registrations(mixed, admin, { order_discount: { studio: 0, mua: 50, reason: '' } }, 400);
+    await registrations(mixed, admin, { order_discount: { studio: 50, mua: 0, reason: '' } }, 400);
+    // MUA services are never discounted: the studio pays the artists their full price.
+    assert.match((await registrations(mixed, admin, { order_discount: { studio: 0, mua: 150, reason: 'Complimentary grooming' } }, 400))
+      .payload.message, /MUA services can't be discounted/);
     const discounted = (await registrations(mixed, admin, {
-      order_discount: { studio: 0, mua: 150, reason: 'Complimentary grooming' },
+      order_discount: { studio: 150, mua: 0, reason: 'Complimentary grooming' },
     })).payload;
-    assert.deepEqual(discounted.revenue_terms, { studio: 150000, mua: 30000, unallocated: 0 });
+    assert.deepEqual(discounted.revenue_terms, { studio: 135000, mua: 45000, unallocated: 0 });
     assert.deepEqual([discounted.total_amount, discounted.balance], [1800, 0]);
     // The discount prints in its own box beside the package, never as an item the client bought.
     assert.ok(orderExtras(discounted).every(([, amount]) => amount >= 0));
@@ -1848,7 +1851,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal(discounted.revenue_discount.fixed, true);
     assert.equal((await auditFor(mixed)).orders[0].overpaid, 150);
     await refundRoute({ registrationId: mixed.id, amount: 150, method: 'cash', reason: 'Approved complimentary service' });
-    assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
+    assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1350, mua: 450, unallocated: 0 });
 
     const discountReport = (await send(api + '/student-excel', { token: admin })).payload;
     const exportRow = discountReport.rows.find((row) => row.jobOrder === discounted.job_order_no);
@@ -1857,7 +1860,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const discountSheet = discountBook.worksheets[0];
     const discountHeaders = discountSheet.getRow(1).values;
     assert.ok(discountHeaders.includes('MUA SERVICES BILLED'));
-    for (const [heading, amount] of [['STUDIO REVENUE', 1500], ['MUA COLLECTED (pay to MUA team)', 300], ['DISCOUNT', -150]]) {
+    for (const [heading, amount] of [['STUDIO REVENUE', 1350], ['MUA COLLECTED (pay to MUA team)', 450], ['DISCOUNT', -150]]) {
       assert.equal(discountSheet.getRow(2).getCell(discountHeaders.indexOf(heading)).value, amount, heading);
     }
     // The discount's reason travels with it: a note on the Overall Excel's DISCOUNT cell, the ledger CSV,
@@ -1885,12 +1888,19 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await send(`${api}/payments/${mixedLast.id}/void`, { method: 'POST', token: admin, body: { reason: 'Incorrect receipt amount' } });
     assert.equal((await registrations(mixed)).payload.balance, 975);
     await pay(mixed, 975, 'additional');
-    assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
+    assert.deepEqual((await auditFor(mixed)).totals.revenue, { studio: 1350, mua: 450, unallocated: 0 });
     assert.equal((await registrations(mixed)).payload.balance, 0);
     const free = await create('add_ons', { code: 'FREE', name: 'Free MUA service', amount: 0, is_active: true, revenue_category: 'mua' });
     const withFree = await register(studio, [{ id: free.id }]);
     await pay(withFree, 1500);
     assert.deepEqual((await auditFor(withFree)).totals.revenue, { studio: 1500, mua: 0, unallocated: 0 });
+    // A cashier percentage is worked out on the Studio charges only; the MUA charge stays whole.
+    const muaExtra = await create('add_ons', { code: 'MUAX', name: 'MUA extra', amount: 300, is_active: true, revenue_category: 'mua' });
+    const muaCredited = await register(studio, [{ id: muaExtra.id }]);
+    const rated = await discount(muaCredited, 10);
+    assert.deepEqual([rated.revenue_discount.studio, rated.revenue_discount.mua, rated.revenue_discount.percentage, rated.total_amount],
+      [15000, 0, 10, 1650]);
+    assert.deepEqual(rated.revenue_terms, { studio: 135000, mua: 30000, unallocated: 0 });
 
     const legacyJob = { id: legacyId };
     assert.deepEqual((await auditFor(legacyJob)).totals.revenue, { studio: 0, mua: 0, unallocated: 1000 });
@@ -1965,7 +1975,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await contest(mixed, parent, 'assign', 409, { artistId: firstArtist.id, version: '2' });
     const performed = (await report()).rows.find((row) => row.id === nextArtist.id).details.filter((row) => row.jobId === mixed.id);
     assert.deepEqual(performed.map((row) => row.serviceName).sort(), ['Grooming session', 'Makeup session']);
-    assert.deepEqual(performed.map((row) => row.earned).sort((a, b) => a - b), [10000, 20000]);
+    // Full sold prices: the order's discount came out of the Studio charges, never the artist pay.
+    assert.deepEqual(performed.map((row) => row.earned).sort((a, b) => a - b), [15000, 30000]);
     const completedOverview = await getTeam(parent, true);
     const adminReport = await report(completedOverview.date);
     const teamIds = new Set(completedOverview.artists.map(({ id }) => id));
@@ -1976,7 +1987,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       completedOverview.report.rows.find(({ id }) => id === nextArtist.id).totalServices);
     assert.equal(completedOverview.report.totalServices, beforeAssignment.report.totalServices + 2);
     const teamEarnings = (overview) => overview.report.rows.reduce((sum, row) => sum + row.totalEarnings, 0);
-    assert.equal(teamEarnings(completedOverview) - teamEarnings(beforeAssignment), 300);
+    assert.equal(teamEarnings(completedOverview) - teamEarnings(beforeAssignment), 450);
     assert.equal(teamEarnings(await getTeam(admin, true)), teamEarnings(completedOverview));
     for (const actor of [parent, firstArtist]) {
       await send(api + '/mua-completions/' + performed[0].id + '/adjustments', {
@@ -2045,7 +2056,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const retained = await auditFor(mixed);
     assert.equal(retained.orders[0].registration.package_snapshot.name, 'Portrait');
     assert.equal(retained.byPackage[0].key, studio.id);
-    assert.deepEqual(retained.totals.revenue, { studio: 1500, mua: 300, unallocated: 0 });
+    assert.deepEqual(retained.totals.revenue, { studio: 1350, mua: 450, unallocated: 0 });
   });
 
   // Admin edits of a job order's package and add-ons at each stage.

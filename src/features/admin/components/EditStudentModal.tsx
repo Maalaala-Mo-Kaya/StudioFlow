@@ -103,7 +103,6 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [reviewAmount, setReviewAmount] = useState('');
   const [reviewReason, setReviewReason] = useState('');
   const [studioDiscount, setStudioDiscount] = useState((reg.revenue_discount?.studio ?? 0) / 100);
-  const [muaDiscount, setMuaDiscount] = useState((reg.revenue_discount?.mua ?? 0) / 100);
   const [discountReason, setDiscountReason] = useState(reg.revenue_discount?.reason ?? '');
 
   // Add-ons: the ones on the order keep the price they were sold at; new ones show today's catalog price.
@@ -162,16 +161,16 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
     : addOns;
   const addsMakeup = addOns.some((item) => !savedIds.has(item.id ?? '')
     && addOnCatalog.find((entry) => entry.id === item.id)?.requires_mua);
+  // Discounts come out of the Studio charges only: MUA services are never discounted.
   const discountChanged = studioDiscount !== (reg.revenue_discount?.studio ?? 0) / 100
-    || muaDiscount !== (reg.revenue_discount?.mua ?? 0) / 100
-    || ((studioDiscount > 0 || muaDiscount > 0) && discountReason.trim() !== (reg.revenue_discount?.reason ?? ''));
+    || (studioDiscount > 0 && discountReason.trim() !== (reg.revenue_discount?.reason ?? ''));
   const itemsChanged = packageChanged || addOnsChanged;
   const priceChanged = itemsChanged || discountChanged;
   // Same rule as the server: a new package is priced from the catalog; otherwise only the add-ons are swapped.
   const subtotal = packageChanged && selectedPkg
     ? cents(selectedPkg.amount) + cents(sumAddOnAmounts(pricedAddOns)) + cents(reg.other_fees)
     : cents(reg.total_amount) + discountCents(reg) - cents(sumAddOnAmounts(savedAddOns)) + cents(sumAddOnAmounts(pricedAddOns));
-  const totalCents = subtotal - cents(studioDiscount) - cents(muaDiscount);
+  const totalCents = subtotal - cents(studioDiscount);
   const currentTotal = totalCents / 100;
   const paid = reg.paid_amount || 0;
   const currentBalance = !priceChanged ? reg.balance : isCancelled ? 0 : Math.max(0, currentTotal - paid);
@@ -234,7 +233,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
         package: packageId,
         ...(sendOptions ? { package_options: picksPayload(validPicks) } : {}),
         ...(!cashierCatalog && !itemsChanged && reviewAmount !== '' ? { review_mua_amount: Number(reviewAmount), review_revenue_reason: reviewReason.trim() } : {}),
-        ...(!cashierCatalog && canEditAddOns && discountChanged ? { order_discount: { studio: studioDiscount, mua: muaDiscount, reason: discountReason.trim() } } : {}),
+        ...(!cashierCatalog && canEditAddOns && discountChanged ? { order_discount: { studio: studioDiscount, mua: 0, reason: discountReason.trim() } } : {}),
         ...(addOnsChanged ? { add_ons: addOns.map((item) => (item.id ? { id: item.id } : { code: item.code, name: item.name })) } : {}),
         ...(!cashierCatalog ? {
           pictorial_date: pictorialDate ? `${pictorialDate} 00:00:00.000Z` : '',
@@ -272,13 +271,10 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
               </div>
             </>}
             {canEditAddOns && <>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <label>Studio discount (₱)<input className="block w-full border border-line p-2" type="number" min="0" step="1"
+              <label className="block">Discount (₱, off the Studio charges; MUA services are never discounted)
+                <input className="block w-full border border-line p-2" type="number" min="0" step="1"
                   value={studioDiscount} onChange={(event) => setStudioDiscount(Number(event.target.value))} /></label>
-                <label>MUA discount (₱)<input className="block w-full border border-line p-2" type="number" min="0" step="1"
-                  value={muaDiscount} onChange={(event) => setMuaDiscount(Number(event.target.value))} /></label>
-              </div>
-              {(studioDiscount > 0 || muaDiscount > 0) && <label className="block">Discount reason
+              {studioDiscount > 0 && <label className="block">Discount reason
                 <input className="block w-full border border-line p-2" required minLength={3} maxLength={500}
                   value={discountReason} onChange={(event) => setDiscountReason(event.target.value)} />
               </label>}

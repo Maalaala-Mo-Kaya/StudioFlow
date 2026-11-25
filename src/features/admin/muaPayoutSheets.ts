@@ -104,7 +104,7 @@ export function addMuaPayoutSheets(workbook: Workbook, { lines, shared, payouts,
   summary.addRow([]);
   for (const note of [
     'The client pays the studio everything; the studio pays the makeup artists.',
-    'EARNED: what each artist earned for the services they completed (sold price, less its MUA discount share, plus adjustments).',
+    'EARNED: what each artist earned for the services they completed (full sold price, plus adjustments; discounts come out of the Studio charges, never from the artist pay).',
     'PAID OUT: lines covered by a recorded payout (MP-…). UNPAID: still owed. NEEDS REVIEW: amounts an admin must verify before paying.',
     'EARNED ON FULLY PAID ORDERS: of the earnings, those on orders the client has paid in full.',
     'WARDROBE / SHARED MUA MONEY: MUA charges that are not one artist\'s service (e.g. Wardrobe). It belongs to the MUA team and is split outside the system. The MUA WARDROBE & SHARED sheet lists each job order.',
