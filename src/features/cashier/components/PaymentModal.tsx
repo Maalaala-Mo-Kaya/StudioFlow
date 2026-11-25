@@ -2,7 +2,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { Registration } from '../../../types';
-import { PAYMENT_METHOD_OPTIONS } from '../../../constants/studio';
+import { DISCOUNT_REASONS, PAYMENT_METHOD_OPTIONS } from '../../../constants/studio';
 import { formatClientName, formatCurrency, formatJobOrderNo, formatQueueNumber } from '../../../utils/formatters';
 import { canUseCollectionMode, type CollectionMode } from '../useCashierState';
 import { discountCents, revenueTerms, toCentavos } from '../../../utils/revenue';
@@ -79,6 +79,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const eligibleBaseCents = terms.studio + (savedDiscount?.studio ?? 0);
   const paidCents = toCentavos(selectedReg.paid_amount);
   const reasonText = reason.trim().replace(/\s+/g, ' ');
+  // Compared the way the server saves it: an empty box against a discount saved without a reason is no change.
+  const savedReason = (savedDiscount?.reason ?? '').trim().replace(/\s+/g, ' ');
   // Percent
   const percentageNumber = Number(percentage);
   const validPercentage = percentage === String(savedPercentage) || (/^\d+$/.test(percentage) && percentageNumber <= 100);
@@ -91,7 +93,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const replacingFixed = kind === 'amount' && Number.isFinite(fixedCents) && fixedCents >= 100
     && (!savedFixed || fixedCents !== (savedDiscount?.studio ?? 0));
   const rateChanged = replacingRate || replacingFixed;
-  const discountChanged = rateChanged || (currentCredit > 0 && reasonText !== savedDiscount?.reason);
+  const discountChanged = rateChanged || (currentCredit > 0 && discountOn && reasonText !== '' && reasonText !== savedReason);
   const previewCredit = removingCredit ? 0
     : replacingRate ? studioCredit + (savedDiscount?.mua ?? 0)
     : replacingFixed ? fixedCents + (savedDiscount?.mua ?? 0)
@@ -151,6 +153,20 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const changeCentavos = isCash && !amountError && !cashError ? cashCentavos - amountCentavos : 0;
   const canSubmit = !isProcessing && !discountError && !reasonError && (noPayment
     || (needsPayment && modeAllowed(paymentType) && !amountError && !cashError && cashierName.trim().length > 0));
+  // Why Confirm is off, shown beside it (the field's own message may be out of view), with the field to fix.
+  const blocker: [string, string] | null = isProcessing || canSubmit ? null
+    : reasonError ? ['The discount needs a reason. Tap a reason or type one.', 'pos-discount-reason']
+    : discountError ? [discountError, 'pos-discount-value']
+    : !needsPayment ? null
+    : !modeAllowed(paymentType) ? ['Choose a collection mode.', '']
+    : amountError ? [amountError, 'pos-payment-amount']
+    : cashError ? [cashError, 'pos-cash-received']
+    : !cashierName.trim() ? ['Enter who prepared the payment (cashier).', 'pos-cashier-name'] : null;
+  const showField = (id: string) => {
+    const field = id ? document.getElementById(id) : null;
+    field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    field?.focus({ preventScroll: true });
+  };
 
   const selectMode = (mode: CollectionMode) => {
     if (modeDisabled(mode) || mode === paymentType) return;
@@ -246,7 +262,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   {kind === 'percent' ? (
                     <label className="block text-sm">Discount percentage
                       <span className="mt-1 flex w-full items-center border border-line bg-panel">
-                        <input type="text" inputMode="numeric" maxLength={3} className="min-w-0 flex-1 bg-transparent p-2 outline-none"
+                        <input id="pos-discount-value" type="text" inputMode="numeric" maxLength={3} className="min-w-0 flex-1 bg-transparent p-2 outline-none"
                           aria-invalid={Boolean(percentError)} aria-describedby={percentError ? 'pos-percent-error' : undefined}
                           value={percentage}
                           // Whole numbers from 0 to 100 only: anything else is not typed in.
@@ -258,7 +274,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     <label className="block text-sm">Discount amount
                       <span className="mt-1 flex w-full items-center border border-line bg-panel">
                         <span className="pl-3 font-black text-gold-soft" aria-hidden="true">₱</span>
-                        <input type="text" inputMode="numeric" maxLength={7} placeholder="e.g. 200" className="min-w-0 flex-1 bg-transparent p-2 outline-none"
+                        <input id="pos-discount-value" type="text" inputMode="numeric" maxLength={7} placeholder="e.g. 200" className="min-w-0 flex-1 bg-transparent p-2 outline-none"
                           aria-invalid={Boolean(amountDiscountError)} aria-describedby={amountDiscountError ? 'pos-percent-error' : undefined}
                           value={fixedInput} onChange={(event) => { if (/^\d{0,7}$/.test(event.target.value)) setFixedInput(event.target.value); }} />
                       </span>
@@ -268,12 +284,21 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   {!discountError && currentCredit > 0 && <p className="mt-1 text-xs text-neutral-600">Switch the discount off to remove it.</p>}
                 </div>
                 <div>
-                  <label className="block text-sm">Reason
-                    <input className="mt-1 block w-full border border-line bg-panel p-2" maxLength={500} placeholder="e.g. Student council officer"
+                  <label className="block text-sm">Reason <span className="text-red-600">*</span>
+                    <input id="pos-discount-reason" className="mt-1 block w-full border border-line bg-panel p-2" maxLength={500} placeholder="e.g. Student council officer"
                       aria-invalid={Boolean(reasonError)} aria-describedby={reasonError ? 'pos-reason-error' : undefined}
                       value={reason} onChange={(event) => setReason(event.target.value)} />
                   </label>
                   {reasonError && <p id="pos-reason-error" className="mt-1 text-xs font-bold text-red-600">{reasonError}</p>}
+                </div>
+                {/* One tap for the usual reasons; the box above still takes any reason. */}
+                <div className="flex flex-wrap gap-1.5 sm:col-span-2" aria-label="Common discount reasons">
+                  {DISCOUNT_REASONS.map((preset) => (
+                    <button key={preset} type="button" onClick={() => setReason(preset)} aria-pressed={reasonText === preset}
+                      className={`min-h-[32px] border px-2.5 text-[11px] font-bold cursor-pointer ${reasonText === preset ? 'border-gold bg-gold-wash text-ink' : 'border-neutral-300 text-neutral-700 hover:border-line'}`}>
+                      {preset}
+                    </button>
+                  ))}
                 </div>
               </div>
               </>)}
@@ -373,6 +398,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   Prepared By (Cashier)
                 </label>
                 <input
+                  id="pos-cashier-name"
                   type="text"
                   value={cashierName}
                   onChange={(e) => onCashierNameChange(e.target.value)}
@@ -438,6 +464,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             </div>
 
           </fieldset>}
+
+          {/* Why Confirm is off, right above it, with a link to the field. */}
+          {blocker && (
+            <p role="status" className="border border-red-600/50 bg-canvas p-2 text-xs font-bold text-red-600">
+              Can't confirm yet: {blocker[0]}{' '}
+              {blocker[1] && (
+                <button type="button" onClick={() => showField(blocker[1])} className="underline cursor-pointer">Show me</button>
+              )}
+            </p>
+          )}
 
           {/* Submit Buttons */}
           <div className="pt-4 lg:pt-3 border-t border-neutral-200 flex gap-3">

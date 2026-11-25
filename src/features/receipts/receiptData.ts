@@ -108,14 +108,59 @@ export function soldPackagePrice(reg: Registration): number {
   return (cents(reg.total_amount) + discountCents(reg) - Math.round(sumAddOnAmounts(getRegistrationAddOns(reg.add_ons)) * 100) - cents(reg.other_fees)) / 100;
 }
 
+/**
+ * What the client bought besides the package: Studio add-ons and other fees (MUA charges: `orderMuaExtras`).
+ * The discount is not a purchase: it prints in its own box beside the package (`orderDiscountCell`).
+ */
 export function orderExtras(reg: Registration): [string, number][] {
-  const addOns = getRegistrationAddOns(reg.add_ons);
-  const credit = discountCents(reg) / 100;
+  const addOns = getRegistrationAddOns(reg.add_ons).filter((item) => item.revenue_category !== 'mua');
   return [
-    ...addOns.map((item): [string, number] => [item.name + (item.revenue_category === 'mua' ? ' (MUA)' : ''), item.amount]),
+    ...addOns.map((item): [string, number] => [item.name, item.amount]),
     ...(reg.other_fees ? [['Other fees', reg.other_fees] as [string, number]] : []),
-    ...(credit && reg.status !== 'cancelled' ? [[`Discount credit (${discountRate(reg.revenue_discount, reg.total_amount)}) · ${reg.revenue_discount?.reason}`, -credit] as [string, number]] : []),
   ];
+}
+
+/** The job order's Discount box (beside the package): "Discount (10%)" / "−₱2,000.00 · reason"; null when none or cancelled. */
+export function orderDiscountCell(reg: Registration, currency = true): { label: string; value: string } | null {
+  const { amount, rate, reason } = orderDiscount(reg);
+  if (amount <= 0) return null;
+  return {
+    label: rate === 'Fixed amount' ? 'Discount (fixed amount)' : `Discount (${rate})`,
+    value: [`-${currency ? '' : 'PHP '}${peso(amount, currency)}`, reason].filter(Boolean).join(' · '),
+  };
+}
+
+/** The totals line for the discount, short enough for the totals box: "Less discount (10%)" or "Less discount". */
+export function lessDiscountLabel(reg: Registration): string {
+  const { rate } = orderDiscount(reg);
+  return rate && rate !== 'Fixed amount' ? `Less discount (${rate})` : 'Less discount';
+}
+
+/**
+ * MUA charges on the order: makeup services and shared MUA items (the automatic Wardrobe add-on).
+ * The studio collects them with the rest of the order and pays the MUA team, so receipts list them apart.
+ */
+export function orderMuaExtras(reg: Registration): [string, number][] {
+  return getRegistrationAddOns(reg.add_ons)
+    .filter((item) => item.revenue_category === 'mua')
+    .map((item): [string, number] => [item.name, item.amount]);
+}
+
+/** The order's Studio and MUA parts at their sold prices, before any discount (pesos; they add up to the original billed). */
+export function orderParts(reg: Registration): { studio: number; mua: number } {
+  const packageMua = (reg.package_snapshot?.revenue_category || reg.expand?.package?.revenue_category) === 'mua'
+    ? Math.round(soldPackagePrice(reg) * 100) : 0;
+  const mua = packageMua + Math.round(orderMuaExtras(reg).reduce((sum, [, amount]) => sum + amount, 0) * 100);
+  const original = Math.round((reg.total_amount || 0) * 100) + discountCents(reg);
+  return { studio: (original - mua) / 100, mua: mua / 100 };
+}
+
+/** "Studio ₱19,200.00 · MUA services ₱400.00": the order's two parts, for the receipts ('' when it has no MUA charge). */
+export function orderPartsLine(reg: Registration, currency = true): string {
+  const { studio, mua } = orderParts(reg);
+  if (mua <= 0) return '';
+  const format = (value: number) => (currency ? '' : 'PHP ') + peso(value, currency);
+  return `Studio ${format(studio)} · MUA services ${format(mua)} (paid to the MUA team)`;
 }
 
 /** The job order's discount credit as printed in its totals: percentage and amount (0 when none or cancelled). */
@@ -124,12 +169,77 @@ export function orderDiscount(reg: Registration): { amount: number; rate: string
   return { amount, rate: discountRate(reg.revenue_discount, reg.total_amount), reason: reg.revenue_discount?.reason ?? '' };
 }
 
-export function paymentDiscount(payment: PaymentRecord) {
+const snapshotCents = (payment?: PaymentRecord) =>
+  payment?.discount_snapshot ? payment.discount_snapshot.studio + payment.discount_snapshot.mua : 0;
+
+/** The counted payment just before this one (null for the first). */
+function previousPayment(payment: PaymentRecord, payments: PaymentRecord[]): PaymentRecord | null {
+  const end = timeOf(payment.created);
+  return payments
+    .filter((p) => p.id !== payment.id && isCounted(p) && timeOf(p.created) < end)
+    .reduce<PaymentRecord | null>((last, p) => (!last || timeOf(p.created) > timeOf(last.created) ? p : last), null);
+}
+
+/**
+ * The discount given (or changed) since the previous payment, as printed on this payment's receipt.
+ * Every later payment keeps a copy of the order's discount (`discount_snapshot`), but the client gets it once:
+ * it shows only on the receipt of the payment it came with. `amount` is the change in pesos (negative when reduced).
+ */
+export function paymentDiscount(payment: PaymentRecord, payments: PaymentRecord[] = []) {
   const snapshot = payment.discount_snapshot;
   if (!snapshot) return null;
-  const amount = (snapshot.studio + snapshot.mua) / 100;
+  const amount = (snapshotCents(payment) - snapshotCents(previousPayment(payment, payments) ?? undefined)) / 100;
   if (!amount) return null;
   return { amount, percentage: snapshot.percentage, rate: discountRate(snapshot), reason: snapshot.reason };
+}
+
+/**
+ * What changed on the order between payments, for the job order's payment table, so its balance column adds up:
+ * "Before OR-000024: + Hair Only ₱100.00 · − Discount ₱400.00 (Returning client)", and "Since OR-000024: …"
+ * for changes after the last payment. Changes before the first payment are already in the order itself.
+ */
+export function jobOrderAdjustments(data: ReceiptData, currency = true): string[] {
+  const counted = data.payments.filter(isCounted).sort((a, b) => timeOf(a.created) - timeOf(b.created));
+  const money = (value: number) => (currency ? '' : 'PHP ') + peso(value, currency);
+  // The PDF's built-in fonts have no minus sign: a plain "-" there.
+  const minus = currency ? '−' : '-';
+  const describe = (additions: string[], discount: number, reason: string) => [
+    ...additions.map((line) => `+ ${line}`),
+    ...(discount > 0 ? [`${minus} Discount ${money(discount)}${reason ? ` (${reason})` : ''}`]
+      : discount < 0 ? [`+ Discount reduced ${money(-discount)}`] : []),
+  ].join(' · ');
+  const notes: string[] = [];
+  counted.forEach((payment, index) => {
+    if (index === 0) return;
+    const discount = paymentDiscount(payment, data.payments);
+    const text = describe(paymentAdditions(data, payment, currency), discount?.amount ?? 0, discount?.reason ?? '');
+    if (text) notes.push(`Before ${receiptLabel(payment)}: ${text}`);
+  });
+  // After the last payment: items added since, and a discount given or changed since (not yet on a receipt).
+  const last = counted.at(-1);
+  const reg = data.registration;
+  if (last && reg.status !== 'cancelled') {
+    const since = changeLines(reg, timeOf(last.created), Infinity, currency);
+    const discount = (discountCents(reg) - snapshotCents(last)) / 100;
+    const text = describe(since, discount, reg.revenue_discount?.reason ?? '');
+    if (text) notes.push(`Since ${receiptLabel(last)}: ${text}`);
+  }
+  return notes;
+}
+
+/** Items, package and fee changes logged on the order in (start, end]. */
+function changeLines(reg: Registration, start: number, end: number, currency: boolean): string[] {
+  const changes = reg.order_changes;
+  if (!Array.isArray(changes) || !changes.length) return [];
+  const lines: string[] = [];
+  for (const change of changes) {
+    const at = timeOf(change.at);
+    if (!(at > start && at <= end)) continue;
+    for (const item of change.added ?? []) lines.push(`${item.name} ${peso(item.amount, currency)}`);
+    if (change.package?.to) lines.push(`Package → ${change.package.to}`);
+    if (change.fees && change.fees.to > change.fees.from) lines.push(`Other fees ${peso(change.fees.to - change.fees.from, currency)}`);
+  }
+  return lines;
 }
 
 /** An order with a job order number already has a printed claim stub (worth reprinting after a change). */
@@ -149,20 +259,8 @@ const timeOf = (value: string) => Date.parse(value.includes('T') ? value : value
  * "Package → Premium B"), so the receipt says what the extra payment is for. Empty when nothing was added.
  */
 export function paymentAdditions(data: ReceiptData, payment: PaymentRecord, currency = true): string[] {
-  const changes = data.registration.order_changes;
-  if (!Array.isArray(changes) || !changes.length) return [];
-  const end = timeOf(payment.created);
-  const earlier = data.payments.filter((p) => p.id !== payment.id && isCounted(p) && timeOf(p.created) < end);
-  const start = earlier.length ? Math.max(...earlier.map((p) => timeOf(p.created))) : -Infinity;
-  const lines: string[] = [];
-  for (const change of changes) {
-    const at = timeOf(change.at);
-    if (!(at > start && at <= end)) continue;
-    for (const item of change.added ?? []) lines.push(`${item.name} ${peso(item.amount, currency)}`);
-    if (change.package?.to) lines.push(`Package → ${change.package.to}`);
-    if (change.fees && change.fees.to > change.fees.from) lines.push(`Other fees ${peso(change.fees.to - change.fees.from, currency)}`);
-  }
-  return lines;
+  const previous = previousPayment(payment, data.payments);
+  return changeLines(data.registration, previous ? timeOf(previous.created) : -Infinity, timeOf(payment.created), currency);
 }
 
 export function receiptRevenueLine(data: ReceiptData, payment?: PaymentRecord, currency = true) {
@@ -174,19 +272,22 @@ export function receiptRevenueLine(data: ReceiptData, payment?: PaymentRecord, c
   const format = (value: number) => (currency ? '' : 'PHP ') + peso(value / 100, currency);
   return [
     `Studio ${format(split.studio)}`, `MUA ${format(split.mua)}`,
-    ...(split.unallocated ? [`Unallocated ${format(split.unallocated)}`] : []),
-  ].join(' / ');
+    // Downpayments on orders mixing Studio and MUA charges are split once the order is fully paid:
+    // held then, and the settling payment splits that earlier cash into Studio and MUA.
+    ...(split.unallocated > 0 ? [`Held until fully paid ${format(split.unallocated)}`]
+      : split.unallocated < 0 ? [`Earlier held cash split ${format(-split.unallocated)}`] : []),
+  ].join(' · ');
 }
 
 export const isCounted = (payment: PaymentRecord) => (payment.status || 'completed') === 'completed';
 
 /**
  * Start on the letter-size job order for ordinary first payments and the
- * payment receipt for later payments or a payment with a discount snapshot.
+ * payment receipt for later payments or a payment that came with a discount.
  */
 export function printModeFor(payment: PaymentRecord | undefined, payments: PaymentRecord[]): PrintMode {
   if (!payment) return 'joborder';
-  if (paymentDiscount(payment)) return 'receipt';
+  if (paymentDiscount(payment, payments)) return 'receipt';
   const index = payments.findIndex((item) => item.id === payment.id);
   return payments.slice(0, Math.max(0, index)).some(isCounted) ? 'receipt' : 'joborder';
 }

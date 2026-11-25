@@ -38,16 +38,22 @@ export const ThemeToggle: React.FC = () => {
       aria-checked={isLight}
       aria-label={isLight ? 'Switch to night theme' : 'Switch to day theme'}
       title={isLight ? 'Night mode' : 'Day mode'}
-      className="group relative flex h-9 w-[4.5rem] shrink-0 items-center rounded-full border border-gold/50 bg-obsidian-2 p-1 cursor-pointer transition-colors hover:border-gold focus-visible:outline-2 focus-visible:outline-gold focus-visible:outline-offset-2"
+      className="group relative block h-9 w-[4.5rem] shrink-0 rounded-full border border-gold/50 bg-obsidian-2 cursor-pointer transition-colors hover:border-gold focus-visible:outline-2 focus-visible:outline-gold focus-visible:outline-offset-2"
     >
+      {/* Inside the 1px border the track is 70 × 34px: a 28px knob with a 3px gap on every side,
+          travelling 70 − 28 − 2 × 3 = 36px. Each icon sits centred on one of the knob's two stops. */}
       <span
         aria-hidden="true"
-        className={`absolute top-1 left-1 size-7 rounded-full bg-gradient-to-br from-gold-bright via-gold to-gold-deep shadow-[0_0_14px_rgb(212_175_55/0.55)] transition-transform duration-300 ease-out ${
-          isLight ? 'translate-x-[2.25rem]' : 'translate-x-0'
+        className={`absolute top-[3px] left-[3px] size-7 rounded-full bg-gradient-to-br from-gold-bright via-gold to-gold-deep shadow-[0_0_14px_rgb(212_175_55/0.55)] transition-transform duration-300 ease-out ${
+          isLight ? 'translate-x-9' : 'translate-x-0'
         }`}
       />
-      <Moon aria-hidden="true" className={`relative z-10 ml-1.5 size-4 transition-colors ${isLight ? 'text-gold-soft' : 'text-on-gold'}`} />
-      <Sun aria-hidden="true" className={`relative z-10 ml-auto mr-1.5 size-4 transition-colors ${isLight ? 'text-on-gold' : 'text-gold-soft'}`} />
+      <span aria-hidden="true" className="absolute top-[3px] left-[3px] z-10 grid size-7 place-items-center">
+        <Moon className={`size-4 transition-colors ${isLight ? 'text-gold-soft' : 'text-on-gold'}`} />
+      </span>
+      <span aria-hidden="true" className="absolute top-[3px] right-[3px] z-10 grid size-7 place-items-center">
+        <Sun className={`size-4 transition-colors ${isLight ? 'text-on-gold' : 'text-gold-soft'}`} />
+      </span>
     </button>
   );
 };

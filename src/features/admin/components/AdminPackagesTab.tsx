@@ -1,11 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, Sparkles, Gift, Package as PackageIcon, Layers, Box, ListChecks, FileSpreadsheet, FileText, FileDown, Loader2 } from 'lucide-react';
+import { Plus, Sparkles, Package as PackageIcon, Layers, Box, FileSpreadsheet, FileText, FileDown, Loader2 } from 'lucide-react';
 import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
 import type { Package, AddOn, RevenueCategory, CatalogItem, CatalogItemInput, ItemPackage, StaffUser } from '../../../types';
-import { formatCurrency, parsePackageInclusions } from '../../../utils/formatters';
-import { parseInclusionTree } from '../../../utils/inclusions';
-import { optionGroups } from '../../../utils/packageOptions';
-import { InclusionTreeView } from '../../../components/common/InclusionTreeView';
+import { formatCurrency } from '../../../utils/formatters';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { Modal } from '../../../components/common/Modal';
 import { useToast } from '../../../context/ToastContext';
@@ -15,7 +12,7 @@ import { DefaultAddOnInput, MuaRequirementBadge, MuaRequirementInput, PackageKin
 import { PackageBuilder } from './PackageBuilder';
 import { ItemPackagesPanel } from './ItemPackagesPanel';
 import { CatalogItemsPanel } from './CatalogItemsPanel';
-import { packagePhotoUrls } from '../../../utils/packagePhotos';
+import { PackageCatalog } from './PackageCatalog';
 
 type View = 'packages' | 'sets' | 'items' | 'addons';
 
@@ -234,67 +231,10 @@ export const AdminPackagesTab: React.FC<AdminPackagesTabProps> = ({
             </button>
           </div>
 
-          <div className="bg-panel border-2 border-line shadow-lux p-5 space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b-2 border-line">
-              <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink">Package Catalog</h3>
-              <span className="font-mono text-[10px] bg-obsidian text-gold px-2 py-0.5 font-bold">{packages.length} Packages</span>
-            </div>
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              {packages.map((pkg) => {
-                const freebies = parsePackageInclusions(pkg.freebies);
-                const [cover] = packagePhotoUrls(pkg, 'card');
-                return (
-                  <div key={pkg.id} className={`p-3.5 border-2 space-y-2 ${pkg.is_active !== false ? 'bg-panel border-line' : 'bg-neutral-100 border-neutral-300 opacity-60'} ${
-                    building !== 'new' && building?.id === pkg.id ? 'ring-2 ring-gold' : ''}`}>
-                    <div className="flex justify-between items-start gap-2">
-                      {cover
-                        ? <img src={cover} alt="" loading="lazy" className="w-16 h-12 shrink-0 object-cover border border-line" />
-                        : <span className="w-16 h-12 shrink-0 flex items-center justify-center border border-dashed border-neutral-400 text-[8px] font-black uppercase text-neutral-500 text-center leading-tight">No photo</span>}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-black bg-obsidian text-gold px-1.5 py-0.5 uppercase">{pkg.code}</span>
-                          <span className="font-bold text-sm text-ink uppercase">{pkg.name}</span>
-                        </div>
-                        <div className="font-mono text-sm font-black text-gold-soft mt-1">{formatCurrency(pkg.amount)}</div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button type="button" onClick={() => onTogglePackageActive(pkg.id, pkg.is_active !== false)}
-                          className={`px-2 py-0.5 text-[10px] font-bold uppercase border cursor-pointer ${pkg.is_active !== false
-                            ? 'bg-emerald-100 text-emerald-800 border-emerald-400' : 'bg-neutral-200 text-neutral-600 border-neutral-400'}`}>
-                          {pkg.is_active !== false ? 'Active' : 'Archived'}
-                        </button>
-                        <span className={recordActionGroup}>
-                          <RecordActionButton variant="edit" recordName={pkg.name} onClick={() => { setBuilding(pkg); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
-                          <RecordActionButton variant="delete" recordName={pkg.name} onClick={() => promptDeletePackage(pkg)} />
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-neutral-400">{PACKAGE_KIND_LABELS[(pkg.client_kind || 'school') as PackageKind]}</span>
-                      <MuaRequirementBadge required={pkg.requires_mua} revenue={pkg.revenue_category} />
-                      <RevenueBadge value={pkg.revenue_category} />
-                      {!pkg.structure && <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-amber-500 text-amber-800">Not built yet: open to build</span>}
-                    </div>
-                    <InclusionTreeView inclusions={parseInclusionTree(pkg.inclusions)} variant="compact" />
-                    {optionGroups(pkg).map((g) => (
-                      <div key={g.id} className="flex flex-wrap items-center gap-1 text-[10px]">
-                        <ListChecks className="w-3 h-3 text-gold" />
-                        <b className="uppercase">{g.name}:</b>
-                        {g.replaces && <span>keep {g.replaces}{g.replaces_for && g.replaces_for !== 'all' ? ` (${g.replaces_for} only)` : ''} or</span>}
-                        {g.choices.map((c) => <span key={c.id} className="px-1.5 border border-neutral-400">{c.label}{c.for !== 'all' ? ` · ${c.for}` : ''}</span>)}
-                      </div>
-                    ))}
-                    {freebies.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1">
-                        <span className="flex items-center gap-1 text-[10px] font-black uppercase text-gold-soft"><Gift className="w-3 h-3" /> Freebies:</span>
-                        {freebies.map((item, i) => <span key={i} className="px-2 py-0.5 text-[10px] border border-gold text-gold-soft">{item}</span>)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <PackageCatalog packages={packages} editingId={building && building !== 'new' ? building.id : null}
+            onEdit={(pkg) => { setBuilding(pkg); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onDelete={promptDeletePackage}
+            onToggleActive={(pkg) => void onTogglePackageActive(pkg.id, pkg.is_active !== false)} />
         </div>
       )}
 

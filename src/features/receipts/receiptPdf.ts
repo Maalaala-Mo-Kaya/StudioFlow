@@ -5,7 +5,7 @@ import { STUDIO_INFO } from '../../constants/studio';
 import { pb } from '../../db/pocketbase';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import {
-  orderDiscount, orderExtras, receiptRevenueLine,
+  jobOrderAdjustments, lessDiscountLabel, orderDiscountCell, orderExtras, orderMuaExtras, orderPartsLine, receiptRevenueLine,
   isCounted, isComplimentarySettlement, jobOrderMarks, paymentAdditions, paymentDiscount, soldPackagePrice, loadReceiptData, loadRefundSignature, methodLabel, paymentTypeLabel, peso, receiptDate, receiptLabel, refundAcknowledgment, refundFigures, signatureUrl, statusLabel,
   visiblePayments, profileCells, profileLine,
   type ReceiptData, type ReceiptPaper, type RefundSlipData,
@@ -133,12 +133,15 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   const pkg = reg.package_snapshot || reg.expand?.package;
   // Add-ons, then other fees: listed one per line below the client grid (the client shows them at each station).
   const extras = orderExtras(reg);
+  const discountCell = orderDiscountCell(reg, false);
   const cells: Array<[string, string, number, boolean?]> = [
     ['CLIENT NAME', `${reg.family_name}, ${reg.given_name}${reg.middle_name ? ' ' + reg.middle_name : ''}`.toUpperCase(), 2, true],
     ['MOBILE', reg.mobile_number || '—', 1],
     ['EMAIL', reg.email || '—', 1],
     ...profileCells(reg).map(([label, value, span]): [string, string, number] => [label.toUpperCase(), value, span]),
-    ['PACKAGE', pkg ? `${pkg.code} · ${pkg.name} — ${php(soldPackagePrice(reg))}` : '—', 4],
+    ['PACKAGE', pkg ? `${pkg.code} · ${pkg.name} — ${php(soldPackagePrice(reg))}` : '—', discountCell ? 2 : 4],
+    // The discount beside the package (not an item the client bought): amount and reason.
+    ...(discountCell ? [[discountCell.label.toUpperCase(), discountCell.value, 2] as [string, string, number]] : []),
   ];
   let cx = x;
   let cy = y;
@@ -150,24 +153,97 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
     cx += cw;
     if (cx >= right - 0.001) { cx = x; cy += rowH; }
   }
-  // Add-ons: numbered, two columns, name and price on every line (never cut off mid-list).
-  const lineH = 0.13;
-  const addOnRows = Math.max(1, Math.ceil(extras.length / 2));
-  const addOnsH = 0.12 + addOnRows * lineH;
+  // Totals box height (worked out first: the add-ons layout depends on the space left under it).
+  const cancelled = reg.status === 'cancelled';
+  const credit = cancelled ? 0 : discountCents(reg) / 100;
+  // The lines above the balance, stacked so none overlap (a discounted order with a refund has five).
+  // (Plain "-": the built-in PDF fonts have no minus sign.)
+  const totalRows: [string, string, number, RGB?][] = [['ORIGINAL BILLED', php(reg.total_amount + discountCents(reg) / 100), 8]];
+  // As on any invoice: original − discount = amount due; payments then come off that.
+  if (credit > 0) totalRows.push([lessDiscountLabel(reg).toUpperCase(), '-' + php(credit), 7], ['AMOUNT DUE', php(reg.total_amount), 7]);
+  // paid_amount is net of refunds; show the refund on its own line so the figures add up.
+  if ((reg.refunded_amount ?? 0) > 0) {
+    totalRows.push(['LESS REFUNDS', '-' + php(reg.refunded_amount), 7], ['NET PAID', php(reg.paid_amount), 7, GREEN]);
+  } else {
+    totalRows.push(['PAYMENTS RECEIVED', php(reg.paid_amount), 8, GREEN]);
+  }
+  // Two lines keep the original spacing; more are stacked closer, and the box grows if still needed.
+  const step = totalRows.length <= 2 ? 0.15 : 0.095;
+  const balanceY = 0.15 + (totalRows.length - 1) * step + (totalRows.length <= 2 ? 0.18 : 0.125);
+  const grow = Math.max(0, balanceY - 0.48);
+  // A cancelled order has one more line (money held by the studio), so its box is taller.
+  const extra = (cancelled ? 0.2 : 0) + grow;
+  // The payment table beside it: rows, then what changed between payments (so its balance column adds up).
+  const { rows, hidden } = visiblePayments(payments);
+  const adjustments = jobOrderAdjustments(data, false);
+  const tableH = 0.15 + Math.max(1, rows.length) * 0.17 + (hidden > 0 ? 0.11 : 0) + adjustments.length * 0.1 + 0.13;
+  // Height of the payments + totals band: the taller of the two.
+  const band = Math.max(1.02 + extra, tableH + 0.04);
+
+  // The studio copy sits at the bottom of the page: keep 1 in blank so printer margins never cut the last lines.
+  const footerY = top + 5.5 - (isCustomer ? 0.24 : 1.0);
+  // The customer copy's terms at a font size: their lines, split into two columns.
+  const termsColW = (w - 0.2) / 2;
+  const termsAt = (size: number) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(size);
+    const lines = data.terms.flatMap((clause, index) =>
+      (doc.splitTextToSize(`${index + 1}. ${clause}`, termsColW) as string[]).map((text, i) => (i ? '   ' + text : text)));
+    return { lines, perColumn: Math.ceil(lines.length / 2), lineH: size * 1.22 * PT };
+  };
+
+  // Add-ons: numbered, name and price on every line (never cut off mid-list).
+  // MUA charges get their own section below the Studio ones: the studio collects them and pays the MUA team.
+  // Many items: the first layout that leaves room for everything below (tighter lines, then three columns).
+  const muaExtras = orderMuaExtras(reg);
+  const layouts = [
+    { cols: 2, lineH: 0.13, size: 8, signGap: 0.34, partsOnTitle: false, gap: 0.2, bare: false },
+    { cols: 2, lineH: 0.115, size: 7.5, signGap: 0.32, partsOnTitle: true, gap: 0.2, bare: false },
+    // Three columns: prices without "PHP" (the titles say it), so the names keep their room.
+    { cols: 3, lineH: 0.115, size: 7, signGap: 0.3, partsOnTitle: true, gap: 0.15, bare: true },
+  ];
+  type Layout = typeof layouts[number];
+  const rowsIn = (count: number, cols: number) => Math.max(1, Math.ceil(count / cols));
+  const boxHeight = (l: Layout) => 0.12 + rowsIn(extras.length, l.cols) * l.lineH
+    + (muaExtras.length ? 0.14 + rowsIn(muaExtras.length, l.cols) * l.lineH + (l.partsOnTitle ? 0.03 : 0.12) : 0);
+  const minimumTerms = isCustomer ? termsAt(5.6) : null;
+  // Under the add-ons: payments and totals, sign-offs, then the terms (customer) or one line (studio).
+  const fits = (l: Layout) => cy + boxHeight(l) + 0.07 + band + l.signGap + 0.2
+    + (minimumTerms ? 0.21 + (minimumTerms.perColumn - 1) * minimumTerms.lineH : 0.2)
+    <= footerY - (isCustomer ? 0.14 : 0.1);
+  const layout = layouts.find(fits) ?? layouts[layouts.length - 1];
+  const addOnsH = boxHeight(layout);
   box(doc, x, cy, w, addOnsH);
-  put(doc, `ADD-ONS${extras.length ? ` (${extras.length})` : ''}`, x + 0.06, cy + 0.09, { size: 5, bold: true, mono: true, color: GREY });
-  if (!extras.length) put(doc, 'None', x + 0.06, cy + 0.2, { size: 8.5, bold: true });
-  const columnW = (w - 0.12 - 0.2) / 2;
-  extras.forEach(([label, amount], index) => {
-    const colX = x + 0.06 + (index % 2) * (columnW + 0.2);
-    const lineY = cy + 0.2 + Math.floor(index / 2) * lineH;
-    const price = php(amount);
+  const columnW = (w - 0.12 - layout.gap * (layout.cols - 1)) / layout.cols;
+  const amountsIn = layout.bare ? ' · AMOUNTS IN PHP' : '';
+  const drawItems = (items: [string, number][], itemsTop: number) => items.forEach(([label, amount], index) => {
+    const colX = x + 0.06 + (index % layout.cols) * (columnW + layout.gap);
+    const lineY = itemsTop + Math.floor(index / layout.cols) * layout.lineH;
+    const price = layout.bare ? peso(amount, false) : php(amount);
     doc.setFont('courier', 'bold');
-    doc.setFontSize(8);
-    const priceW = doc.getTextWidth(price);
-    put(doc, `${index + 1}. ${label}`, colX, lineY, { size: 8, bold: true, width: columnW - priceW - 0.1 });
-    put(doc, price, colX + columnW, lineY, { size: 8, bold: true, mono: true, align: 'right' });
+    doc.setFontSize(layout.size);
+    const room = columnW - doc.getTextWidth(price) - 0.08;
+    // A long name gets a smaller font before it is ever cut off.
+    const name = `${index + 1}. ${label}`;
+    let nameSize = layout.size;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(nameSize);
+    while (nameSize > 5.6 && doc.getTextWidth(name) > room) doc.setFontSize(nameSize -= 0.2);
+    put(doc, name, colX, lineY, { size: nameSize, bold: true, width: room });
+    put(doc, price, colX + columnW, lineY, { size: layout.size, bold: true, mono: true, align: 'right' });
   });
+  put(doc, `${muaExtras.length ? 'STUDIO ADD-ONS' : 'ADD-ONS'}${extras.length ? ` (${extras.length})` : ''}${amountsIn}`, x + 0.06, cy + 0.09, { size: 5, bold: true, mono: true, color: GREY });
+  if (!extras.length) put(doc, 'None', x + 0.06, cy + 0.2, { size: 8.5, bold: true });
+  drawItems(extras, cy + 0.2);
+  if (muaExtras.length) {
+    const my = cy + 0.12 + rowsIn(extras.length, layout.cols) * layout.lineH;
+    rule(doc, x + 0.06, my, right - 0.06, my, 0.5, true);
+    put(doc, `MUA SERVICES (${muaExtras.length}) · PAID TO THE MUA TEAM${amountsIn}`, x + 0.06, my + 0.09, { size: 5, bold: true, mono: true, color: GREY });
+    drawItems(muaExtras, my + 0.2);
+    // The Studio / MUA line: under the MUA lines, or on the section's title line when space is short.
+    const partsY = layout.partsOnTitle ? my + 0.095 : my + 0.2 + (rowsIn(muaExtras.length, layout.cols) - 1) * layout.lineH + 0.12;
+    put(doc, orderPartsLine(reg, false), right - 0.06, partsY, { size: 6.5, bold: true, mono: true, align: 'right' });
+  }
   y = cy + addOnsH + 0.07;
 
   // Payment table
@@ -185,7 +261,6 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
     tx += cw;
   }
   let ty = y + 0.15;
-  const { rows, hidden } = visiblePayments(payments);
   if (!rows.length) {
     box(doc, x, ty, tableW, 0.17);
     put(doc, complimentary ? 'Settled with discount credit' : 'No payment recorded yet', x + tableW / 2, ty + 0.115, { size: 6.5, italic: true, color: GREY, align: 'center' });
@@ -215,31 +290,16 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
     put(doc, `+ ${hidden} more payment${hidden === 1 ? '' : 's'} on file (older or voided)`, x + 0.05, ty + 0.11, { size: 6, italic: true, color: GREY });
     ty += 0.11;
   }
+  for (const note of adjustments) {
+    put(doc, note, x + 0.05, ty + 0.1, { size: 5.8, bold: true, color: [51, 51, 51], width: tableW - 0.1 });
+    ty += 0.1;
+  }
   // Studio / MUA split: under the payment table (it used to sit on the Add-ons box's bottom border).
   put(doc, receiptRevenueLine(data, undefined, false), x + 0.05, ty + 0.11, { size: 5.5, color: GREY, width: tableW - 0.1 });
 
   // Totals
   const bx = right - totalsW;
-  const cancelled = reg.status === 'cancelled';
-  const credit = cancelled ? 0 : discountCents(reg) / 100;
   const settled = reg.balance <= 0 && reg.paid_amount + credit > 0;
-  // The lines above the balance, stacked so none overlap (a discounted order with a refund has five).
-  // (Plain "-": the built-in PDF fonts have no minus sign.)
-  const totalRows: [string, string, number, RGB?][] = [['ORIGINAL BILLED', php(reg.total_amount + discountCents(reg) / 100), 8]];
-  if (credit > 0) totalRows.push([`LESS DISCOUNT (${orderDiscount(reg).rate.toUpperCase()})`, '-' + php(credit), 7]);
-  // paid_amount is net of refunds; show the refund on its own line so the figures add up.
-  if ((reg.refunded_amount ?? 0) > 0) {
-    totalRows.push(['LESS REFUNDS', '-' + php(reg.refunded_amount), 7], ['NET PAID', php(reg.paid_amount), 7, GREEN]);
-  } else {
-    totalRows.push(['PAYMENTS RECEIVED', php(reg.paid_amount), 8, GREEN]);
-  }
-  if (credit > 0) totalRows.push(['TOTAL SETTLED', php(reg.paid_amount + credit), 7]);
-  // Two lines keep the original spacing; more are stacked closer, and the box grows if still needed.
-  const step = totalRows.length <= 2 ? 0.15 : 0.095;
-  const balanceY = 0.15 + (totalRows.length - 1) * step + (totalRows.length <= 2 ? 0.18 : 0.125);
-  const grow = Math.max(0, balanceY - 0.48);
-  // A cancelled order has one more line (money held by the studio), so its box is taller.
-  const extra = (cancelled ? 0.2 : 0) + grow;
   box(doc, bx, y, totalsW, 0.92 + extra, 1.5);
   const line = (label: string, value: string, ly: number, size: number, color: RGB = INK) => {
     put(doc, label, bx + 0.07, ly, { size: 5.5, bold: true, color: [85, 85, 85] });
@@ -268,11 +328,11 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   }
 
   // Sign-offs
-  y += 1.02 + extra;
+  y += band;
   const signs = isCustomer ? 2 : 3;
   const gap = 0.3;
   const sw = (w - gap * (signs - 1)) / signs;
-  const lineY = y + 0.34;
+  const lineY = y + layout.signGap;
   put(doc, (reg.prepared_by || cashierName).toUpperCase(), x + sw / 2, lineY - 0.05, { size: 8, bold: true, mono: true, align: 'center', width: sw });
   signLine(doc, "PREPARED BY", x, lineY, sw);
   drawSignature(doc, signature, x + sw + gap + sw / 2, lineY);
@@ -286,30 +346,31 @@ function drawJobOrderHalf(doc: jsPDF, data: ReceiptData, copy: 'customer' | 'stu
   // Terms
   y = lineY + 0.2;
   rule(doc, x, y, right, y, 1.5);
-  // The studio copy sits at the bottom of the page: keep 1 in blank so printer margins never cut the last lines.
-  const footerY = top + 5.5 - (isCustomer ? 0.24 : 1.0);
   if (isCustomer) {
     put(doc, 'TERMS & CONDITIONS', x, y + 0.11, { size: 6, bold: true, mono: true });
+    // Still short of space: shrink the terms until the last line clears the footer rule.
+    const firstY = y + 0.21;
+    const lastY = footerY - 0.14;
+    let size = 6.2;
+    let terms = termsAt(size);
+    while (size > 4.4 && firstY + (terms.perColumn - 1) * terms.lineH > lastY) terms = termsAt(size -= 0.2);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.2);
+    doc.setFontSize(size);
     doc.setTextColor(34, 34, 34);
-    const colW = (w - 0.2) / 2;
-    const lineH = 6.2 * 1.22 * PT;
-    const lines = data.terms.flatMap((clause, index) =>
-      (doc.splitTextToSize(`${index + 1}. ${clause}`, colW) as string[]).map((text, i) => (i ? '   ' + text : text)));
-    const perColumn = Math.ceil(lines.length / 2);
-    lines.forEach((text, index) => {
-      const column = index < perColumn ? 0 : 1;
-      doc.text(text, x + column * (colW + 0.2), y + 0.21 + (index % perColumn) * lineH);
+    terms.lines.forEach((text, index) => {
+      const column = index < terms.perColumn ? 0 : 1;
+      doc.text(text, x + column * (termsColW + 0.2), firstY + (index % terms.perColumn) * terms.lineH);
     });
     rule(doc, x, footerY - 0.1, right, footerY - 0.1, 0.4);
     put(doc, 'DO NOT LOSE THIS CLAIM STUB — present it to claim your pictures.', x, footerY, { size: 6, bold: true, mono: true });
     put(doc, `Inquiries: ${STUDIO_INFO.phone} · ${STUDIO_INFO.facebook}`, right, footerY, { size: 6, bold: true, mono: true, align: 'right' });
   } else {
     put(doc, 'The client agreed to the Terms & Conditions printed on the customer claim stub, as shown by the signature above.', x, y + 0.14, { size: 7, bold: true });
-    rule(doc, x, footerY - 0.1, right, footerY - 0.1, 0.4);
-    put(doc, `File with job order ${formatJobOrderNo(reg.job_order_no).replace('№', 'No.')}`, x, footerY, { size: 6, bold: true, mono: true });
-    put(doc, `Record ID ${reg.id}`, right, footerY, { size: 6, bold: true, mono: true, align: 'right' });
+    // A very full order may use part of the blank bottom inch, never the last 0.4 in.
+    const studioFooterY = Math.min(top + 5.1, Math.max(footerY, y + 0.34));
+    rule(doc, x, studioFooterY - 0.1, right, studioFooterY - 0.1, 0.4);
+    put(doc, `File with job order ${formatJobOrderNo(reg.job_order_no).replace('№', 'No.')}`, x, studioFooterY, { size: 6, bold: true, mono: true });
+    put(doc, `Record ID ${reg.id}`, right, studioFooterY, { size: 6, bold: true, mono: true, align: 'right' });
   }
 
   // CANCELLED / REFUNDED stamp across the half, like VOIDED on a receipt.
@@ -381,10 +442,13 @@ function drawReceiptSlip(doc: jsPDF, data: ReceiptData, payment: PaymentRecord, 
     for (const line of lines) put(doc, line, x, y += 6 * PT + 0.01, { size: 6, color: GREY });
   }
   row('METHOD', methodLabel(payment.payment_method) + (payment.remarks ? ` · ${payment.remarks}` : ''), y += 0.14);
-  row('PREVIOUS BALANCE', php(payment.balance_before), y += 0.14);
-  const discount = paymentDiscount(payment);
+  // Only the discount given with this payment (later receipts don't repeat it). The saved balance before
+  // the payment already has it taken off, so show the balance before the discount: previous − discount − paid = balance.
+  const discount = paymentDiscount(payment, data.payments);
+  row('PREVIOUS BALANCE', php((payment.balance_before ?? 0) + (discount?.amount ?? 0)), y += 0.14);
   if (discount) {
-    row(`DISCOUNT CREDIT (${discount.rate.toUpperCase()})`, php(-discount.amount), y += 0.13);
+    row(discount.amount > 0 ? `LESS DISCOUNT (${discount.rate.toUpperCase()})` : 'DISCOUNT REDUCED',
+      discount.amount > 0 ? '-' + php(discount.amount) : '+' + php(-discount.amount), y += 0.13);
     doc.setFont('helvetica', 'normal');
     const reason = `Reason · ${discount.reason}`;
     let size = 6;
@@ -414,7 +478,15 @@ function drawReceiptSlip(doc: jsPDF, data: ReceiptData, payment: PaymentRecord, 
   y += 0.08;
   box(doc, x, y, w, 0.17, after <= 0 ? 2 : 1);
   put(doc, after <= 0 ? 'FULLY SETTLED' : 'BALANCE DUE BEFORE RELEASE', mid, y + 0.118, { size: 7.5, bold: true, align: 'center' });
-  if (!isCustomer && !status) {
+  const parts = orderPartsLine(reg, false);
+  if (parts) {
+    // Orders with MUA charges: both copies show the Studio / MUA parts of the order and of this payment.
+    put(doc, `Job order: ${parts}`, x, y + 0.28, { size: 5.5, bold: true, width: w });
+    // How this payment was booked: for the studio's records only.
+    if (!isCustomer && !status && y + 0.38 < H - 0.5) {
+      put(doc, `This payment: ${receiptRevenueLine(data, payment, false)}`, x, y + 0.38, { size: 5.5, color: GREY, width: w });
+    }
+  } else if (!isCustomer && !status) {
     put(doc, `Allocation movement: ${receiptRevenueLine(data, payment, false)}`, x, y + 0.28, { size: 5.5, color: GREY, width: w });
   }
 

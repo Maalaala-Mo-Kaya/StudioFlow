@@ -12,6 +12,8 @@ interface CatalogColumn {
   code: string;
   name: string;
   amount: number;
+  /** Revenue type: 'mua' columns are grouped after the Studio ones and coloured apart. */
+  category?: string;
 }
 
 interface StudentExcelRow {
@@ -87,7 +89,9 @@ const financialColumns = [
   { key: 'total', header: 'TOTAL PAYMENT (less refunds)' },
   { key: 'balance', header: 'BALANCE' },
   { key: 'studio', header: 'STUDIO REVENUE' },
-  { key: 'mua', header: 'OTHER PAYMENT - MUA' },
+  // MUA is its own part of the studio: the studio collects its charges and pays the MUA team.
+  { key: 'muaBilled', header: 'MUA SERVICES BILLED' },
+  { key: 'mua', header: 'MUA COLLECTED (pay to MUA team)' },
   { key: 'unallocated', header: 'UNALLOCATED CASH' },
   { key: 'credit', header: 'DISCOUNT CREDIT' },
   { key: 'operational', header: 'OPERATIONAL COLLECTED' },
@@ -106,6 +110,14 @@ const stamp = new Intl.DateTimeFormat('en-PH', {
   timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
 });
 const catalogWidth = (name: string) => Math.min(44, Math.max(24, Math.ceil(name.length / 2) + 4));
+/** Header colour of the MUA columns (plum, white text): set apart from the gold Studio columns. */
+const MUA_FILL = 'FF6B2D5C';
+const isMua = (column: CatalogColumn) => column.category === 'mua';
+/** MUA charges on an order, after its MUA discount share (centavos); 0 when its revenue terms are missing. */
+function muaBilled(row: Pick<StudentExcelRow, 'revenueTerms' | 'due'>) {
+  const terms = row.revenueTerms;
+  return terms && terms.studio + terms.mua + terms.unallocated === row.due ? terms.mua : 0;
+}
 const LEVEL_ORDER = ['college', 'shs'];
 
 function pictorialDate(value: string) {
@@ -255,16 +267,22 @@ export function buildStudentWorkbook(
   workbook.creator = STUDIO_INFO.name;
   const packageColumns = packages.map((pkg) => ({
     key: `package:${pkg.id}`,
-    header: [pkg.code, pkg.name, formatCurrency(pkg.amount, { exact: true })].filter(Boolean).join('\n'),
+    header: [isMua(pkg) ? 'MUA' : '', pkg.code, pkg.name, formatCurrency(pkg.amount, { exact: true })].filter(Boolean).join('\n'),
     width: catalogWidth(pkg.name),
     style: peso,
   }));
-  const addOnColumns = addOns.map((item) => ({
+  // Studio add-ons first, then the MUA ones together under plum headers.
+  const addOnColumns = [...addOns.filter((item) => !isMua(item)), ...addOns.filter(isMua)].map((item) => ({
     key: `addon:${item.id}`,
-    header: `${item.name}\n${formatCurrency(item.amount, { exact: true })}`,
+    header: `${isMua(item) ? 'MUA · ' : ''}${item.name}\n${formatCurrency(item.amount, { exact: true })}`,
     width: catalogWidth(item.name),
     style: peso,
   }));
+  const muaKeys = new Set([
+    ...packages.filter(isMua).map((pkg) => `package:${pkg.id}`),
+    ...addOns.filter(isMua).map((item) => `addon:${item.id}`),
+    'muaBilled', 'mua',
+  ]);
   // Orders in the date range, for the chosen scope. Cancelled orders are left off the sheets:
   // they are no longer owed; the Summary lists any money already received from them.
   const scoped = allRows.filter((row) => inRange(row, range) && (
@@ -307,8 +325,9 @@ export function buildStudentWorkbook(
     header.height = 76;
     header.eachCell((cell, column) => {
       const details = column <= studentColumns.length;
-      cell.font = { bold: true, color: { argb: details ? 'FFFFFFFF' : 'FF0A0A0A' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: details ? 'FF0A0A0A' : 'FFC9A227' } };
+      const muaColumn = muaKeys.has(String(sheet.getColumn(column).key));
+      cell.font = { bold: true, color: { argb: details || muaColumn ? 'FFFFFFFF' : 'FF0A0A0A' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: details ? 'FF0A0A0A' : muaColumn ? MUA_FILL : 'FFC9A227' } };
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
     });
     sheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '1:1' };
@@ -358,7 +377,7 @@ export function buildStudentWorkbook(
         const revenue = allocateRevenue(total, student.revenueTerms ?? { studio: 0, mua: 0, unallocated: student.due });
         const granted = student.discount ?? 0;
         const credit = Math.min(granted, Math.max(0, student.due + granted - total));
-        const amountsInRow = { ...charges, ...revenue, due: student.due, full, additional, down, refunded, total, balance,
+        const amountsInRow = { ...charges, ...revenue, muaBilled: muaBilled(student), due: student.due, full, additional, down, refunded, total, balance,
           credit, operational: total + credit };
         for (const [column, amount] of Object.entries(amountsInRow)) {
           amounts.set(column, (amounts.get(column) ?? 0) + amount);
@@ -552,6 +571,34 @@ export function buildStudentWorkbook(
       result: difference,
     };
     check.getCell('name').font = { bold: true };
+
+    // Studio and MUA apart: MUA charges are collected with the job order and paid out to the MUA team.
+    for (const key of ['muaBilled', 'mua']) {
+      const cell = head.getCell(key);
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: MUA_FILL } };
+    }
+    summary.addRow([]);
+    const partsTitle = summary.addRow({ code: 'STUDIO / MUA', name: 'Two parts of the studio (from the GRAND TOTAL above)' });
+    partsTitle.font = { bold: true, size: 12 };
+    const part = (name: string, formula: string, result: number, mua = false) => {
+      const line = summary.addRow({ code: mua ? 'MUA' : 'STUDIO', name });
+      line.getCell('due').value = { formula, result: Math.round(result * 100) / 100 };
+      if (mua) line.getCell('code').font = { bold: true, color: { argb: MUA_FILL } };
+      return line;
+    };
+    const atGrand = (key: string) => `${letterOf(key)}${grand.number}`;
+    part('Studio revenue collected (studio income)', atGrand('studio'), grandOf('studio'));
+    part('MUA services billed on these job orders', atGrand('muaBilled'), grandOf('muaBilled'), true);
+    part('MUA collected: money to pay out to the MUA team', atGrand('mua'), grandOf('mua'), true);
+    part('MUA still to collect from clients', `MAX(0,ROUND(${atGrand('muaBilled')}-${atGrand('mua')},2))`,
+      Math.max(0, grandOf('muaBilled') - grandOf('mua')), true);
+    part('Held, not yet split (downpayments on orders with Studio and MUA charges; split when fully paid)',
+      atGrand('unallocated'), grandOf('unallocated'));
+    if (mua) {
+      summary.addRow({ name: 'What each artist earned and was paid: MUA SUMMARY sheet. Wardrobe and other shared MUA money: MUA WARDROBE & SHARED sheet.' })
+        .font = { italic: true };
+    }
     summary.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
     summary.headerFooter.oddFooter = `&L${STUDIO_INFO.name} · Overall Summary · ${period}&RPage &P of &N`;
   }

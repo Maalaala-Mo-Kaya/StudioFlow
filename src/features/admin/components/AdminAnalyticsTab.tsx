@@ -799,7 +799,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
 const sumGroups = (groups: AuditGroup[]): AuditGroup => groups.reduce((sum, group) => ({
   ...sum, count: sum.count + group.count, billed: sum.billed + group.billed, collected: sum.collected + group.collected,
   discount: sum.discount + group.discount, balance: sum.balance + group.balance, held: sum.held + group.held,
-}), { key: 'total', code: 'TOTAL', name: '', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
+}), { key: 'total', code: 'TOTAL', name: '', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0,
+  muaCount: 0, muaBilled: 0, muaDiscount: 0, muaCollected: 0, muaBalance: 0 });
 
 /**
  * A school / package row's figures: Studio revenue counted, cash held until a mixed order is fully

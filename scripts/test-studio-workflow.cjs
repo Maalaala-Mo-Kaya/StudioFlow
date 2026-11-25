@@ -1532,7 +1532,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const { buildAudit } = await vite.ssrLoadModule('/src/features/admin/auditData.ts');
     const { buildAuditWorkbook } = await vite.ssrLoadModule('/src/features/admin/auditWorkbook.ts');
     const { buildStudentWorkbook } = await vite.ssrLoadModule('/src/features/admin/studentExcel.ts');
-    const { receiptRevenueLine, orderExtras } = await vite.ssrLoadModule('/src/features/receipts/receiptData.ts');
+    const { receiptRevenueLine, orderExtras, orderMuaExtras, orderPartsLine, orderDiscountCell, paymentDiscount, jobOrderAdjustments } = await vite.ssrLoadModule('/src/features/receipts/receiptData.ts');
     const { registrationAddOns } = await vite.ssrLoadModule('/src/features/registration/registrationAddOns.ts');
     const { buildRegistrationsCsv } = await vite.ssrLoadModule('/src/utils/csv.ts');
     const studio = await create('packages', {
@@ -1646,7 +1646,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal((await queue(defaultArtist)).some((row) => row.id === included.id), false);
     assert.equal((await send(api + '/makeup?completed=0', { token: admin })).payload.some((row) => row.id === included.id), false);
     await send(api + '/makeup-completed?date=2026-02-30', { token: admin, status: 400 });
-    assert.deepEqual(orderExtras(includedPaid), [['Wardrobe (MUA)', 50]]);
+    // MUA charges print in their own section: the studio collects them and pays the MUA team.
+    assert.deepEqual([orderExtras(includedPaid), orderMuaExtras(includedPaid)], [[], [['Wardrobe', 50]]]);
+    assert.equal(orderPartsLine(includedPaid), 'Studio ₱1,500.00 · MUA services ₱50.00 (paid to the MUA team)');
     assert.equal(wardrobePayment.balance_before, 1550);
     assert.deepEqual((await auditFor(included)).totals.revenue, { studio: 1500, mua: 50, unallocated: 0 });
     const includedReport = (await send(api + '/student-excel', { token: admin })).payload;
@@ -1804,8 +1806,24 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await auditReadback.xlsx.load(await auditBook.xlsx.writeBuffer());
     const allocationRows = auditReadback.getWorksheet('Revenue').getRows(5, 2).map((row) => row.values.slice(4, 8));
     assert.deepEqual(allocationRows, [[0, 0, 975, 975], [1500, 450, -975, 975]]);
+    // MUA is its own part of the studio: its own sheet (billed and collected for the MUA team).
+    const muaTotals = auditReadback.getWorksheet('MUA').getRow(7);
+    assert.deepEqual([muaTotals.getCell(9).value.result, muaTotals.getCell(10).value.result], [450, 450]);
     const receipt = { registration: settled.orders[0].registration, payments: [mixedFirst, mixedLast], refunds: [], terms: [] };
-    assert.equal(receiptRevenueLine(receipt, mixedLast), 'Studio ₱1,500.00 / MUA ₱450.00 / Unallocated ₱-975.00');
+    assert.equal(receiptRevenueLine(receipt, mixedLast), 'Studio ₱1,500.00 · MUA ₱450.00 · Earlier held cash split ₱975.00');
+    // A discount given with the 2nd payment shows on that receipt only (later payments keep a copy of it),
+    // and the job order says what changed between payments so its balance column adds up.
+    const snap = { studio: 40000, mua: 0, percentage: 2, fixed: true, reason: 'Returning client' };
+    const flow = [
+      { id: 'a', amount: 9750, status: 'completed', receipt_no: 'OR-1', created: '2026-11-25 01:00:00.000Z', balance_before: 19500, balance_after: 9750 },
+      { id: 'b', amount: 1000, status: 'completed', receipt_no: 'OR-2', created: '2026-11-25 03:00:00.000Z', balance_before: 9450, balance_after: 8450, discount_snapshot: snap },
+      { id: 'c', amount: 8450, status: 'completed', receipt_no: 'OR-3', created: '2026-11-26 03:00:00.000Z', balance_before: 8450, balance_after: 0, discount_snapshot: snap },
+    ];
+    assert.deepEqual(flow.map((payment) => paymentDiscount(payment, flow)?.amount ?? 0), [0, 400, 0]);
+    const flowOrder = { status: 'paid', total_amount: 19200, revenue_discount: { ...snap, at: '2026-11-25 03:00:00.000Z' },
+      order_changes: [{ at: '2026-11-25 02:00:00.000Z', added: [{ name: 'Hair Only', amount: 100 }] }] };
+    assert.deepEqual(jobOrderAdjustments({ registration: flowOrder, payments: flow, refunds: [], terms: [] }),
+      ['Before OR-2: + Hair Only ₱100.00 · − Discount ₱400.00 (Returning client)']);
     assert.deepEqual(buildRegistrationsCsv([receipt.registration], receipt.payments).split('\r\n')
       .slice(1).map((line) => line.split(',').slice(-5)), [['1500.00', '450.00', '0.00', '0.00', '1950.00'], ['1500.00', '450.00', '0.00', '0.00', '1950.00']]);
 
@@ -1824,7 +1842,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     })).payload;
     assert.deepEqual(discounted.revenue_terms, { studio: 150000, mua: 30000, unallocated: 0 });
     assert.deepEqual([discounted.total_amount, discounted.balance], [1800, 0]);
-    assert.deepEqual(orderExtras(discounted).at(-1), ['Discount credit (Fixed amount) · Complimentary grooming', -150]);
+    // The discount prints in its own box beside the package, never as an item the client bought.
+    assert.ok(orderExtras(discounted).every(([, amount]) => amount >= 0));
+    assert.deepEqual(orderDiscountCell(discounted), { label: 'Discount (fixed amount)', value: '-₱150.00 · Complimentary grooming' });
     assert.equal(discounted.revenue_discount.fixed, true);
     assert.equal((await auditFor(mixed)).orders[0].overpaid, 150);
     await refundRoute({ registrationId: mixed.id, amount: 150, method: 'cash', reason: 'Approved complimentary service' });
@@ -1836,7 +1856,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const discountBook = buildStudentWorkbook({ ...discountReport, rows: [exportRow] });
     const discountSheet = discountBook.worksheets[0];
     const discountHeaders = discountSheet.getRow(1).values;
-    for (const [heading, amount] of [['STUDIO REVENUE', 1500], ['OTHER PAYMENT - MUA', 300], ['DISCOUNT', -150]]) {
+    assert.ok(discountHeaders.includes('MUA SERVICES BILLED'));
+    for (const [heading, amount] of [['STUDIO REVENUE', 1500], ['MUA COLLECTED (pay to MUA team)', 300], ['DISCOUNT', -150]]) {
       assert.equal(discountSheet.getRow(2).getCell(discountHeaders.indexOf(heading)).value, amount, heading);
     }
     // The discount's reason travels with it: a note on the Overall Excel's DISCOUNT cell, the ledger CSV,
@@ -2388,6 +2409,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     // and billed − discount − revenue − still to settle = 0.
     const [school] = buildAudit([settled], [payment], []).bySchool.filter((group) => group.count);
     assert.deepEqual([school.billed, school.discount, school.collected, school.balance], [750, 375, 375, 0]);
+    assert.deepEqual([school.muaBilled, school.muaDiscount, school.muaCollected, school.muaBalance], [200, 0, 200, 0]);
     const reasonEdit = request(settled, 'pos-reason', 0, 50, null);
     reasonEdit.discount = { reason: 'Student council representative' };
     const corrected = await confirm(settled, reasonEdit);
@@ -2457,8 +2479,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.deepEqual(fixedPaid.registration.revenue_terms, { studio: 55000, mua: 0, unallocated: 40000 });
     const [fixedPayment] = await entries('payments', partly);
     assert.deepEqual([fixedPayment.discount_snapshot.studio, fixedPayment.discount_snapshot.fixed], [20000, true]);
-    const { orderExtras: extrasOf } = await vite.ssrLoadModule('/src/features/receipts/receiptData.ts');
-    assert.deepEqual(extrasOf(fixedPaid.registration).at(-1), ['Discount credit (Fixed amount) · Loyal client', -200]);
+    const { orderDiscountCell: discountCellOf } = await vite.ssrLoadModule('/src/features/receipts/receiptData.ts');
+    assert.deepEqual(discountCellOf(fixedPaid.registration, false), { label: 'Discount (fixed amount)', value: '-PHP 200.00 · Loyal client' });
 
     // A percentage that lands on centavos (50% of ₱3,845 = ₱1,922.50) is rounded to the nearest whole peso,
     // so the balance stays payable: payments are whole pesos.
