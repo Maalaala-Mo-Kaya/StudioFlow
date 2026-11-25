@@ -46,7 +46,7 @@ export interface RefundRequest {
   clientKey: string;
 }
 
-export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students' | 'workflow' | 'camera' | 'clients' | 'catalog-import' | 'ledger' | 'qr-codes';
+export type AdminTab = 'metrics' | 'orgs' | 'packages' | 'roster' | 'staff' | 'framing' | 'students' | 'workflow' | 'camera' | 'clients' | 'catalog-import' | 'ledger' | 'qr-codes' | 'devcon';
 
 const excelUnavailable = 'The connected PocketBase server did not return an Excel report. Restart it with the latest StudioFlow hooks and migrations, then try again.';
 
@@ -700,7 +700,9 @@ export function useAdminData() {
         toast.error(excelUnavailable);
         return;
       }
-      await downloadStudentExcel({ packages: data.packages, addOns: data.addOns, rows: data.rows }, scope, range, label);
+      // `mua` adds the MUA SUMMARY, per-artist and Wardrobe / shared sheets (an older server sends none).
+      const mua = Array.isArray(data.mua?.lines) && Array.isArray(data.mua?.shared) ? data.mua : undefined;
+      await downloadStudentExcel({ packages: data.packages, addOns: data.addOns, rows: data.rows, mua }, scope, range, label);
     } catch (err) {
       console.error('Failed to export the student workbook:', err);
       toast.error(err instanceof ClientResponseError && err.status === 404

@@ -5,18 +5,31 @@ import { formatCurrency } from '../../../utils/formatters';
 import { revenueLabels } from '../packageLabels';
 import type { PackageKind } from '../useAdminData';
 
+/** Where a package's or add-on's money goes: two clear buttons (Studio / MUA), like "Offered To". */
 export function RevenueInput({ value, onChange, addOn = false }: {
   value: RevenueCategory | ''; onChange: (value: RevenueCategory | '') => void; addOn?: boolean;
 }) {
-  return <label className="block text-xs font-bold">
-    {addOn ? 'Revenue classification and registration section' : 'Revenue classification'} <span className="text-red-600">*</span>
-    <select required className={`mt-1 block min-h-10 w-full border bg-panel px-2 ${value ? 'border-line' : 'border-red-500'}`}
-      value={value} onChange={(event) => onChange(event.target.value as RevenueCategory | '')}>
-      {!value && <option value="" disabled>Choose Studio or MUA…</option>}
-      <option value="studio">{revenueLabels.studio}{addOn ? ' · Studio Add-ons' : ''}</option>
-      <option value="mua">{revenueLabels.mua}{addOn ? ' · MUA Services' : ''}</option>
-    </select>
-  </label>;
+  const choices = [
+    { id: 'studio' as const, title: `${revenueLabels.studio}${addOn ? ' · Studio Add-ons' : ''}`, hint: 'Prints, frames, shoot: the studio keeps it' },
+    { id: 'mua' as const, title: `${revenueLabels.mua}${addOn ? ' · MUA Services' : ''}`, hint: 'Makeup / grooming: paid out to the MUA' },
+  ];
+  return (
+    <fieldset>
+      <legend className="block text-[11px] font-black uppercase mb-1">Money goes to <span className="text-red-600">*</span></legend>
+      <div role="radiogroup" aria-label="Money goes to" className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+        {choices.map((choice) => (
+          <button key={choice.id} type="button" role="radio" aria-checked={value === choice.id} onClick={() => onChange(choice.id)}
+            className={`btn-tactile min-h-[46px] px-3 py-1.5 border text-left cursor-pointer ${
+              value === choice.id ? 'bg-gold text-on-gold border-gold' : `bg-canvas text-ink ${value ? 'border-neutral-300' : 'border-red-500'} hover:border-gold`
+            }`}>
+            <span className="block text-[11px] font-black uppercase">{choice.title}</span>
+            <span className={`block text-[10px] font-sans ${value === choice.id ? 'opacity-80' : 'text-neutral-500'}`}>{choice.hint}</span>
+          </button>
+        ))}
+      </div>
+      {!value && <p className="mt-1 text-[10px] font-bold text-red-600">Choose Studio or MUA.</p>}
+    </fieldset>
+  );
 }
 
 /** A catalog record's revenue type; a missing one is a red warning (its sales stay unallocated). */

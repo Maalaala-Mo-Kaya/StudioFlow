@@ -76,7 +76,19 @@ export interface AuditGroup {
    * Studio and MUA charges (split when the order is fully paid), or charges with no revenue type.
    */
   held: number;
+  /** The same figures for the MUA part of the studio (makeup services and shared MUA items such as Wardrobe). */
+  muaCount: number;
+  muaBilled: number;
+  muaDiscount: number;
+  /** MUA cash counted in the period (net of refunds): money to pay out to the MUA team. */
+  muaCollected: number;
+  muaBalance: number;
 }
+
+const emptyGroup = () => ({
+  count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0,
+  muaCount: 0, muaBilled: 0, muaDiscount: 0, muaCollected: 0, muaBalance: 0,
+});
 
 /** A discount credit counted in the period (granted then, on an active order), for the Discounts sheet. */
 export interface AuditDiscount {
@@ -223,11 +235,11 @@ export function buildAudit(
   const packageOf = (reg?: Registration) => reg?.package_snapshot?.id || reg?.package || UNKNOWN_PACKAGE;
   const schools = new Map<string, AuditGroup>();
   for (const org of catalog.organizations ?? []) {
-    schools.set(org.id, { key: org.id, code: org.code || 'ORG', name: org.name, count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
+    schools.set(org.id, { key: org.id, code: org.code || 'ORG', name: org.name, ...emptyGroup() });
   }
   const packagesByKey = new Map<string, AuditGroup>();
   for (const pkg of catalog.packages ?? []) {
-    packagesByKey.set(pkg.id, { key: pkg.id, code: pkg.code || 'PKG', name: pkg.name, count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
+    packagesByKey.set(pkg.id, { key: pkg.id, code: pkg.code || 'PKG', name: pkg.name, ...emptyGroup() });
   }
   const schoolGroup = (reg?: Registration) => {
     const key = groupOf(reg);
@@ -235,8 +247,8 @@ export function buildAudit(
     if (!group) {
       const org = reg?.expand?.organization;
       group = key === WALKIN_KEY
-        ? { key, code: 'WALK-IN', name: 'Walk-in clients', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 }
-        : { key, code: org?.code || 'ORG', name: org?.name || 'Removed school', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 };
+        ? { key, code: 'WALK-IN', name: 'Walk-in clients', ...emptyGroup() }
+        : { key, code: org?.code || 'ORG', name: org?.name || 'Removed school', ...emptyGroup() };
       schools.set(key, group);
     }
     return group;
@@ -246,7 +258,7 @@ export function buildAudit(
     let group = packagesByKey.get(key);
     if (!group) {
       const pkg = reg?.package_snapshot || reg?.expand?.package;
-      group = { key, code: pkg?.code || '—', name: pkg?.name || 'No package / removed package', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 };
+      group = { key, code: pkg?.code || '—', name: pkg?.name || 'No package / removed package', ...emptyGroup() };
       packagesByKey.set(key, group);
     }
     return group;
@@ -254,9 +266,14 @@ export function buildAudit(
   for (const row of orderRows) {
     for (const group of [schoolGroup(row.registration), packageGroup(row.registration)]) {
       if (!row.cancelled) group.count += 1;
-      const studio = revenueTerms(row.registration).studio;
-      group.billed += row.cancelled ? row.revenue.studio : studio + (row.registration.revenue_discount?.studio ?? 0);
-      group.balance += row.cancelled ? 0 : Math.max(0, studio - row.revenue.studio);
+      const terms = revenueTerms(row.registration);
+      group.billed += row.cancelled ? row.revenue.studio : terms.studio + (row.registration.revenue_discount?.studio ?? 0);
+      group.balance += row.cancelled ? 0 : Math.max(0, terms.studio - row.revenue.studio);
+      // The MUA part, kept apart the same way.
+      const muaCharge = terms.mua + (row.registration.revenue_discount?.mua ?? 0);
+      if (!row.cancelled && muaCharge > 0) group.muaCount += 1;
+      group.muaBilled += row.cancelled ? row.revenue.mua : muaCharge;
+      group.muaBalance += row.cancelled ? 0 : Math.max(0, terms.mua - row.revenue.mua);
     }
   }
   const revenue = emptyRevenue();
@@ -280,16 +297,20 @@ export function buildAudit(
     });
     schoolGroup(reg).discount += studioCredit;
     packageGroup(reg).discount += studioCredit;
+    schoolGroup(reg).muaDiscount += credit - studioCredit;
+    packageGroup(reg).muaDiscount += credit - studioCredit;
   }
   for (const row of [...countedPayments, ...refundRows]) {
     for (const group of [schoolGroup(row.registration), packageGroup(row.registration)]) {
       group.collected += row.revenue.studio;
+      group.muaCollected += row.revenue.mua;
       group.held += row.revenue.unallocated;
     }
     for (const key of revenueKeys) revenue[key] += row.revenue[key];
   }
   const toPesos = (group: AuditGroup): AuditGroup => ({
     ...group, billed: pesos(group.billed), collected: pesos(group.collected), discount: pesos(group.discount), balance: pesos(group.balance), held: pesos(group.held),
+    muaBilled: pesos(group.muaBilled), muaDiscount: pesos(group.muaDiscount), muaCollected: pesos(group.muaCollected), muaBalance: pesos(group.muaBalance),
   });
   // Walk-ins last; groups with nothing in the period after the active ones.
   const ordered = (groups: Iterable<AuditGroup>) => [...groups]

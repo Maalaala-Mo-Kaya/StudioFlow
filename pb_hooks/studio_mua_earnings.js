@@ -17,38 +17,17 @@ function purchasedEarnings(job) {
     const quantity = Number.isSafeInteger(item.quantity) && item.quantity > 0 ? item.quantity : 1;
     return { ...item, quantity, gross: cents(item.amount) * quantity };
   });
-  const eligible = lines.filter((line) => line.revenue_category === "mua");
-  const total = eligible.reduce((sum, line) => sum + line.gross, 0);
-  const discount = json(job, "revenue_discount");
-  // Existing discounts are per revenue category. Allocate proportionally to
-  // every priced MUA line (including non-service charges) in sold-line order.
-  // Cumulative rounding keeps the allocated centavos equal to the discount.
-  const muaDiscount = discount?.mua || 0;
-  const review = json(job, "revenue_review");
-  let running = 0;
-  let allocated = 0;
-  const amounts = new Map();
-  for (const line of eligible) {
-    running += line.gross;
-    const next = total ? Math.round(muaDiscount * running / total) : 0;
-    amounts.set(serviceKey(line), next - allocated);
-    allocated = next;
-  }
+  // The artist earns the full sold price: discounts come out of the Studio charges only,
+  // and the studio pays the MUA team whatever discount the client was given.
   return (source) => {
     const key = serviceKey(source);
     const line = lines.find((item) => serviceKey(item) === key);
     const quantity = line?.quantity || 1;
-    if (!line || line.revenue_category !== "mua" || (muaDiscount && (review || muaDiscount > total))) {
+    if (!line || line.revenue_category !== "mua") {
       return { kind: "review", quantity, earned: 0, ...(line ? { limit: line.gross } : {}),
-        reviewReason: !line ? "No verified purchased service price."
-          : line.revenue_category !== "mua" ? "The sold item has no separately priced MUA charge."
-          : "The order discount needs a verified allocation to this service." };
+        reviewReason: !line ? "No verified purchased service price." : "The sold item has no separately priced MUA charge." };
     }
-    const reduction = amounts.get(key) || 0;
-    return {
-      kind: "price", quantity, unit: cents(line.amount), earned: line.gross - reduction,
-      ...(reduction ? { discount: { amount: reduction, reason: discount.reason, by: discount.by, at: discount.at } } : {}),
-    };
+    return { kind: "price", quantity, unit: cents(line.amount), earned: line.gross };
   };
 }
 

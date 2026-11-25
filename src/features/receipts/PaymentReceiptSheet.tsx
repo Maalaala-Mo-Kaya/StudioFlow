@@ -1,5 +1,5 @@
 import React from 'react';
-import { paymentAdditions, paymentDiscount, receiptRevenueLine } from './receiptData';
+import { orderPartsLine, paymentAdditions, paymentDiscount, receiptRevenueLine } from './receiptData';
 import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
@@ -42,10 +42,14 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
   const status = statusLabel(payment);
   const after = payment.balance_after ?? 0;
   const isCash = payment.payment_method === 'cash' && (payment.cash_tendered ?? 0) > 0;
-  const discount = paymentDiscount(payment);
+  // Only the discount given with this payment (later receipts don't repeat it). The saved balance before
+  // the payment already has it taken off, so show the balance before the discount: previous − discount − paid = balance.
+  const discount = paymentDiscount(payment, data.payments);
+  const previousBalance = (payment.balance_before ?? 0) + (discount?.amount ?? 0);
   const method = methodLabel(payment.payment_method) + (payment.remarks ? ` · ${payment.remarks}` : '');
   // Items added to the order since the previous payment: what this payment is for.
   const additions = paymentAdditions(data, payment);
+  const parts = orderPartsLine(reg);
 
   return (
     <section
@@ -95,9 +99,9 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
           <p className="line-clamp-2 break-words text-[8px] leading-[9px]">Added · {additions.join(', ')}</p>
         )}
         <Row label="Method" value={method} />
-        <Row label={discount ? 'Balance After Discount' : 'Previous Balance'} value={peso(payment.balance_before)} />
+        <Row label="Previous Balance" value={peso(previousBalance)} />
         {discount && <>
-          <Row label={`Discount Credit (${discount.rate})`} value={peso(-discount.amount)} />
+          <Row label={discount.amount > 0 ? `Less Discount (${discount.rate})` : 'Discount Reduced'} value={discount.amount > 0 ? `−${peso(discount.amount)}` : `+${peso(-discount.amount)}`} />
           <p className="break-words text-[8px] leading-[9px]">Reason · {discount.reason}</p>
         </>}
       </div>
@@ -108,7 +112,12 @@ const ReceiptSlip: React.FC<{ data: ReceiptData; payment: PaymentRecord; copy: '
       </div>
 
       <div className="mt-[4px] space-y-[3px] font-mono">
-        {!isCustomer && !status && <p className="text-[7px]">Allocation movement · {receiptRevenueLine(data, payment)}</p>}
+        {/* Orders with MUA charges: both copies show the Studio / MUA parts of the order and of this payment. */}
+        {parts ? <>
+          <p className="text-[7px] font-bold leading-[8px]">Job order · {parts}</p>
+          {/* How this payment was booked: for the studio's records only. */}
+          {!isCustomer && !status && <p className="text-[7px] leading-[8px]">This payment · {receiptRevenueLine(data, payment)}</p>}
+        </> : !isCustomer && !status && <p className="text-[7px]">Allocation movement · {receiptRevenueLine(data, payment)}</p>}
         {isCash && <Row label="Cash / Change" value={`${peso(payment.cash_tendered)} / ${peso(payment.change_amount)}`} />}
         <Row label="Balance at Issue" value={peso(after)} strong tone={after > 0 ? '#c8102e' : undefined} />
       </div>

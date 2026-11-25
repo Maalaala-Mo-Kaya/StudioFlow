@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "@fontsource-variable/cinzel";
 
+/* Hover on every screen size and device. Tailwind's own hover: applies only where the browser reports a
+   hover pointer (mouse), so phones, tablets and DevTools phone previews never show it. Used on the kiosk
+   package cards, where a tap selects the card anyway, so a hover that stays after a tap is harmless. */
+@custom-variant hover-any (&:hover);
+
 @layer components {
   .studio-data-table > thead > tr {
     background-color: inherit;
@@ -416,6 +421,20 @@ button.bg-obsidian:not(:disabled):hover {
 
 .animate-modal {
   animation: modalScaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Kiosk package browser: the "next package" arrow nudges until the client first scrolls. */
+@keyframes nudgeRight {
+  0%, 60%, 100% { transform: translateX(0); }
+  30% { transform: translateX(4px); }
+}
+
+.animate-nudge-right {
+  animation: nudgeRight 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-nudge-right { animation: none; }
 }
 
 .animate-status-pulse {

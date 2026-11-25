@@ -17,6 +17,7 @@ import {
   ScanText,
   BookOpenCheck,
   QrCode,
+  TriangleAlert,
 } from 'lucide-react';
 import type { AdminTab } from '../useAdminData';
 
@@ -198,6 +199,12 @@ export const AdminSidebarNav: React.FC<AdminSidebarNavProps> = ({
       label: 'Staff Accounts',
       shortLabel: 'Staff',
       icon: ShieldCheck,
+    },
+    {
+      id: 'devcon',
+      label: 'DEV CON',
+      shortLabel: 'DEV CON',
+      icon: TriangleAlert,
     },
   ];
 

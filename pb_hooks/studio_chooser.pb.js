@@ -176,7 +176,11 @@ routerAdd("POST", "/api/studioflow/chooser/{id}/confirm", (e) => {
   const input = new DynamicModel({ version: "", requestId: "", selected: arrayOf("") });
   e.bindBody(input);
   if (!/^[a-z0-9-]{15,80}$/i.test(input.requestId) || !input.version) throw new BadRequestError("A selection version and request ID are required.");
-  selection.queueMoves(e.app, id, e.auth, input);
+  // notes: { photo id: text } for selected photos, for the editor.
+  const notes = (e.requestInfo().body || {}).notes;
+  selection.queueMoves(e.app, id, e.auth, {
+    version: input.version, requestId: input.requestId, selected: [...input.selected], notes,
+  });
   return e.json(200, selection.details(e.app, id));
 }, $apis.requireAuth("users"));
 

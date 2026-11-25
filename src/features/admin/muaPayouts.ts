@@ -10,7 +10,7 @@ export interface MuaPayoutLine {
   date: string;
   completedAt: string;
   service: string;
-  /** Sold price less its MUA discount share, plus adjustments. */
+  /** Full sold price (MUA services are never discounted), plus adjustments. */
   earned: number;
   /** Why the amount needs an admin's review (then it is not paid out); '' when verified. */
   review: string;

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Info, ArrowRight, Check, Gift, ListChecks, Printer, Camera, Frame, Images, Columns3 } from 'lucide-react';
+import { Info, ArrowRight, ArrowLeft, Check, Gift, ListChecks, Printer, Camera, Frame, Images, Columns3, Hand } from 'lucide-react';
 import { type OptionPicks } from '../../../utils/packageOptions';
 import { parseInclusionTree, topLevelLabels } from '../../../utils/inclusions';
 import type { Package, AddOn, Gender } from '../../../types';
@@ -73,6 +73,19 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
     if (firstVisible !== -1) setViewedIndex(firstVisible);
   }, []);
 
+  /** Brings package `index` to the leading edge of the track. */
+  const scrollToIndex = (index: number) => {
+    const track = trackRef.current;
+    const first = track?.children[0] as HTMLElement | undefined;
+    const card = track?.children[Math.max(0, Math.min(index, packages.length - 1))] as HTMLElement | undefined;
+    if (!track || !first || !card) return;
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    track.scrollTo({ left: card.offsetLeft - first.offsetLeft, behavior: smooth ? 'smooth' : 'auto' });
+  };
+  const browsing = hasOverflow && packages.length > 1;
+  const atStart = viewedIndex <= 0;
+  const atEnd = viewedIndex >= packages.length - 1;
+
   useEffect(() => {
     const track = trackRef.current;
     if (!track) return;
@@ -120,14 +133,8 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                 <Columns3 className="w-3.5 h-3.5" /> Compare
               </button>
             )}
-            {hasOverflow && packages.length > 1 && (
-              <span className="text-[10px] text-neutral-500 uppercase flex items-center gap-1">
-                Swipe or Scroll
-                <ArrowRight className="w-3 h-3 text-gold-soft" aria-hidden="true" />
-              </span>
-            )}
             <output className="text-xs font-black tabular-nums text-gold-soft" aria-label="Package browsing position">
-              {Math.min(viewedIndex + 1, packages.length)}/{packages.length}
+              {Math.min(viewedIndex + 1, packages.length)} of {packages.length}
             </output>
           </div>
         )}
@@ -139,13 +146,14 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       )}
 
       {/* Horizontal Scroll Track for Packages */}
+      <div className="relative">
       <div
         ref={trackRef}
         onScroll={(e) => updateViewedIndex(e.currentTarget)}
         role="group"
         aria-label="Available packages"
         tabIndex={0}
-        className={`${packages.length ? 'flex' : 'hidden'} overflow-x-auto gap-4 pb-4 snap-x snap-mandatory scrollbar-thin -mx-2 px-2 scroll-px-2 [--package-width:min(320px,100%)] ${
+        className={`${packages.length ? 'flex' : 'hidden'} overflow-x-auto gap-4 pt-3 pb-4 snap-x snap-mandatory scrollbar-thin -mx-2 px-2 scroll-px-2 [--package-width:min(320px,100%)] ${
           // Leave room for the last card to reach the leading snap position on wide screens.
           hasOverflow && packages.length > 1 ? 'after:shrink-0 after:-ml-4 after:w-[calc(100%-var(--package-width))]' : ''
         }`}
@@ -173,10 +181,19 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
           return (
             <div
               key={pkg.id}
-              className={`card-interactive p-5 border-2 flex flex-col justify-between relative shrink-0 w-(--package-width) snap-start transition-all ${
+              onClick={() => onSelectPackage(pkg.id)}
+              // Hover: lifts 4px (the track's pt-3 leaves room, so the top border isn't clipped),
+              // glows gold, and a gold bar sweeps across the top. The chosen card keeps the bar.
+              className={`group p-5 border-2 flex flex-col justify-between relative shrink-0 w-(--package-width) snap-start cursor-pointer
+                transition-[transform,border-color,box-shadow,background-color] duration-300 ease-out hover-any:-translate-y-1 motion-reduce:hover-any:translate-y-0
+                before:absolute before:inset-x-0 before:top-0 before:h-1 before:bg-gold before:origin-left before:transition-transform before:duration-300 before:ease-out motion-reduce:before:transition-none ${
+                // hover-any: (index.css) applies on every screen, unlike Tailwind's hover:. Touch screens also get
+                // the look while the finger is down (active:), and the chosen card keeps the bar.
+                isSelected ? 'before:scale-x-100' : 'before:scale-x-0 hover-any:before:scale-x-100 active:before:scale-x-100 active:border-gold active:shadow-lux-gold'
+              } ${
                 isSelected
                   ? 'bg-obsidian text-white border-line shadow-lux-gold'
-                  : 'bg-panel text-ink border-neutral-300 hover:border-line'
+                  : 'bg-panel text-ink border-neutral-300 hover-any:border-gold hover-any:shadow-lux-gold'
               }`}
             >
               {isSelected && (
@@ -263,7 +280,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
               <div className="space-y-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setDetailsId(pkg.id)}
+                  onClick={(event) => { event.stopPropagation(); setDetailsId(pkg.id); }}
                   className={`w-full py-1.5 text-[11px] font-bold uppercase tracking-wider underline flex items-center justify-center gap-1.5 cursor-pointer ${
                     isSelected
                       ? 'text-gold hover:text-white'
@@ -280,20 +297,58 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
                 <button
                   type="button"
                   aria-pressed={isSelected}
-                  onClick={() => onSelectPackage(pkg.id)}
-                  className={`w-full min-h-[38px] flex items-center justify-center text-[11px] font-black uppercase tracking-widest cursor-pointer transition ${
+                  onClick={(event) => { event.stopPropagation(); onSelectPackage(pkg.id); }}
+                  className={`btn-tactile w-full min-h-14 px-3 flex items-center justify-center gap-2 border-2 text-sm font-black uppercase tracking-widest cursor-pointer ${
                     isSelected
-                      ? 'bg-gold text-on-gold'
-                      : 'bg-canvas text-ink border border-neutral-300'
+                      ? 'bg-transparent text-gold border-gold'
+                      : 'bg-gold text-on-gold border-gold shadow-lux-gold hover:bg-gold-bright'
                   }`}
                 >
-                  {isSelected ? '✓ Chosen Package' : 'Choose Package'}
+                  {isSelected
+                    ? <><Check className="w-5 h-5 shrink-0" strokeWidth={3} aria-hidden="true" /> Chosen</>
+                    : <><Hand className="w-5 h-5 shrink-0" aria-hidden="true" /> Choose this package</>}
                 </button>
+                {isSelected && (
+                  <p className="text-center text-[10px] font-bold uppercase tracking-wider text-neutral-300">
+                    Tap Next below to continue
+                  </p>
+                )}
               </div>
             </div>
           );
         })}
       </div>
+      {browsing && !atEnd && (
+        <button type="button" onClick={() => scrollToIndex(viewedIndex + 1)} aria-label="See the next package"
+          className="absolute right-0 top-1/2 z-20 -translate-y-1/2 grid size-12 place-items-center rounded-full border-2 border-gold bg-gold text-on-gold shadow-lux-gold cursor-pointer hover:bg-gold-bright">
+          <ArrowRight className={`w-6 h-6 ${atStart ? 'animate-nudge-right' : ''}`} strokeWidth={3} aria-hidden="true" />
+        </button>
+      )}
+      </div>
+      {browsing && (
+        <div className="mt-1 flex items-center justify-between gap-3 border border-gold/40 bg-gold-wash px-2 py-2">
+          <button type="button" onClick={() => scrollToIndex(viewedIndex - 1)} disabled={atStart} aria-label="Previous package"
+            className="btn-tactile grid size-11 shrink-0 place-items-center border-2 border-gold text-gold cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">
+            <ArrowLeft className="w-5 h-5" strokeWidth={3} aria-hidden="true" />
+          </button>
+          <div className="flex min-w-0 flex-col items-center gap-1.5">
+            <p className="text-center text-[11px] font-black uppercase tracking-wider text-ink">
+              {atEnd ? 'That’s every package' : <>Swipe to see all {packages.length} packages</>}
+            </p>
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {packages.map((pkg, index) => (
+                <button key={pkg.id} type="button" onClick={() => scrollToIndex(index)}
+                  aria-label={`Show package ${index + 1}: ${pkg.name}`} aria-current={index === viewedIndex ? 'true' : undefined}
+                  className={`h-2.5 cursor-pointer transition-all ${index === viewedIndex ? 'w-6 bg-gold' : `w-2.5 ${pkg.id === selectedPackageId ? 'bg-gold-soft' : 'bg-neutral-400'}`}`} />
+              ))}
+            </div>
+          </div>
+          <button type="button" onClick={() => scrollToIndex(viewedIndex + 1)} disabled={atEnd} aria-label="Next package"
+            className="btn-tactile grid size-11 shrink-0 place-items-center border-2 border-gold bg-gold text-on-gold cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">
+            <ArrowRight className="w-5 h-5" strokeWidth={3} aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {packages.length === 0 && (
         <p className="border border-dashed border-neutral-300 p-4 text-sm text-neutral-600">
           {emptyMessage ?? 'No Job Order Packages are currently available.'}

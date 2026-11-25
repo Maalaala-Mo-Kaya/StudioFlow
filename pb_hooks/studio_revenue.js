@@ -61,12 +61,17 @@ function changes(e, original, subtotal, itemsChanged, record = e.record, body = 
       // Whole pesos (rounded to the nearest peso): payments are whole pesos, so a credit with centavos
       // (50% of ₱3,845 = ₱1,922.50) would leave a balance that can never be paid exactly.
       const credit = (charge) => Math.round(charge * percentage / 10000);
-      values = { ...values, studio: credit(charges.studio), mua: percentage === 0 ? 0 : (previousDiscount?.mua || 0) };
+      values = { ...values, studio: credit(charges.studio), mua: 0 };
     }
-    if (!values || !Number.isFinite(values.studio) || !Number.isFinite(values.mua)
-      || values.studio < 0 || values.mua < 0) {
-      throw new BadRequestError("Enter nonnegative whole-peso discounts for Studio and MUA.");
+    if (!values || !Number.isFinite(values.studio) || values.studio < 0) {
+      throw new BadRequestError("Enter a nonnegative whole-peso Studio discount.");
     }
+    // MUA services are never discounted: the studio pays the artists their full price,
+    // so a discount always comes out of the Studio charges.
+    if (values.mua !== undefined && values.mua !== null && values.mua !== 0) {
+      throw new BadRequestError("MUA services can't be discounted. Give the discount on the Studio charges.");
+    }
+    values = { ...values, mua: 0 };
     const { studio, mua } = values;
     discount = studio || mua ? {
       studio: cents(studio), mua: cents(mua), percentage: percentage ?? (subtotal ? (cents(studio) + cents(mua)) * 100 / subtotal : 0),

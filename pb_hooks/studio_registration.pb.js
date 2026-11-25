@@ -11,7 +11,7 @@ onRecordCreateRequest((e) => {
     photo_status: "pending_shoot", claimed_by: "", released_at: "", prepared_by: "",
     makeup_state: "", makeup_artist: "", makeup_completed_at: "", makeup_version: 0,
     photo_edit_until: 0, photo_revision: 0,
-    photo_selection: null, photo_pending: null, photo_last_request: null,
+    photo_selection: null, photo_pending: null, photo_last_request: null, photo_notes: null,
     refunded_amount: 0, cancelled_at: "", cancelled_by: "", cancel_reason: "", status_before_cancel: "",
     restored_at: "", restored_by: "", deleted_by_id: "", had_discount_credit: false, order_changes: null, photography: null,
   })) e.record.set(field, value);
@@ -86,7 +86,7 @@ onRecordUpdateRequest((e) => {
     "job_order_no", "queue_number", "queue_issued_at",
     "makeup_service", "makeup_services", "makeup_state", "makeup_artist", "makeup_completed_at", "makeup_version", "shoot_completed",
     "photo_folder", "photo_folder_key", "photo_edit_until", "photo_revision",
-    "photo_selection", "photo_pending", "photo_last_request", "photography",
+    "photo_selection", "photo_pending", "photo_last_request", "photography", "photo_notes",
     // Server-owned pickup tracking (see studio_production.pb.js).
     "ready_at", "pickup_notified_at", "pickup_notified_by", "pickup_notify_count",
   ];

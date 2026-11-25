@@ -42,6 +42,7 @@ export function CashierOrderSummary({
         }}
         optionLines={chosenOptionLines(registration.package_options)}
         addOns={getRegistrationAddOns(registration.add_ons)}
+        addOnsClassName="max-h-40 overflow-y-auto overscroll-contain pr-1"
       />
       <dl className="space-y-1.5 border-t border-neutral-800 pt-3">
         {!!registration.other_fees && (

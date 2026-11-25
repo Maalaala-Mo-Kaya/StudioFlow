@@ -75,3 +75,16 @@ export const PAYMENT_METHOD_OPTIONS = [
   { value: 'maya', label: 'Maya' },
   { value: 'card', label: 'Bank / Card' },
 ] as const;
+
+/**
+ * One-tap reasons in the cashier's discount box (the cashier can still type any reason).
+ * Every discount needs a reason: it prints on the receipt and goes to the ledger and the Audit Export.
+ */
+export const DISCOUNT_REASONS: ReadonlyArray<string> = [
+  'Promo',
+  'Returning client',
+  'Student council officer',
+  'Group / batch discount',
+  'Price adjustment',
+  'Approved by management',
+];

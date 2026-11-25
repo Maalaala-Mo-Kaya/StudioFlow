@@ -1,6 +1,6 @@
 // MUA payouts. The client pays the studio everything; the studio pays the makeup artists.
 // - Artist lines: each logged MUA completion (studio_mua_reporting.logCompletion) with what the artist
-//   earned for it (sold price, less its MUA discount share, plus later adjustments), whether the client
+//   earned for it (full sold price, plus later adjustments; MUA is never discounted), whether the client
 //   has paid the order in full, and whether the studio already paid it out (a payout, MP-000001…).
 // - Shared lines: MUA charges that are not a service (an MUA item without "MUA service", e.g. the
 //   automatic Wardrobe add-on). That money belongs to the MUA team as a whole and is split outside the

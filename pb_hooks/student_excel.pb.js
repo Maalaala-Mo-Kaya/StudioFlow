@@ -11,6 +11,8 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
     name: record.getString("name"),
     amount: record.getFloat("amount"),
     active: record.getBool("is_active"),
+    // Studio or MUA: the Overall Excel groups and colours the MUA columns apart.
+    category: record.getString("revenue_category"),
   }));
   const readJson = (record, field) => {
     try {
@@ -129,7 +131,7 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
       addOnTotal += amount;
       charges.set(id, (charges.get(id) || 0) + amount);
       if (!addOnColumns.has(id)) {
-        addOnColumns.set(id, addOnsById.get(id) || { id, code: item.code || "", name: item.name, amount: item.amount });
+        addOnColumns.set(id, addOnsById.get(id) || { id, code: item.code || "", name: item.name, amount: item.amount, category: item.revenue_category || "" });
       }
     }
 
@@ -147,6 +149,7 @@ routerAdd("GET", "/api/studioflow/student-excel", (e) => {
         code: hasSnapshot ? snapshot.code : "",
         name: (hasSnapshot && snapshot.name) || "Historical package " + packageId,
         amount: (hasSnapshot ? snapshot.configuredAmount ?? snapshot.amount : undefined) ?? packageAmount / 100,
+        category: (hasSnapshot && snapshot.revenue_category) || "",
       });
     }
     return {

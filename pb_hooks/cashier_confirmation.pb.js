@@ -66,9 +66,9 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/confirm-payment", (e) => {
           reg.set("revenue_discount", { ...before, reason: reasonText });
         }
       } else if (fixedAmount) {
-        // Off the Studio charges; an MUA credit an admin gave earlier is kept.
+        // Off the Studio charges only (MUA services are never discounted).
         const total = require(__hooks + "/studio_revenue.js").changes(e, reg, subtotal, false, reg,
-          { order_discount: { studio: amount, mua: (before?.mua || 0) / 100, reason: reasonText } });
+          { order_discount: { studio: amount, mua: 0, reason: reasonText } });
         reg.set("total_amount", total / 100);
       } else {
         const total = require(__hooks + "/studio_revenue.js").changes(e, reg, subtotal, false, reg,

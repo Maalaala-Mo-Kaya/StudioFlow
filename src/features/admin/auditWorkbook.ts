@@ -3,7 +3,8 @@ import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { clientDetail, clientGroup } from '../../utils/clientInfo';
 import { downloadBlob } from '../../utils/downloadBlob';
-import { discountRate } from '../../utils/revenue';
+import { getRegistrationAddOns } from '../../utils/registrationAddOns';
+import { discountRate, revenueTerms } from '../../utils/revenue';
 import type { AuditData, AuditGroup } from './auditData';
 
 /**
@@ -238,6 +239,59 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
   totalRowStyle(discountsSheet, discountsTotalRow);
   setupPrint(discountsSheet, 'Discounts', 4);
 
+  // ---- MUA --------------------------------------------------------------------------------
+  // MUA is its own part of the studio: the studio collects its charges with the job order and pays the MUA team.
+  const muaSheet = workbook.addWorksheet('MUA', { views: [{ state: 'frozen', ySplit: 4 }], properties: { tabColor: { argb: 'FF6B2D5C' } } });
+  muaSheet.columns = [
+    { key: 'jo', width: 10 }, { key: 'made', width: 19 }, { key: 'client', width: 28 }, { key: 'group', width: 24 },
+    { key: 'services', width: 44 }, { key: 'status', width: 16 },
+    { key: 'charges', width: 14, style: { numFmt: PESO } }, { key: 'discount', width: 14, style: { numFmt: PESO } },
+    { key: 'billed', width: 14, style: { numFmt: PESO } }, { key: 'collected', width: 16, style: { numFmt: PESO } },
+    { key: 'due', width: 14, style: { numFmt: PESO } },
+  ];
+  muaSheet.getCell('A1').value = `${STUDIO_INFO.name} · MUA Services`;
+  muaSheet.getCell('A1').font = { bold: true, size: 14 };
+  muaSheet.getCell('A2').value = `Job orders with MUA charges (makeup services and shared MUA items such as Wardrobe). The studio collects them and pays the MUA team. ${range}`;
+  muaSheet.getRow(4).values = ['JO №', 'Date made', 'Client', 'School / Client', 'MUA services', 'Status',
+    'MUA charges', 'MUA discount', 'MUA billed', 'MUA collected (pay to MUA team)', 'MUA still to collect'];
+  headerRowStyle(muaSheet, 4);
+  const firstMua = 5;
+  const muaOrders = audit.orders.filter((order) => revenueTerms(order.registration).mua > 0 || order.revenue.mua !== 0);
+  for (const order of muaOrders) {
+    const reg = order.registration;
+    const terms = revenueTerms(reg);
+    const discount = order.cancelled ? 0 : (reg.revenue_discount?.mua ?? 0) / 100;
+    const billed = order.cancelled ? order.revenue.mua : terms.mua / 100;
+    const pkg = reg.package_snapshot || reg.expand?.package;
+    const services = [
+      ...(pkg?.revenue_category === 'mua' ? [`Package ${pkg.code || pkg.name}`] : []),
+      ...getRegistrationAddOns(reg.add_ons).filter((item) => item.revenue_category === 'mua')
+        .map((item) => `${item.name} ₱${item.amount.toLocaleString('en-PH')}`),
+    ].join(', ');
+    const row = muaSheet.addRow({
+      jo: reg.job_order_no || '', made: when(reg.created), client: clientName(reg), group: clientGroup(reg, true),
+      services, status: ORDER_STATUS[reg.status] ?? reg.status,
+      charges: billed + discount, discount, billed, collected: order.revenue.mua,
+      due: order.cancelled ? 0 : Math.max(0, Math.round((billed - order.revenue.mua) * 100) / 100),
+    });
+    row.getCell('billed').value = { formula: `ROUND(${row.getCell('charges').address}-${row.getCell('discount').address},2)`, result: billed };
+  }
+  const lastMua = firstMua + muaOrders.length - 1;
+  const muaTotalRow = lastMua + 2;
+  const muaSum = (column: string, result: number) => (muaOrders.length ? { formula: `SUM(${column}${firstMua}:${column}${lastMua})`, result } : 0);
+  const muaAdd = (value: (order: typeof muaOrders[number]) => number) =>
+    Math.round(muaOrders.reduce((sum, order) => sum + value(order), 0) * 100) / 100;
+  const muaBilledTotal = muaAdd((order) => (order.cancelled ? order.revenue.mua : revenueTerms(order.registration).mua / 100));
+  muaSheet.getCell(`F${muaTotalRow}`).value = `TOTAL (${muaOrders.length})`;
+  muaSheet.getCell(`I${muaTotalRow}`).value = muaSum('I', muaBilledTotal);
+  muaSheet.getCell(`J${muaTotalRow}`).value = muaSum('J', muaAdd((order) => order.revenue.mua));
+  muaSheet.getCell(`K${muaTotalRow}`).value = muaSum('K', muaAdd((order) => (order.cancelled ? 0
+    : Math.max(0, Math.round((revenueTerms(order.registration).mua / 100 - order.revenue.mua) * 100) / 100))));
+  totalRowStyle(muaSheet, muaTotalRow);
+  muaSheet.getCell(`A${muaTotalRow + 2}`).value = 'MUA collected counts every payment and refund ever made on these job orders. Cash on an order with Studio and MUA charges is split only once the order is fully paid; until then it is held (see the Revenue sheet).';
+  muaSheet.getCell(`A${muaTotalRow + 2}`).font = { italic: true };
+  setupPrint(muaSheet, 'MUA Services', 4);
+
   // ---- Summary (first sheet) --------------------------------------------------------------
   const revenueSheet = workbook.addWorksheet('Revenue');
   revenueSheet.columns = [
@@ -247,7 +301,7 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
   ];
   revenueSheet.getCell('A1').value = 'Revenue allocation movements';
   revenueSheet.getCell('A2').value = 'Mixed partial and unverified cash stays unallocated. Settlement or refunds can move cash between categories.';
-  revenueSheet.getRow(4).values = ['Document', 'Date', 'Job Order', 'Studio', 'Other Payment - MUA', 'Unallocated', 'Cash movement',
+  revenueSheet.getRow(4).values = ['Document', 'Date', 'Job Order', 'Studio', 'MUA (pay to MUA team)', 'Held, not yet split', 'Cash movement',
     'Assigned MUA ID', 'MUA completed at'];
   headerRowStyle(revenueSheet, 4);
   for (const { payment, registration, revenue, counted } of audit.payments) {
@@ -279,13 +333,15 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
     ['net', 'NET COLLECTIONS (cash to account for)', { formula: '', result: audit.totals.netCollections },
       'Payments received − Refunds given', true],
     ...([
-      ['studio', 'Studio revenue', 'D'],
-      ['mua', 'Other Payment - MUA', 'E'],
-      ['unallocated', 'Unallocated cash', 'F'],
+      ['studio', 'Studio revenue (studio income)', 'D'],
+      ['mua', 'MUA collected (pay out to the MUA team)', 'E'],
+      ['unallocated', 'Held, not yet split (unallocated cash)', 'F'],
     ] as const).map(([key, label, column]): Line => [
       key, label, { formula: lastRevenue >= 5 ? `SUM(Revenue!${column}5:${column}${lastRevenue})` : '0', result: audit.totals.revenue[key] },
       'Net allocation movements from the Revenue sheet',
     ]),
+    ['muaBilled', 'MUA services billed (job orders made)', { formula: muaOrders.length ? `MUA!I${muaTotalRow}` : '0', result: muaBilledTotal },
+      'Total of "MUA billed" on the MUA sheet: MUA charges on the job orders listed, after their discount'],
     ['gross', 'Gross invoiced (job orders made)', { formula: `${orders}!I${ordersTotalRow}`, result: audit.totals.gross },
       'Total of "Counted in gross" on the Job Orders sheet. A cancelled order counts only for money it still holds.', true],
     ['paid', '   Paid on these job orders', { formula: `${orders}!J${ordersTotalRow}`, result: audit.totals.paidOnOrders },
@@ -395,6 +451,37 @@ export function buildAuditWorkbook(audit: AuditData, period: AuditPeriod, now = 
   summary.getColumn(7).width = 18;
   breakdown('Studio by School / Client', audit.bySchool);
   breakdown('Studio by Package', audit.byPackage);
+
+  // The MUA part, apart: billed − discount − collected − still to collect = 0 on every row;
+  // the collected total equals "MUA collected" above.
+  const muaBreakdown = (title: string, groups: AuditGroup[]) => {
+    const listed = groups.filter((group) => group.muaCount || group.muaBilled || group.muaCollected || group.muaDiscount || group.muaBalance);
+    if (!listed.length) return;
+    rowNumber += 2;
+    summary.getCell(`A${rowNumber}`).value = title;
+    summary.getCell(`A${rowNumber}`).font = { bold: true, size: 12, color: { argb: 'FF6B2D5C' } };
+    rowNumber += 1;
+    summary.getRow(rowNumber).values = ['Name', 'Orders with MUA', 'MUA billed', 'MUA discount', 'MUA collected (pay to MUA team)', 'MUA still to collect'];
+    headerRowStyle(summary, rowNumber);
+    const first = rowNumber + 1;
+    for (const group of listed) {
+      rowNumber += 1;
+      const row = summary.getRow(rowNumber);
+      row.values = [`${group.code} · ${group.name}`, group.muaCount, group.muaBilled, group.muaDiscount, group.muaCollected, group.muaBalance];
+      [3, 4, 5, 6].forEach((column) => { row.getCell(column).numFmt = PESO; });
+      row.eachCell((cell) => { cell.border = box; });
+    }
+    const last = rowNumber;
+    rowNumber += 1;
+    const add = (value: (group: AuditGroup) => number) => Math.round(listed.reduce((sum, group) => sum + value(group), 0) * 100) / 100;
+    const sumOf = (column: string, result: number) => ({ formula: `SUM(${column}${first}:${column}${last})`, result });
+    summary.getRow(rowNumber).values = ['TOTAL', sumOf('B', add((g) => g.muaCount)), sumOf('C', add((g) => g.muaBilled)),
+      sumOf('D', add((g) => g.muaDiscount)), sumOf('E', add((g) => g.muaCollected)), sumOf('F', add((g) => g.muaBalance))];
+    [3, 4, 5, 6].forEach((column) => { summary.getRow(rowNumber).getCell(column).numFmt = PESO; });
+    totalRowStyle(summary, rowNumber);
+  };
+  muaBreakdown('MUA by School / Client (paid out to the MUA team)', audit.bySchool);
+  muaBreakdown('MUA by Package', audit.byPackage);
 
   rowNumber += 2;
   summary.getCell(`A${rowNumber}`).value = 'Prepared by: ______________________________          Checked by: ______________________________';

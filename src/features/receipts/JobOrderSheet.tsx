@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { discountCents } from '../../utils/revenue';
 import type { PaymentRecord } from '../../types';
 import { STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import {
-  orderDiscount, orderExtras, receiptRevenueLine,
+  jobOrderAdjustments, lessDiscountLabel, orderDiscountCell, orderExtras, orderMuaExtras, orderPartsLine, receiptRevenueLine,
   isCounted, isComplimentarySettlement, jobOrderMarks, methodLabel, soldPackagePrice, paymentTypeLabel, peso, receiptDate, receiptLabel, signatureUrl, statusLabel, visiblePayments, profileCells,
   type ReceiptData,
 } from './receiptData';
@@ -34,6 +34,18 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
   const isCustomer = copy === 'customer';
   const pkg = reg.package_snapshot || reg.expand?.package;
   const extras = orderExtras(reg);
+  const muaExtras = orderMuaExtras(reg);
+  const discountCell = orderDiscountCell(reg);
+  const adjustments = jobOrderAdjustments(data);
+  // Many add-ons: when the half overflows its 5.5 in, step to a tighter layout until it fits
+  // (1: tighter lines and smaller terms, 2: three columns of add-ons, 3: smallest terms; the studio copy uses part of its blank inch).
+  const sectionRef = useRef<HTMLElement>(null);
+  const [density, setDensity] = useState(0);
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    if (section && density < 3 && section.scrollHeight > section.clientHeight + 1) setDensity(density + 1);
+  }, [density, data]);
+  const crowded = density >= 1;
   const { rows, hidden } = visiblePayments(payments, MAX_ROWS);
   const latest = [...payments].reverse().find(isCounted);
   const credit = reg.status === 'cancelled' ? 0 : discountCents(reg) / 100;
@@ -48,7 +60,8 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
   return (
     <section
       aria-label={isCustomer ? 'Customer claim stub' : 'Studio accounting copy'}
-      className={`relative h-[5.5in] w-[8.5in] overflow-hidden px-[0.32in] pt-[0.26in] ${isCustomer ? 'pb-[0.22in]' : 'pb-[1in]'} flex flex-col gap-[7px] text-[10px] leading-tight`}
+      ref={sectionRef}
+      className={`relative h-[5.5in] w-[8.5in] overflow-hidden px-[0.32in] pt-[0.26in] ${isCustomer ? 'pb-[0.22in]' : density >= 3 ? 'pb-[0.45in]' : 'pb-[1in]'} flex flex-col gap-[7px] text-[10px] leading-tight`}
     >
       {marks.stamp && (
         <div aria-hidden className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
@@ -83,25 +96,26 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
         <Cell label="Mobile">{reg.mobile_number || '—'}</Cell>
         <Cell label="Email">{reg.email || '—'}</Cell>
         {profileCells(reg).map(([label, value, span]) => <Cell key={label} label={label} span={span}>{value}</Cell>)}
-        <Cell label="Package" span={4}>
+        <Cell label="Package" span={discountCell ? 2 : 4}>
           {pkg ? `${pkg.code} · ${pkg.name} — ${peso(soldPackagePrice(reg))}` : '—'}
         </Cell>
+        {/* The discount beside the package (not an item the client bought): amount and reason. */}
+        {discountCell && <Cell label={discountCell.label} span={2}>{discountCell.value}</Cell>}
         {/* Every add-on on its own line, never cut off: the client shows this to each station. */}
         <div className="col-span-4 min-w-0 border-b border-r border-[#0a0a0a] px-[5px] py-[2px]">
           <div className="font-mono text-[7px] font-bold uppercase tracking-wider text-[#666]">
-            Add-ons{extras.length ? ` (${extras.length})` : ''}
+            {muaExtras.length ? 'Studio add-ons' : 'Add-ons'}{extras.length ? ` (${extras.length})` : ''}
           </div>
-          {extras.length ? (
-            <ol className="grid grid-cols-2 gap-x-[14px]">
-              {extras.map(([label, amount], index) => (
-                <li key={index} className="flex items-baseline justify-between gap-2 text-[10px] font-bold leading-snug">
-                  <span className="min-w-0">{index + 1}. {label}</span>
-                  <span className="shrink-0 font-mono">{peso(amount)}</span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <div className="text-[10px] font-bold">None</div>
+          {extras.length ? <ItemList items={extras} density={density} /> : <div className="text-[10px] font-bold">None</div>}
+          {/* MUA charges apart: the studio collects them and pays the MUA team. */}
+          {muaExtras.length > 0 && (
+            <div className="mt-[2px] border-t border-dashed border-[#0a0a0a] pt-[1px]">
+              <div className="font-mono text-[7px] font-bold uppercase tracking-wider text-[#666]">
+                MUA services ({muaExtras.length}) · paid to the MUA team
+              </div>
+              <ItemList items={muaExtras} density={density} />
+              <div className="mt-[1px] text-right font-mono text-[8px] font-bold">{orderPartsLine(reg)}</div>
+            </div>
           )}
         </div>
       </div>
@@ -130,13 +144,21 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
                 + {hidden} more payment{hidden === 1 ? '' : 's'} on file (older or voided)
               </td></tr>
             )}
+            {/* What changed between payments (items added, discount), so the balance column adds up. */}
+            {adjustments.map((note) => (
+              <tr key={note}><td colSpan={isCustomer ? 6 : 7} className="px-[4px] pt-[1px] text-[7px] font-bold text-[#333]">{note}</td></tr>
+            ))}
           </tbody>
         </table>
 
         <div className="w-[2.2in] shrink-0 self-start border-2 border-[#0a0a0a] p-[6px] font-mono space-y-[2px]">
           <Line label="Original billed" value={peso(reg.total_amount + discountCents(reg) / 100)} />
           {/* The discount on its own line, so Original billed − discount − payments = balance. */}
-          {credit > 0 && <Line label={`Less discount (${orderDiscount(reg).rate})`} value={`−${peso(credit)}`} />}
+          {credit > 0 && <>
+            <Line label={lessDiscountLabel(reg)} value={`−${peso(credit)}`} />
+            {/* As on any invoice: original − discount = amount due; payments then come off that. */}
+            <Line label="Amount due" value={peso(reg.total_amount)} />
+          </>}
           <p className="text-[7px] leading-tight">{receiptRevenueLine(data)}</p>
           {/* paid_amount is net of refunds; show the refund so the payment history still adds up. */}
           {(reg.refunded_amount ?? 0) > 0 && <Line label="Less refunds" value={`−${peso(reg.refunded_amount)}`} />}
@@ -144,7 +166,6 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
             <div className="text-right text-[7.5px] font-bold text-[#444]">{refundNumbers.join(', ')}</div>
           )}
           <Line label={(reg.refunded_amount ?? 0) > 0 ? 'Net Paid' : 'Payments received'} value={peso(reg.paid_amount)} tone="#0f6b3a" />
-          {credit > 0 && <Line label="Total settled" value={peso(reg.paid_amount + credit)} />}
           <Line label={cancelled ? 'Balance (cancelled, not owed)' : 'Balance'} value={peso(reg.balance)} tone={reg.balance > 0 ? '#c8102e' : undefined} big />
           {/* A cancelled order owes nothing; show what the studio still holds (refundable up to this). */}
           {cancelled && <Line label="Held by studio" value={peso(Math.max(0, reg.paid_amount))} />}
@@ -182,7 +203,7 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
 
       {/* Terms */}
       {isCustomer ? (
-        <div className="mt-auto border-t-2 border-[#0a0a0a] pt-[3px] text-[7.2px] leading-[1.28] text-[#222]">
+        <div className={`mt-auto border-t-2 border-[#0a0a0a] pt-[3px] text-[#222] ${density >= 3 ? 'text-[5.8px] leading-[1.18]' : crowded ? 'text-[6.4px] leading-[1.2]' : 'text-[7.2px] leading-[1.28]'}`}>
           <div className="font-mono text-[7.5px] font-black uppercase tracking-wider">Terms &amp; Conditions</div>
           <ol className="list-decimal pl-[10px] columns-2 gap-x-[14px]">
             {data.terms.map((clause, index) => <li key={index} className="break-inside-avoid">{clause}</li>)}
@@ -206,6 +227,18 @@ const JobOrderHalf: React.FC<{ data: ReceiptData; cashierName: string; copy: 'cu
     </section>
   );
 };
+
+/** Numbered lines in two columns (three when the stub is very full), name and price on each. */
+const ItemList: React.FC<{ items: [string, number][]; density: number }> = ({ items, density }) => (
+  <ol className={`grid gap-x-[14px] ${density >= 2 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+    {items.map(([label, amount], index) => (
+      <li key={index} className={`flex items-baseline justify-between gap-2 font-bold ${density >= 2 ? 'text-[8.5px] leading-tight' : density ? 'text-[9px] leading-tight' : 'text-[10px] leading-snug'}`}>
+        <span className="min-w-0">{index + 1}. {label}</span>
+        <span className="shrink-0 font-mono">{peso(amount)}</span>
+      </li>
+    ))}
+  </ol>
+);
 
 const PaymentRow: React.FC<{ payment: PaymentRecord; studio: boolean }> = ({ payment, studio }) => {
   const status = statusLabel(payment);

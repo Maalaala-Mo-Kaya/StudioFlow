@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Pencil, Check, X, Printer, Frame, Box, Store, Shirt, Palette, Loader2, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Check, X, Printer, Frame, Box, Store, Shirt, Palette, Loader2, ShieldCheck, AlertTriangle, Search, LayoutGrid, List } from 'lucide-react';
 import type { CatalogItem, CatalogItemCategory, CatalogItemInput, StaffUser } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { formatCurrency } from '../../../utils/formatters';
@@ -21,6 +21,17 @@ const ICONS = { print: Printer, frame: Frame, other: Box, attire: Shirt, backgro
 const CATEGORY_ORDER = ['print', 'frame', 'attire', 'background', 'other'] as const;
 /** Attires and backgrounds describe poses; they aren't sold on their own. */
 const sellable = (category: CatalogItemCategory) => category === 'print' || category === 'frame' || category === 'other';
+
+/** Single items grouped by kind, or as one list; remembered per device. */
+type ItemLayout = 'grouped' | 'list';
+const ITEM_LAYOUT_KEY = 'studioflow-single-items-layout';
+function savedItemLayout(): ItemLayout {
+  try {
+    return localStorage.getItem(ITEM_LAYOUT_KEY) === 'list' ? 'list' : 'grouped';
+  } catch {
+    return 'grouped';
+  }
+}
 
 interface CatalogItemsPanelProps {
   items: CatalogItem[];
@@ -240,6 +251,20 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, sta
   const [photographers, setPhotographers] = useState<string[]>([]);
   const [requiresPhotography, setRequiresPhotography] = useState(false);
   const missingPhotographer = category === 'other' && requiresPhotography && !photographers.length;
+  // Which items show: one kind (or all), by name; grouped by kind or as one list.
+  const [show, setShow] = useState<CatalogItemCategory | 'all'>('all');
+  const [query, setQuery] = useState('');
+  const [layout, setLayout] = useState<ItemLayout>(savedItemLayout);
+  const chooseLayout = (next: ItemLayout) => {
+    setLayout(next);
+    try { localStorage.setItem(ITEM_LAYOUT_KEY, next); } catch { /* optional */ }
+  };
+  const counts = Object.fromEntries(CATEGORY_ORDER.map((group) =>
+    [group, items.filter((i) => (i.category || 'other') === group).length])) as Record<CatalogItemCategory, number>;
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shownItems = items
+    .filter((i) => (show === 'all' || (i.category || 'other') === show) && words.every((word) => i.name.toLowerCase().includes(word)))
+    .sort((a, b) => CATEGORY_ORDER.indexOf(a.category || 'other') - CATEGORY_ORDER.indexOf(b.category || 'other') || a.name.localeCompare(b.name));
 
   const run = async (action: () => Promise<unknown>, done: string) => {
     setBusy(true);
@@ -264,11 +289,39 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, sta
     if (sellable(category)) Object.assign(data, { amount, client_kind: kind });
     if (category === 'other' && requiresPhotography) data.required_photographers = photographers;
     if (await run(() => onSave(null, data), `"${name.trim()}" added.`)) {
+      // Keep the new item in view when another kind was being shown.
+      if (show !== 'all' && show !== category) setShow(category);
       setName('');
       setPrice('');
       setPhotographers([]);
       setRequiresPhotography(false);
     }
+  };
+
+  /** Sell at kiosk (sellable kinds), Edit and Delete: the same in both layouts. */
+  const itemActions = (item: CatalogItem) => {
+    const group = item.category || 'other';
+    return (
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {sellable(group) && <button type="button" disabled={busy} aria-pressed={!!item.is_active}
+          title={item.is_active ? 'Sold at the kiosk. Click to stop selling it.' : item.amount ? 'Click to sell it at the kiosk.' : 'Set a price first to sell it at the kiosk.'}
+          onClick={() => {
+            if (!item.is_active && !item.amount) { toast.error(`Set a price for "${item.name}" first.`); return; }
+            void run(() => onSave(item.id, { is_active: !item.is_active }),
+              item.is_active ? `"${item.name}" is no longer sold at the kiosk.` : `"${item.name}" is now sold at the kiosk.`);
+          }}
+          className={`flex items-center gap-1 px-1.5 py-1 border text-[9px] font-black uppercase cursor-pointer ${
+            item.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-500' : 'text-neutral-500 border-neutral-300 hover:border-line'
+          }`}>
+          <Store className="w-3 h-3" /> {item.is_active ? 'At kiosk' : 'Sell at kiosk'}
+        </button>}
+        <span className={recordActionGroup}>
+          <RecordActionButton variant="edit" recordName={item.name} onClick={() => setEditing(item)} />
+          <RecordActionButton variant="delete" recordName={item.name} disabled={busy}
+            onClick={() => void run(() => onDelete(item.id), `"${item.name}" deleted.`)} />
+        </span>
+      </div>
+    );
   };
 
   return (
@@ -304,10 +357,93 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, sta
         <p className="text-[10px] font-sans text-neutral-600">{CATEGORY_HELP[category]}</p>
       </form>
 
-      {CATEGORY_ORDER.map((group) => {
-        const list = items.filter((i) => (i.category || 'other') === group);
+      {/* Find items: one kind at a time (e.g. only Attire), by name, grouped or as one list. */}
+      <div className="bg-panel border-2 border-line shadow-lux p-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div role="radiogroup" aria-label="Show item kind" className="flex flex-wrap gap-1.5">
+            {(['all', ...CATEGORY_ORDER] as const).map((value) => {
+              const Icon = value === 'all' ? null : ICONS[value];
+              const count = value === 'all' ? items.length : counts[value];
+              return (
+                <button key={value} type="button" role="radio" aria-checked={show === value} onClick={() => setShow(value)}
+                  className={`min-h-[34px] px-2.5 flex items-center gap-1.5 border text-[10px] font-black uppercase cursor-pointer ${
+                    show === value ? 'bg-obsidian text-gold border-line' : 'bg-canvas text-neutral-600 border-neutral-300 hover:border-line'}`}>
+                  {Icon && <Icon className="w-3.5 h-3.5" aria-hidden="true" />}
+                  {value === 'all' ? 'All' : ITEM_CATEGORY_LABELS[value]}
+                  <span className="text-[9px] opacity-70">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          <label className="relative flex-1 min-w-[180px]">
+            <span className="sr-only">Search items</span>
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500" aria-hidden="true" />
+            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search items…"
+              className="w-full min-h-[34px] border border-line bg-canvas pl-7 pr-2 text-xs" />
+          </label>
+          {/* How the items are shown, remembered on this device. */}
+          <span role="radiogroup" aria-label="Show items as" className="flex border border-line">
+            {([['grouped', 'By category', LayoutGrid], ['list', 'List', List]] as const).map(([value, label, Icon]) => (
+              <button key={value} type="button" role="radio" aria-checked={layout === value} onClick={() => chooseLayout(value)}
+                className={`min-h-[32px] px-2.5 flex items-center gap-1 text-[10px] font-black uppercase cursor-pointer ${
+                  layout === value ? 'bg-obsidian text-gold' : 'bg-panel text-neutral-600 hover:text-ink'}`}>
+                <Icon className="w-3.5 h-3.5" aria-hidden="true" /> {label}
+              </button>
+            ))}
+          </span>
+        </div>
+        {(query.trim() || show !== 'all') && (
+          <p className="text-[11px] text-neutral-600" aria-live="polite">
+            {shownItems.length} of {items.length} items{show !== 'all' ? ` · ${ITEM_CATEGORY_LABELS[show]} only` : ''}
+          </p>
+        )}
+      </div>
+
+      {layout === 'list' ? (
+        <div className="bg-panel border-2 border-line shadow-lux p-3">
+          {!shownItems.length ? <p className="p-4 text-center text-neutral-500 font-sans italic">No item matches.</p> : (
+            <div className="overflow-x-auto border border-line">
+              <table className="w-full min-w-[640px] border-collapse text-xs">
+                <thead>
+                  <tr className="bg-obsidian text-gold text-left text-[10px] uppercase tracking-wider">
+                    <th className="p-2">Item</th>
+                    <th className="p-2">Kind</th>
+                    <th className="p-2 text-right">Price</th>
+                    <th className="p-2">Clients</th>
+                    <th className="p-2 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shownItems.map((item) => {
+                    const group = item.category || 'other';
+                    const Icon = ICONS[group];
+                    return (
+                      <tr key={item.id} className="border-t border-line hover:bg-gold-wash">
+                        <td className="p-2 font-semibold text-ink break-words">{item.name}</td>
+                        <td className="p-2 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase"><Icon className="w-3.5 h-3.5 text-gold" aria-hidden="true" />{ITEM_CATEGORY_LABELS[group]}</span>
+                        </td>
+                        <td className={`p-2 text-right whitespace-nowrap ${item.amount ? 'font-bold text-gold-soft' : 'text-neutral-500 italic'}`}>
+                          {sellable(group) ? (item.amount ? formatCurrency(item.amount, { exact: true }) : 'No price') : '—'}
+                        </td>
+                        <td className="p-2 text-[10px] uppercase whitespace-nowrap">
+                          {sellable(group) ? PACKAGE_KIND_LABELS[(item.client_kind || 'both') as PackageKind] : '—'}
+                        </td>
+                        <td className="p-2">{itemActions(item)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : CATEGORY_ORDER.filter((group) => show === 'all' || show === group).map((group) => {
+        const list = shownItems.filter((i) => (i.category || 'other') === group);
         const selling = list.filter((i) => i.is_active).length;
         const Icon = ICONS[group];
+        // While searching, kinds with no match are left out instead of saying "None yet".
+        if (query.trim() && !list.length) return null;
         return (
           <div key={group} className="bg-panel border-2 border-line shadow-lux p-5 space-y-2">
             <h4 className="flex items-center justify-between font-black uppercase text-ink">
@@ -318,38 +454,18 @@ export const CatalogItemsPanel: React.FC<CatalogItemsPanelProps> = ({ items, sta
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
               {list.map((item) => (
                 <div key={item.id} className="p-2 border border-neutral-300 bg-canvas">
-                  {(
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <span className="block font-semibold text-ink break-words">{item.name}</span>
-                        {sellable(group) && (
-                          <span className={`block text-[10px] ${item.amount ? 'text-gold-soft font-bold' : 'text-neutral-500 italic'}`}>
-                            {item.amount ? `${formatCurrency(item.amount, { exact: true })} each` : 'No price'}
-                            {' · '}{PACKAGE_KIND_LABELS[(item.client_kind || 'both') as PackageKind]}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                        {sellable(group) && <button type="button" disabled={busy} aria-pressed={!!item.is_active}
-                          title={item.is_active ? 'Sold at the kiosk. Click to stop selling it.' : item.amount ? 'Click to sell it at the kiosk.' : 'Set a price first to sell it at the kiosk.'}
-                          onClick={() => {
-                            if (!item.is_active && !item.amount) { toast.error(`Set a price for "${item.name}" first.`); return; }
-                            void run(() => onSave(item.id, { is_active: !item.is_active }),
-                              item.is_active ? `"${item.name}" is no longer sold at the kiosk.` : `"${item.name}" is now sold at the kiosk.`);
-                          }}
-                          className={`flex items-center gap-1 px-1.5 py-1 border text-[9px] font-black uppercase cursor-pointer ${
-                            item.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-500' : 'text-neutral-500 border-neutral-300 hover:border-line'
-                          }`}>
-                          <Store className="w-3 h-3" /> {item.is_active ? 'At kiosk' : 'Sell at kiosk'}
-                        </button>}
-                        <span className={recordActionGroup}>
-                          <RecordActionButton variant="edit" recordName={item.name} onClick={() => setEditing(item)} />
-                          <RecordActionButton variant="delete" recordName={item.name} disabled={busy}
-                            onClick={() => void run(() => onDelete(item.id), `"${item.name}" deleted.`)} />
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="block font-semibold text-ink break-words">{item.name}</span>
+                      {sellable(group) && (
+                        <span className={`block text-[10px] ${item.amount ? 'text-gold-soft font-bold' : 'text-neutral-500 italic'}`}>
+                          {item.amount ? `${formatCurrency(item.amount, { exact: true })} each` : 'No price'}
+                          {' · '}{PACKAGE_KIND_LABELS[(item.client_kind || 'both') as PackageKind]}
                         </span>
-                      </div>
+                      )}
                     </div>
-                  )}
+                    {itemActions(item)}
+                  </div>
                 </div>
               ))}
             </div>

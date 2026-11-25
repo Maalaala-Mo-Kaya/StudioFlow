@@ -44,6 +44,8 @@ const collectionModeLabels: Record<PaymentRecord['payment_type'], string> = {
 
 type Period = 'today' | 'month' | 'all';
 const PERIOD_LABELS: Record<Period, string> = { today: 'Today', month: 'This Month', all: 'All Time' };
+/** School / package revenue rows: scroll inside their card (about six rows) instead of growing the page. */
+const GROUP_LIST_SCROLL = 'max-h-[26rem] overflow-y-auto overscroll-contain pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
 
 interface AdminAnalyticsTabProps {
   /** Analytics & Overview, or its Settlement & Ledger sub-tab. */
@@ -584,7 +586,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             </h3>
             <span className="font-mono text-[10px] text-neutral-500">{PERIOD_LABELS[period]}</span>
           </div>
-          <div className="divide-y divide-neutral-200">
+          {/* The rows scroll inside the card (about six at a time); the TOTAL stays in view below them. */}
+          <div className={`divide-y divide-neutral-200 ${GROUP_LIST_SCROLL}`} tabIndex={0} role="region" aria-label="Studio revenue by school">
             {activeSchools.length === 0 && <p className="py-3 text-xs text-neutral-500">No payments or job orders {periodWords}.</p>}
             {activeSchools.map((s) => (
               <div key={s.key} className="py-2.5 flex items-center justify-between text-xs font-mono">
@@ -595,13 +598,13 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                 <GroupFigures group={s} fallback={s.count ? 'No balance' : 'Payments only'} />
               </div>
             ))}
-            {activeSchools.length > 0 && (
-              <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
-                <span>TOTAL</span>
-                <GroupFigures group={sumGroups(activeSchools)} total />
-              </div>
-            )}
           </div>
+          {activeSchools.length > 0 && (
+            <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
+              <span>TOTAL</span>
+              <GroupFigures group={sumGroups(activeSchools)} total />
+            </div>
+          )}
           <GroupFootnote groups={activeSchools} />
           {hiddenSchools > 0 && (
             <p className="mt-2 text-[10px] text-neutral-500">{hiddenSchools} school{hiddenSchools === 1 ? '' : 's'} with nothing {periodWords} not shown.</p>
@@ -617,7 +620,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             </h3>
             <span className="font-mono text-[10px] text-neutral-500">{PERIOD_LABELS[period]}</span>
           </div>
-          <div className="divide-y divide-neutral-200">
+          <div className={`divide-y divide-neutral-200 ${GROUP_LIST_SCROLL}`} tabIndex={0} role="region" aria-label="Studio revenue by package">
             {activePackages.length === 0 && <p className="py-3 text-xs text-neutral-500">No job orders {periodWords}.</p>}
             {activePackages.map((pkg) => (
               <div key={pkg.key} className="py-2.5 flex items-center justify-between text-xs font-mono">
@@ -628,13 +631,13 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
                 <GroupFigures group={pkg} fallback={`${pkg.count} order${pkg.count === 1 ? '' : 's'}`} />
               </div>
             ))}
-            {activePackages.length > 0 && (
-              <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
-                <span>TOTAL</span>
-                <GroupFigures group={sumGroups(activePackages)} total fallback={`${audit.totals.activeOrders} orders`} />
-              </div>
-            )}
           </div>
+          {activePackages.length > 0 && (
+            <div className="pt-2.5 flex items-center justify-between text-xs font-mono font-black border-t-2 border-line">
+              <span>TOTAL</span>
+              <GroupFigures group={sumGroups(activePackages)} total fallback={`${audit.totals.activeOrders} orders`} />
+            </div>
+          )}
           <GroupFootnote groups={activePackages} />
         </div>
       </div>
@@ -799,7 +802,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
 const sumGroups = (groups: AuditGroup[]): AuditGroup => groups.reduce((sum, group) => ({
   ...sum, count: sum.count + group.count, billed: sum.billed + group.billed, collected: sum.collected + group.collected,
   discount: sum.discount + group.discount, balance: sum.balance + group.balance, held: sum.held + group.held,
-}), { key: 'total', code: 'TOTAL', name: '', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0 });
+}), { key: 'total', code: 'TOTAL', name: '', count: 0, billed: 0, collected: 0, discount: 0, balance: 0, held: 0,
+  muaCount: 0, muaBilled: 0, muaDiscount: 0, muaCollected: 0, muaBalance: 0 });
 
 /**
  * A school / package row's figures: Studio revenue counted, cash held until a mixed order is fully
