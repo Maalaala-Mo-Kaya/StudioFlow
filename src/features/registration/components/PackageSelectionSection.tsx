@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Info, ArrowRight, ArrowLeft, Check, Gift, ListChecks, Printer, Camera, Frame, Images, Columns3, Hand } from 'lucide-react';
 import { type OptionPicks } from '../../../utils/packageOptions';
 import { parseInclusionTree, topLevelLabels } from '../../../utils/inclusions';
@@ -9,6 +9,7 @@ import { PackageDetailsModal } from './PackageDetailsModal';
 import { PackageCompareModal } from './PackageCompareModal';
 import { validationProps, type RegistrationErrors } from '../registrationValidation';
 import { RegistrationFieldError } from './RegistrationFieldError';
+import { isMakeupArtistService } from '../registrationAddOns';
 
 const preferredPackageWidth = 320;
 const packagePeekWidth = 32;
@@ -21,6 +22,7 @@ interface PackageSelectionSectionProps {
   defaultAddOn?: AddOn;
   selectedAddOns: string[];
   onToggleAddOn: (id: string) => void;
+  onSelectMakeupService: (id: string) => void;
   paymentType: 'full' | 'downpayment';
   onPaymentTypeChange: (type: 'full' | 'downpayment') => void;
   totalAmount: number;
@@ -44,6 +46,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   defaultAddOn,
   selectedAddOns,
   onToggleAddOn,
+  onSelectMakeupService,
   paymentType,
   onPaymentTypeChange,
   totalAmount,
@@ -55,6 +58,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   part = 'all',
   onOptionPicksChange,
 }) => {
+  const makeupServiceGroup = useId();
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
   const [viewedIndex, setViewedIndex] = useState(0);
@@ -360,51 +364,42 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       {part !== 'cards' && (<>
       {part === 'extras' && <h2 id="sec-packages" className="mb-5 border-b-2 border-line pb-2.5 text-sm font-black uppercase tracking-widest text-ink">Add-ons &amp; Payment</h2>}
       {([
-        ['Studio Add-ons', 'Add prints, frames, or other studio products to your package.',
-          addOnsList.filter((addon) => addon.revenue_category !== 'mua' && !addon.requires_mua)],
-        ['MUA Services', 'Choose optional makeup and grooming services for your pictorial.',
-          addOnsList.filter((addon) => addon.revenue_category === 'mua' || addon.requires_mua)],
-      ] as const).map(([title, description, list]) => list.length > 0 && (
-        <section key={title} aria-label={title} className="mb-6 mt-5 border-t border-line pt-4">
-          <h3 className="font-mono text-[11px] font-black text-ink uppercase tracking-widest">
+        ['Studio Add-ons', 'Add prints, frames, or other studio products to your package.', false,
+          addOnsList.filter((addon) => !isMakeupArtistService(addon))],
+        ['Makeup Artist Services', 'Choose one optional makeup or grooming service for your pictorial.', true,
+          addOnsList.filter(isMakeupArtistService)],
+      ] as const).map(([title, description, single, list]) => list.length > 0 && (
+        <fieldset key={title} className="mb-6 mt-5 min-w-0 border-t border-line pt-3">
+          <legend className="pr-3 font-mono text-[11px] font-black text-ink uppercase tracking-widest">
             {title}
-          </h3>
-          <p className="mb-3 mt-1 text-xs text-neutral-600">{description}</p>
+          </legend>
+          <p className="mb-3 text-xs text-neutral-600">{description}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {list.map((addon) => {
-              const isChecked = selectedAddOns.includes(addon.id);
+            {(single ? [...list, { id: '', name: 'No additional service' }] : list).map((addon) => {
+              const isChecked = addon.id ? selectedAddOns.includes(addon.id)
+                : !list.some((item) => selectedAddOns.includes(item.id));
               return (
-                <button
-                  type="button"
-                  key={addon.id}
-                  aria-pressed={isChecked}
-                  onClick={() => onToggleAddOn(addon.id)}
-                  className={`btn-tactile min-h-[48px] flex items-center justify-between p-3.5 border text-left cursor-pointer ${
+                <label key={addon.id}
+                  className={`btn-tactile min-h-[48px] flex items-center justify-between gap-3 p-3.5 border text-left cursor-pointer focus-within:outline-2 focus-within:outline-gold ${
                     isChecked
                       ? 'border-line bg-gold-wash shadow-lux'
                       : 'border-neutral-300 bg-panel hover:border-line'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-4 h-4 flex items-center justify-center border ${
-                        isChecked
-                          ? 'bg-obsidian border-line text-gold'
-                          : 'border-neutral-400 bg-panel'
-                      }`}
-                    >
-                      {isChecked && <span className="text-[10px] font-black">✓</span>}
-                    </div>
+                  <span className="flex min-w-0 items-center gap-3">
+                    <input type={single ? 'radio' : 'checkbox'} name={single ? makeupServiceGroup : undefined}
+                      checked={isChecked} onChange={() => single ? onSelectMakeupService(addon.id) : onToggleAddOn(addon.id)}
+                      className="size-4 shrink-0 accent-gold" />
                     <span className="text-xs font-bold text-ink uppercase">{addon.name}</span>
-                  </div>
-                  <span className="font-mono text-xs font-black text-gold-soft ml-2 shrink-0">
-                    +{formatCurrency(addon.amount)}
                   </span>
-                </button>
+                  {'amount' in addon && <span className="font-mono text-xs font-black text-gold-soft shrink-0">
+                    +{formatCurrency(addon.amount)}
+                  </span>}
+                </label>
               );
             })}
           </div>
-        </section>
+        </fieldset>
       ))}
 
       {defaultAddOn && (

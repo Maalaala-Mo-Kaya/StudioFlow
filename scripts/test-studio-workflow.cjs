@@ -320,14 +320,15 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     form.set('signature', new Blob([png], { type: 'image/png' }), 'signature.png');
     return form;
   }
-  async function register(pkg, addOns = [], expected = 200, fields = {}) {
+  async function register(pkg, addOns = [], expected = 200, fields = {}, token) {
     const form = await registrationForm(pkg, addOns, fields);
-    const { payload } = await send(records('registrations'), { method: 'POST', body: form, status: expected });
+    const { payload } = await send(records('registrations'), { method: 'POST', body: form, status: expected, token });
     if (expected !== 200) return payload;
     assert.equal(payload.status, 'pending_payment');
     assert.equal(payload.paid_amount, 0);
     return payload;
   }
+  const registerAtCounter = (pkg, addOns, fields) => register(pkg, addOns, 200, fields, admin);
   async function pay(student, amount, type = 'full', status = 200, extra = {}) {
     return (await send(records('payments'), { token: cashier, method: 'POST', status, body: {
       registration: student.id, amount, cashier_name: 'Test cashier', payment_type: type,
@@ -850,7 +851,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const duplicateMakeup = await create('add_ons', {
     code: 'TOUCH', name: 'Touch up', amount: 100, is_active: true, revenue_category: 'mua', requires_mua: true,
   });
-  const multi = await register(multiPackage, [{ id: duplicateMakeup.id }, { id: hair.id }]);
+  const multi = await registerAtCounter(multiPackage, [{ id: duplicateMakeup.id }, { id: hair.id }]);
   await pay(multi, 1250);
   await contest(multi, performer, 'claim');
   await contest(multi, performer, 'start');
@@ -1793,7 +1794,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const muaOnly = await register(pureMua);
     await pay(muaOnly, 300);
     assert.deepEqual((await auditFor(muaOnly)).totals.revenue, { studio: 0, mua: 300, unallocated: 0 });
-    const mixed = await register(studio, [{ id: muaAddOn.id, revenue_category: 'studio', amount: 0 }, { id: groomingAddOn.id }], 200,
+    const mixed = await registerAtCounter(studio, [{ id: muaAddOn.id, revenue_category: 'studio', amount: 0 }, { id: groomingAddOn.id }],
       { revenue_terms: JSON.stringify({ studio: 0, mua: 1, unallocated: 0 }) });
     assert.deepEqual(mixed.revenue_terms, { studio: 150000, mua: 45000, unallocated: 0 });
     const mixedFirst = await pay(mixed, 975, 'initial');
@@ -1838,7 +1839,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.deepEqual(buildRegistrationsCsv([receipt.registration], receipt.payments).split('\r\n')
       .slice(1).map((line) => line.split(',').slice(-5)), [['1500.00', '450.00', '0.00', '0.00', '1950.00'], ['1500.00', '450.00', '0.00', '0.00', '1950.00']]);
 
-    const discountJob = await register(studio, [{ id: muaAddOn.id }, { id: groomingAddOn.id }]);
+    const discountJob = await registerAtCounter(studio, [{ id: muaAddOn.id }, { id: groomingAddOn.id }]);
     // Sold prices and ownership are independent from later catalog edits.
     await patchCatalog('packages', studio, { amount: 1800, revenue_category: 'mua' });
     await patchCatalog('add_ons', groomingAddOn, { amount: 180, revenue_category: 'studio', requires_mua: false, is_active: false });
@@ -2622,6 +2623,13 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       code: 'KIOSK-VERSION', name: 'Kiosk Custom Service', amount: 200, is_active: true,
       revenue_category: 'mua', requires_mua: true,
     });
+    const secondService = await create('add_ons', {
+      code: 'KIOSK-GROOM', name: 'Kiosk Grooming', amount: 50, is_active: true,
+      revenue_category: 'mua', requires_mua: true,
+    });
+    const kioskPrint = await create('add_ons', {
+      code: 'KIOSK-PRINT', name: 'Kiosk Print', amount: 100, is_active: true, revenue_category: 'studio',
+    });
     const added = await registrationCatalog();
     assert.notEqual(added.version, before.version);
     assert.equal(added.addOns.find(({ id }) => id === kioskAddOn.id).revenue_category, 'mua');
@@ -2632,8 +2640,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     });
     assert.equal((await registrationCatalog()).version, added.version);
 
-    const form = await registrationForm(standard, [{ id: kioskAddOn.id }], { registration_version: added.version });
+    const permittedAddOns = [{ id: kioskAddOn.id }, { id: kioskPrint.id }];
+    const form = await registrationForm(standard, [...permittedAddOns, { id: secondService.id }], { registration_version: added.version });
     const submit = (status = 200) => send(records('registrations'), { method: 'POST', body: form, status });
+    assert.match((await submit(400)).payload.message, /Choose only one Makeup Artist Service/);
+    form.set('add_ons', JSON.stringify(permittedAddOns));
     await patchCatalog('add_ons', kioskAddOn, { amount: 250 });
     const priced = await registrationCatalog();
     assert.notEqual(priced.version, added.version);
@@ -2643,6 +2654,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal(first.payload.id, retry.payload.id);
     const registration = [first.payload, retry.payload].find((payload) => Array.isArray(payload.add_ons));
     assert.equal(registration.add_ons.find(({ id }) => id === kioskAddOn.id).amount, 250);
+    assert.ok(registration.add_ons.some(({ id }) => id === kioskPrint.id));
     assert.equal(registration.makeup_service, kioskAddOn.name);
     assert.equal([first, retry].filter(({ payload }) => Object.hasOwn(payload, 'total_amount')).length, 1);
 

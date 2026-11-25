@@ -15,7 +15,7 @@ import {
   activeKind, availableKinds as kindsIn, clearRegistrationDraft, readRegistrationDraft,
   registrationDraftLifetime, saveRegistrationDraft, textFields, type RegistrationConfiguration, type RegistrationDraft, type RegistrationStepId,
 } from './registrationDraft';
-import { registrationAddOns } from './registrationAddOns';
+import { isMakeupArtistService, registrationAddOns } from './registrationAddOns';
 import { makeRegistrationQuote, recaptureSignature, reconcileRegistration, registrationTerms, termsKey } from './registrationRecovery';
 import { keepValidPicks, missingPicks, optionGroups, picksPayload, type OptionPicks } from '../../utils/packageOptions';
 import {
@@ -171,6 +171,13 @@ export function useRegistrationForm() {
   const selectedPackage = kindPackages.find((pkg) => pkg.id === selectedPackageId);
   const { manualAddOns, selected, defaultAddOn, requiresMua: asksLook, totalAmount } =
     registrationAddOns(selectedPackage, kindAddOns, selectedAddOns);
+  const selectMakeupService = (id: string) => {
+    const serviceIds = new Set(manualAddOns.filter(isMakeupArtistService).map((item) => item.id));
+    setSelectedAddOns((previous) => [
+      ...previous.filter((item) => !serviceIds.has(item)),
+      ...(serviceIds.has(id) ? [id] : []),
+    ]);
+  };
   // The package's option groups, and the picks that still apply to this package and gender.
   const packageOptionGroups = optionGroups(selectedPackage);
   const clientGender = gender === 'male' || gender === 'female' ? gender : '';
@@ -541,6 +548,7 @@ export function useRegistrationForm() {
     }),
     selectedAddOns: selected.map(({ id }) => id),
     toggleAddOn,
+    selectMakeupService,
     packageOptionGroups,
     optionPicks: validPicks,
     setOptionPicks: changeField('package_options', setOptionPicks),

@@ -1,5 +1,7 @@
 import type { AddOn, Package } from '../../types';
 
+export const isMakeupArtistService = (item: AddOn) => item.revenue_category === 'mua' || !!item.requires_mua;
+
 /** The registration catalog supplies effective MUA requirements for new orders. */
 export function registrationAddOns(
   selectedPackage: Package | undefined, offeredAddOns: AddOn[], selectedIds: string[],
