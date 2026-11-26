@@ -21,7 +21,7 @@ import { getRegistrationAddOns, sumAddOnAmounts } from '../../../utils/registrat
 import { isWalkIn } from '../../../utils/clientInfo';
 import { useStudioSettings } from '../../../hooks/useStudioSettings';
 import { MAKEUP_LOOKS, MAKEUP_LOOK_NOTE_MAX } from '../../../constants/makeupLook';
-import { discountCents, revenueTerms } from '../../../utils/revenue';
+import { canEditOrderDiscount, discountCents, revenueTerms } from '../../../utils/revenue';
 import { PackageOptionsPicker } from '../../../components/common/PackageOptionsPicker';
 import { PhotographyProgress } from '../../photographer/components/PhotographyProgress';
 import { CashierEditHistory } from './CashierEditHistory';
@@ -120,6 +120,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const isCancelled = reg.status === 'cancelled';
   // Released orders are closed; cancelled ones owe nothing (Restore first). The server enforces both.
   const canEditAddOns = !isCancelled && reg.status !== 'released';
+  const canEditDiscount = !cashierCatalog && canEditOrderDiscount(reg);
   // Makeup can be added until the shoot is done: during the shoot the client goes back to the MUA queue.
   const inShoot = reg.status === 'shooting';
   const photosDone = !['pending_payment', 'paid', 'shooting'].includes(reg.status);
@@ -161,16 +162,15 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
     : addOns;
   const addsMakeup = addOns.some((item) => !savedIds.has(item.id ?? '')
     && addOnCatalog.find((entry) => entry.id === item.id)?.requires_mua);
-  // Discounts come out of the Studio charges only: MUA services are never discounted.
-  const discountChanged = studioDiscount !== (reg.revenue_discount?.studio ?? 0) / 100
-    || (studioDiscount > 0 && discountReason.trim() !== (reg.revenue_discount?.reason ?? ''));
+  const discountChanged = canEditDiscount && (studioDiscount !== (reg.revenue_discount?.studio ?? 0) / 100
+    || (studioDiscount > 0 && discountReason.trim() !== (reg.revenue_discount?.reason ?? '')));
   const itemsChanged = packageChanged || addOnsChanged;
   const priceChanged = itemsChanged || discountChanged;
   // Same rule as the server: a new package is priced from the catalog; otherwise only the add-ons are swapped.
   const subtotal = packageChanged && selectedPkg
     ? cents(selectedPkg.amount) + cents(sumAddOnAmounts(pricedAddOns)) + cents(reg.other_fees)
     : cents(reg.total_amount) + discountCents(reg) - cents(sumAddOnAmounts(savedAddOns)) + cents(sumAddOnAmounts(pricedAddOns));
-  const totalCents = subtotal - cents(studioDiscount);
+  const totalCents = subtotal - (discountChanged ? cents(studioDiscount) : discountCents(reg));
   const currentTotal = totalCents / 100;
   const paid = reg.paid_amount || 0;
   const currentBalance = !priceChanged ? reg.balance : isCancelled ? 0 : Math.max(0, currentTotal - paid);
@@ -233,7 +233,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
         package: packageId,
         ...(sendOptions ? { package_options: picksPayload(validPicks) } : {}),
         ...(!cashierCatalog && !itemsChanged && reviewAmount !== '' ? { review_mua_amount: Number(reviewAmount), review_revenue_reason: reviewReason.trim() } : {}),
-        ...(!cashierCatalog && canEditAddOns && discountChanged ? { order_discount: { studio: studioDiscount, mua: 0, reason: discountReason.trim() } } : {}),
+        ...(discountChanged ? { order_discount: { studio: studioDiscount, mua: 0, reason: discountReason.trim() } } : {}),
         ...(addOnsChanged ? { add_ons: addOns.map((item) => (item.id ? { id: item.id } : { code: item.code, name: item.name })) } : {}),
         ...(!cashierCatalog ? {
           pictorial_date: pictorialDate ? `${pictorialDate} 00:00:00.000Z` : '',
@@ -270,7 +270,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
                   value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} /></label>
               </div>
             </>}
-            {canEditAddOns && <>
+            {canEditDiscount && <>
               <label className="block">Discount (₱, off the Studio charges; MUA services are never discounted)
                 <input className="block w-full border border-line p-2" type="number" min="0" step="1"
                   value={studioDiscount} onChange={(event) => setStudioDiscount(Number(event.target.value))} /></label>

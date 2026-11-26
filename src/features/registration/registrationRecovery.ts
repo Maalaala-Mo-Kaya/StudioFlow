@@ -2,7 +2,7 @@ import { REGISTRATION_TERMS_CLAUSES } from '../../constants/studio';
 import type { ClientKind } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { keepValidPicks, optionGroups } from '../../utils/packageOptions';
-import { registrationAddOns } from './registrationAddOns';
+import { isMakeupArtistService, registrationAddOns } from './registrationAddOns';
 import { activeKind, availableKinds, registrationSteps, type RegistrationConfiguration, type RegistrationDraft, type RegistrationQuote, type RegistrationStepId } from './registrationDraft';
 
 export const recaptureSignature = 'Sign again on the Review & sign step. Signatures are cleared when the form reloads.';
@@ -49,7 +49,12 @@ export function reconcileRegistration(draft: RegistrationDraft, config: Registra
     next.selectedPackageId = null;
   }
   const offeredAddOns = config.addOns.filter((item) => !!kind && [kind, 'both'].includes(item.client_kind || 'both'));
-  const extras = registrationAddOns(pkg, offeredAddOns, draft.selectedAddOns);
+  const services = new Set(offeredAddOns.filter((item) => !item.default_when_no_mua && isMakeupArtistService(item))
+    .map((item) => item.id));
+  const multipleServices = draft.selectedAddOns.filter((id) => services.has(id)).length > 1;
+  const selectedIds = multipleServices ? draft.selectedAddOns.filter((id) => !services.has(id)) : draft.selectedAddOns;
+  if (multipleServices) review('Choose one Makeup Artist Service or select No additional service.', 'extras');
+  const extras = registrationAddOns(pkg, offeredAddOns, selectedIds);
   next.selectedAddOns = extras.selected.map(({ id }) => id);
   const terms = termsKey(config, kind);
   const quote = makeRegistrationQuote(pkg, extras, terms);
@@ -58,7 +63,7 @@ export function reconcileRegistration(draft: RegistrationDraft, config: Registra
       review(`${before.name} changed from ${formatCurrency(before.amount, { exact: true })} to ${formatCurrency(after.amount, { exact: true })}.`, step);
     }
   };
-  for (const id of draft.selectedAddOns) {
+  for (const id of selectedIds) {
     const before = old?.addOns.find((item) => item.id === id);
     const after = quote.addOns.find((item) => item.id === id);
     if (!after) review(`${before?.name ?? 'A selected add-on'} is no longer available. Its charge was removed.`, 'extras');

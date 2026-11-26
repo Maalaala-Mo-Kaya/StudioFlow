@@ -1,6 +1,6 @@
 const { addOnCents, cents, savedAddOns } = require(__hooks + "/studio_pricing.js");
 const { json } = require(__hooks + "/studio_workflow.js");
-const { actorName, readReason } = require(__hooks + "/studio_ledger.js");
+const { actorName, assertDiscountEditable, readReason } = require(__hooks + "/studio_ledger.js");
 
 function terms(record, subtotal) {
   const packageLine = json(record, "package_snapshot");
@@ -25,6 +25,7 @@ function changes(e, original, subtotal, itemsChanged, record = e.record, body = 
   const admin = e.hasSuperuserAuth() || e.auth?.getString("role") === "admin";
   if (hasReview && !admin) throw new ForbiddenError("Only administrators can review revenue.");
   if (hasDiscount && !admin && e.auth?.getString("role") !== "cashier") throw new ForbiddenError("Only cashiers and administrators can grant discounts.");
+  if (hasDiscount) assertDiscountEditable(original);
   let review = itemsChanged ? null : json(original, "revenue_review");
   let charges = terms(record, subtotal);
   const savedTerms = json(original, "revenue_terms");
@@ -78,10 +79,6 @@ function changes(e, original, subtotal, itemsChanged, record = e.record, body = 
       ...(percentage === undefined ? { fixed: true } : {}),
       reason: readReason(values.reason), by: actor(), byId: e.auth?.id || "", at: new Date().toISOString(),
     } : null;
-  }
-  if (hasDiscount && body.order_discount?.percentage !== undefined && (discount?.studio || 0) + (discount?.mua || 0) >
-    Math.max(0, subtotal - cents(original.getFloat("paid_amount")))) {
-    throw new BadRequestError("Discount credit cannot exceed the original charges still unpaid.");
   }
   if ((discount?.studio || 0) > charges.studio || (discount?.mua || 0) > charges.mua) {
     throw new BadRequestError("Each discount must fit the verified charges in its category. Review or adjust the discount first.");

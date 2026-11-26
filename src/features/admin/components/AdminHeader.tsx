@@ -5,6 +5,7 @@ import type { DateRange, OverallScope } from '../studentExcel';
 import { SearchableSelect } from '../../../components/common/SearchableSelect';
 import { isWalkIn } from '../../../utils/clientInfo';
 import { clampDay, useStudioCalendar } from '../../../hooks/useStudioCalendar';
+import { workflowError } from '../../../hooks/useWorkflowData';
 
 interface AdminHeaderProps {
   onExportCsv: () => void;
@@ -14,7 +15,7 @@ interface AdminHeaderProps {
   registrations: Registration[];
 }
 
-type ExportKind = 'master' | 'school' | 'walkin' | 'levels' | 'csv';
+type ExportKind = 'master' | 'school' | 'walkin' | 'levels' | 'csv' | 'mua';
 
 const KINDS: Array<{ id: ExportKind; label: string; hint: string }> = [
   { id: 'master', label: 'Master Overall: all schools', hint: 'One file: Summary + one sheet per school + Walk-ins' },
@@ -24,21 +25,22 @@ const KINDS: Array<{ id: ExportKind; label: string; hint: string }> = [
   { id: 'csv', label: 'CSV list of every job order', hint: 'One plain list with paid and balance (dates not applied)' },
 ];
 
-const manilaDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' });
+const OTHER_EXPORTS: typeof KINDS = [
+  { id: 'mua', label: 'MUA report', hint: 'Performance, earnings, and payouts in one Excel workbook' },
+];
 
 /**
- * Admin header with the Export panel: Overall workbooks (master, one school, walk-ins or by level)
- * for an optional date range, or the CSV list.
+ * Admin export picker for client lists and the combined MUA workbook.
  */
 export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportExcel, exportingExcel, organizations, registrations }) => {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<ExportKind>('master');
   const [schoolId, setSchoolId] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  // Nothing before the studio's first day (pictorial dates may run ahead of today, so no upper cap).
-  const { start } = useStudioCalendar();
+  const [clientRange, setClientRange] = useState({ from: '', to: '' });
+  const [muaRange, setMuaRange] = useState<{ from: string; to: string }>();
+  const { start, today } = useStudioCalendar();
   const [busy, setBusy] = useState(false);
+  const [exportError, setExportError] = useState('');
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const exporting = busy || exportingExcel;
@@ -73,27 +75,36 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportE
     keywords: org.code,
   }));
   const school = organizations.find((org) => org.id === schoolId);
+  const mua = kind === 'mua';
+  const monthStart = clampDay(`${today.slice(0, 8)}01`, start, today);
+  const { from, to } = mua ? muaRange ?? { from: monthStart, to: today } : clientRange;
+  const setRange = mua ? setMuaRange : setClientRange;
   const badRange = Boolean(from && to && from > to);
-  const canExport = !exporting && !badRange && (kind !== 'school' || Boolean(school));
+  const canExport = !exporting && !badRange && (kind !== 'school' || Boolean(school)) && (!mua || Boolean(from && to));
 
   const setQuick = (preset: 'all' | 'month' | 'today') => {
-    const today = manilaDay.format(new Date());
-    if (preset === 'all') { setFrom(''); setTo(''); }
-    if (preset === 'today') { setFrom(today); setTo(today); }
-    if (preset === 'month') { setFrom(clampDay(`${today.slice(0, 8)}01`, start)); setTo(today); }
+    if (preset === 'all') setRange(mua ? { from: start, to: today } : { from: '', to: '' });
+    if (preset === 'today') setRange({ from: today, to: today });
+    if (preset === 'month') setRange({ from: monthStart, to: today });
   };
 
   const runExport = async () => {
     if (!canExport) return;
     setBusy(true);
+    setExportError('');
     try {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const range: DateRange = { from: from || undefined, to: to || undefined };
       if (kind === 'csv') onExportCsv();
-      else if (kind === 'school' && school) await onExportExcel({ kind: 'school', schoolId: school.id }, range, school.code || school.name);
+      else if (kind === 'mua') {
+        const { downloadMuaExport } = await import('../muaPerformanceExport');
+        await downloadMuaExport(from, to);
+      } else if (kind === 'school' && school) await onExportExcel({ kind: 'school', schoolId: school.id }, range, school.code || school.name);
       else if (kind !== 'school') await onExportExcel({ kind }, range);
       setOpen(false);
       triggerRef.current?.focus();
+    } catch (error) {
+      setExportError(workflowError(error));
     } finally {
       setBusy(false);
     }
@@ -145,16 +156,22 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportE
               </button>
             </div>
 
-            <fieldset className="space-y-1.5">
+            <fieldset disabled={exporting} className="space-y-1.5">
               <legend className="mb-1.5 font-bold uppercase text-neutral-400 text-[10px]">What to export</legend>
-              {KINDS.map(({ id, label, hint }) => (
-                <label key={id} className={`flex gap-2 p-2 border cursor-pointer ${kind === id ? 'border-gold bg-obsidian-2' : 'border-neutral-700 hover:border-neutral-500'}`}>
-                  <input type="radio" name="export-kind" value={id} checked={kind === id} onChange={() => setKind(id)} className="mt-0.5 accent-gold" />
-                  <span>
-                    <span className="block font-bold">{label}</span>
-                    <span className="block text-[10px] text-neutral-400">{hint}</span>
-                  </span>
-                </label>
+              {[KINDS, OTHER_EXPORTS].map((options, index) => (
+                <div key={options[0].id} role={index ? 'group' : undefined} aria-labelledby={index ? 'admin-export-others' : undefined} className="space-y-1.5">
+                  {index === 1 && <h2 id="admin-export-others" className="pt-2 font-bold uppercase text-neutral-400 text-[10px]">Others</h2>}
+                  {options.map(({ id, label, hint }) => (
+                    <label key={id} className={`flex gap-2 p-2 border cursor-pointer ${kind === id ? 'border-gold bg-obsidian-2' : 'border-neutral-700 hover:border-neutral-500'}`}>
+                      <input type="radio" name="export-kind" value={id} checked={kind === id}
+                        onChange={() => { setKind(id); setExportError(''); }} className="mt-0.5 accent-gold" />
+                      <span>
+                        <span className="block font-bold">{label}</span>
+                        <span className="block text-[10px] text-neutral-400">{hint}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
               ))}
             </fieldset>
 
@@ -173,12 +190,12 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportE
               </div>
             )}
 
-            <fieldset disabled={kind === 'csv'} className="space-y-2 disabled:opacity-40">
-              <legend className="mb-1 font-bold uppercase text-neutral-400 text-[10px]">Dates (optional)</legend>
+            <fieldset disabled={kind === 'csv' || exporting} className="space-y-2 disabled:opacity-40">
+              <legend className="mb-1 font-bold uppercase text-neutral-400 text-[10px]">{mua ? 'MUA report period · Philippine time' : 'Dates (optional)'}</legend>
               <div className="flex flex-wrap gap-1.5">
                 {([['all', 'All dates'], ['month', 'This month'], ['today', 'Today']] as const).map(([preset, text]) => (
-                  <button key={preset} type="button" onClick={() => setQuick(preset)}
-                    className="px-2 py-1 border border-neutral-600 hover:border-gold uppercase text-[10px] font-bold cursor-pointer">
+                  <button key={preset} type="button" disabled={mua && preset === 'all' && !start} onClick={() => setQuick(preset)}
+                    className="px-2 py-1 border border-neutral-600 hover:border-gold uppercase text-[10px] font-bold cursor-pointer disabled:opacity-40">
                     {text}
                   </button>
                 ))}
@@ -186,21 +203,25 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportE
               <div className="grid grid-cols-2 gap-2">
                 <label className="block">
                   <span className="block text-[10px] text-neutral-400 mb-0.5">From</span>
-                  <input type="date" value={from} min={start || undefined} max={to || undefined} onChange={(e) => setFrom(clampDay(e.target.value, start, to))}
+                  <input type="date" value={from} min={start || undefined} max={to || (mua ? today : undefined)}
+                    onChange={(e) => setRange({ from: clampDay(e.target.value, start, to || (mua ? today : undefined)), to })}
                     className="w-full p-1.5 bg-canvas text-ink border border-line" />
                 </label>
                 <label className="block">
                   <span className="block text-[10px] text-neutral-400 mb-0.5">To</span>
-                  <input type="date" value={to} min={from || start || undefined} onChange={(e) => setTo(clampDay(e.target.value, from || start))}
+                  <input type="date" value={to} min={from || start || undefined} max={mua ? today : undefined}
+                    onChange={(e) => setRange({ from, to: clampDay(e.target.value, from || start, mua ? today : undefined) })}
                     className="w-full p-1.5 bg-canvas text-ink border border-line" />
                 </label>
               </div>
               <p className={`text-[10px] ${badRange ? 'text-red-400 font-bold' : 'text-neutral-400'}`}>
                 {badRange ? '"From" must be on or before "To".'
-                  : 'Uses the pictorial date (or the registration date when there is none). Leave both empty for everything.'}
+                  : mua ? 'The selected period applies to all MUA worksheets.'
+                    : 'Uses the pictorial date (or the registration date when there is none). Leave both empty for everything.'}
               </p>
             </fieldset>
 
+            {exportError && <p role="alert" className="text-red-400">{exportError}</p>}
             <button
               type="button"
               onClick={() => void runExport()}

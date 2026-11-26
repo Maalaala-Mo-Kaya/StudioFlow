@@ -45,7 +45,9 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/confirm-payment", (e) => {
 
     const before = workflow.json(reg, "revenue_discount");
     const discountRequested = discountInput != null;
+    const firstCollection = ledger.canEditDiscount(reg);
     if (discountRequested) {
+      ledger.assertDiscountEditable(reg);
       const { percentage, reason, amount } = discountInput;
       // A fixed peso discount (whole pesos, off the Studio charges) instead of a percentage.
       const fixedAmount = amount !== undefined && amount !== null;
@@ -106,7 +108,7 @@ routerAdd("POST", "/api/studioflow/registrations/{id}/confirm-payment", (e) => {
         registration: id, client_key: key, amount, payment_type: type, payment_method: method,
         cashier_id: actor.id, cashier_name: typeof cashierName === "string" && cashierName.trim() || ledger.actorName(actor),
         cash_tendered: method === "cash" ? cash : 0, remarks: typeof remarks === "string" ? remarks.trim() : "",
-        discount_snapshot: after ? {
+        discount_snapshot: firstCollection && after ? {
           studio: after.studio, mua: after.mua, reason: after.reason, ...(after.fixed ? { fixed: true } : {}),
           percentage: after.percentage ?? (after.studio + after.mua) * 100 / (totals.total + after.studio + after.mua),
         } : null,

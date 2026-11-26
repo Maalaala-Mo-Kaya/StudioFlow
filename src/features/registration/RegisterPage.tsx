@@ -212,6 +212,7 @@ export const RegisterPage: React.FC = () => {
                   defaultAddOn={form.defaultAddOn}
                   selectedAddOns={form.selectedAddOns}
                   onToggleAddOn={form.toggleAddOn}
+                  onSelectMakeupService={form.selectMakeupService}
                   paymentType={form.paymentType}
                   onPaymentTypeChange={form.setPaymentType}
                   totalAmount={form.totalAmount}
@@ -340,6 +341,7 @@ export const RegisterPage: React.FC = () => {
                   defaultAddOn={form.defaultAddOn}
                   selectedAddOns={form.selectedAddOns}
                   onToggleAddOn={form.toggleAddOn}
+                  onSelectMakeupService={form.selectMakeupService}
                   paymentType={form.paymentType}
                   onPaymentTypeChange={form.setPaymentType}
                   totalAmount={form.totalAmount}

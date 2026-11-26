@@ -183,27 +183,3 @@ export function addMuaPayoutSheets(workbook: Workbook, { lines, shared, payouts,
     total(log, logTotal.number);
   }
 }
-
-/** The standalone MUA payout export for a period (Admin → Analytics → MUA Payouts). */
-export async function downloadMuaPayoutWorkbook(
-  report: { from: string; to: string; lines: MuaPayoutLine[]; shared: MuaSharedLine[]; payouts: MuaPayout[] },
-  period: string,
-) {
-  const [{ default: ExcelJS }, { downloadBlob }] = await Promise.all([import('exceljs'), import('../../utils/downloadBlob')]);
-  const workbook = new ExcelJS.Workbook();
-  workbook.calcProperties.fullCalcOnLoad = true;
-  workbook.creator = STUDIO_INFO.name;
-  const used = new Set<string>();
-  const name = (wanted: string) => {
-    const base = wanted.replace(/[:\\/?*[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 28) || 'Sheet';
-    let candidate = base;
-    for (let n = 2; used.has(candidate.toLowerCase()); n++) candidate = `${base.slice(0, 27 - String(n).length)} ${n}`;
-    used.add(candidate.toLowerCase());
-    return candidate;
-  };
-  addMuaPayoutSheets(workbook, { ...report, period, name });
-  const bytes = await workbook.xlsx.writeBuffer();
-  downloadBlob(new Blob([new Uint8Array(bytes)], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  }), `StudioFlow-MUA-Payouts_${report.from}_to_${report.to}.xlsx`);
-}

@@ -40,6 +40,10 @@ onRecordCreateRequest((e) => {
       const [defaultAddOn] = pricing.defaultAddOns(tx, clientKind);
       const addOns = pricing.priceAddOns(tx, selections, [], clientKind)
         .filter((item) => item.id !== defaultAddOn?.id);
+      if (!e.auth && addOns.filter((item) => item.revenue_category === "mua" ||
+        (item.revenue_category !== "studio" && workflow.serviceRequirement(tx.findRecordById("add_ons", item.id), "add_on"))).length > 1) {
+        throw new BadRequestError("Choose only one Makeup Artist Service.");
+      }
       e.record.set("add_ons", addOns);
       const auto = e.record.getString("package") && defaultAddOn
         && !workflow.purchasedServices(tx, e.record).length ? defaultAddOn : null;
@@ -158,9 +162,6 @@ onRecordUpdateRequest((e) => {
   e.record.set("order_changes", original.get("order_changes"));
   if ("order_discount" in body && !isAdmin) throw new ForbiddenError("Use the cashier discount action.");
   if (itemsChanged || "review_mua_amount" in body || "order_discount" in body) {
-    if (("order_discount" in body) && ["cancelled", "released"].includes(original.getString("status"))) {
-      throw new BadRequestError("Discounts can only be changed on active, unreleased orders.");
-    }
     const final = require(__hooks + "/studio_revenue.js").changes(e, original, total, itemsChanged);
     e.record.set("total_amount", final / 100);
     // Balance and payment status from the receipts and refunds (a cancelled order still owes nothing).

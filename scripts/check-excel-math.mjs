@@ -5,7 +5,7 @@
 // app's own code (loaded through Vite):
 //   - Overall Excel (every scope: by level, master, one school) with its MUA sheets
 //   - Audit Export (all time and today)
-//   - MUA Payouts export and the MUA Performance earnings Excel
+//   - Combined MUA Performance, Earnings, and Payouts export
 // Each workbook is written to .xlsx, read back, and recalculated with HyperFormula (dev dependency,
 // GPL-3.0, never shipped). Every formula's saved result must equal the recalculated value, every
 // check line must be ₱0 / "OK - balanced", and the discount figures must match the server's records.
@@ -135,14 +135,14 @@ async function run() {
   }
 
   /** The cashier's payment popup: an optional discount and an optional payment, confirmed together. */
-  async function confirm(reg, { percentage, amount: fixed, reason = 'Excel check', pay } = {}) {
+  async function confirm(reg, { percentage, amount: fixed, reason = 'Excel check', pay, status = 200 } = {}) {
     const current = await get(reg);
     const saved = current.revenue_discount;
     const savedCredit = (saved?.studio ?? 0) + (saved?.mua ?? 0);
     const original = cents(current.total_amount) + savedCredit;
     const studioBase = (current.revenue_terms?.studio ?? 0) + (saved?.studio ?? 0);
-    const credit = percentage !== undefined ? (percentage === 0 ? 0 : Math.round(studioBase * percentage / 10000) * 100 + (saved?.mua ?? 0))
-      : fixed !== undefined ? fixed * 100 + (saved?.mua ?? 0) : savedCredit;
+    const credit = percentage !== undefined ? Math.round(studioBase * percentage / 10000) * 100
+      : fixed !== undefined ? fixed * 100 : savedCredit;
     const total = original - credit;
     const balance = Math.max(0, total - cents(current.paid_amount));
     const discount = percentage !== undefined ? { percentage, reason } : fixed !== undefined ? { amount: fixed, reason } : undefined;
@@ -150,7 +150,7 @@ async function run() {
     const amount = pay === 'full' || pay === 'additional' ? balance : pay === 'initial' ? Math.min(balance, Math.round(total / 200) * 100)
       : pay === 'part' ? Math.min(balance, 50000) : 0;
     const type = pay === 'part' ? 'additional' : pay;
-    return send(`${api}/registrations/${reg.id}/confirm-payment`, { method: 'POST', token: cashier, body: {
+    return send(`${api}/registrations/${reg.id}/confirm-payment`, { method: 'POST', token: cashier, status, body: {
       clientKey: randomUUID().replaceAll('-', ''), updated: current.updated, balanceDue: balance, discount,
       payment: pay ? { amount: amount / 100, type, method: 'cash', cash: amount / 100, cashierName: 'Excel cashier', remarks: '' } : undefined,
     } });
@@ -199,10 +199,11 @@ async function run() {
   await confirm(g, { percentage: 10, pay: 'full' });
   await send(records('registrations', g.id), { method: 'PATCH', token: cashier, body: { add_ons: [{ id: print.id }] } });
   await payBalance(g);
-  // H: 5% with a downpayment, then removed (switched off) with a part payment.
+  // H: 5% with a downpayment, then reject removal and collect a partial payment.
   const h = await register(premium);
   await confirm(h, { percentage: 5, pay: 'initial' });
-  await confirm(h, { percentage: 0, pay: 'part' });
+  await confirm(h, { percentage: 0, pay: 'part', status: 409 });
+  await confirm(h, { pay: 'part' });
   // I: no discount, unpaid (balance only).
   await register(studio, [print]);
 
@@ -213,8 +214,8 @@ async function run() {
   const organizations = await all('organizations');
   const packages = await all('packages');
   const excelData = await send(api + '/student-excel', { token: admin });
-  const payouts = await send(`${api}/mua-payouts?from=${manilaDay}&to=${manilaDay}`, { token: admin });
-  const performance = await send(`${api}/mua-performance?date=${manilaDay}`, { token: admin });
+  const muaExport = await send(`${api}/mua-export?from=${manilaDay}&to=${manilaDay}`, { token: admin });
+  const { payouts } = muaExport;
   if (!payouts.lines.length) fail('MUA Payouts', 'no artist line for the completed makeup service (case D)');
   const dLine = payouts.lines.find((line) => line.jobId === d.id);
   // The artist is paid the full price even though the client had a discount.
@@ -233,8 +234,7 @@ async function run() {
   const { buildStudentWorkbook } = await load('/src/features/admin/studentExcel.ts');
   const { buildAudit } = await load('/src/features/admin/auditData.ts');
   const { buildAuditWorkbook } = await load('/src/features/admin/auditWorkbook.ts');
-  const { addMuaPayoutSheets } = await load('/src/features/admin/muaPayoutSheets.ts');
-  const { buildMuaWorkbook } = await load('/src/features/admin/muaPerformanceExport.ts');
+  const { buildMuaExportWorkbook } = await load('/src/features/admin/muaPerformanceExport.ts');
   const { default: ExcelJS } = await import('exceljs');
   const { HyperFormula } = await import('hyperformula');
 
@@ -373,16 +373,5 @@ async function run() {
     }
   }
 
-  // ---- MUA Payouts and MUA Performance -------------------------------------------------------
-  const payoutBook = new ExcelJS.Workbook();
-  const used = new Set();
-  addMuaPayoutSheets(payoutBook, { ...payouts, period: manilaDay, name: (wanted) => {
-    let candidate = wanted.slice(0, 28);
-    for (let n = 2; used.has(candidate.toLowerCase()); n++) candidate = `${wanted.slice(0, 26)} ${n}`;
-    used.add(candidate.toLowerCase());
-    return candidate;
-  } });
-  await recalculate('MUA Payouts', payoutBook);
-  await recalculate('MUA Performance earnings', await buildMuaWorkbook(performance, 'earnings', payouts));
-  await recalculate('MUA Performance', await buildMuaWorkbook(performance, 'performance'));
+  await recalculate('MUA report', await buildMuaExportWorkbook(muaExport));
 }

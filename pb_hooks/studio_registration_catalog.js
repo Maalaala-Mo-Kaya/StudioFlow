@@ -1,5 +1,5 @@
 // Bump when the deployed public form's requirements or built-in terms change.
-const FORM_REVISION = 1;
+const FORM_REVISION = 2;
 const TOPIC = "studioflow-registration-catalog";
 const COLLECTIONS = ["packages", "add_ons", "organizations", "levels", "courses", "school_courses", "studio_settings", "session_types"];
 

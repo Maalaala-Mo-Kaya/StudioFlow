@@ -182,8 +182,8 @@ function previousPayment(payment: PaymentRecord, payments: PaymentRecord[]): Pay
 
 /**
  * The discount given (or changed) since the previous payment, as printed on this payment's receipt.
- * Every later payment keeps a copy of the order's discount (`discount_snapshot`), but the client gets it once:
- * it shows only on the receipt of the payment it came with. `amount` is the change in pesos (negative when reduced).
+ * Older payments may repeat an order's `discount_snapshot`. Show only the change on those receipts.
+ * New collections only record a snapshot with the first payment. `amount` is the change in pesos.
  */
 export function paymentDiscount(payment: PaymentRecord, payments: PaymentRecord[] = []) {
   const snapshot = payment.discount_snapshot;

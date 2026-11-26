@@ -157,8 +157,6 @@ export function CashierTable({
             </button>
           ) : null}
 
-          {reg.balance === 0 && reg.revenue_discount && !['cancelled', 'released'].includes(reg.status) &&
-            <RecordActionButton variant="edit" recordName={`discount for ${formatClientName(reg)}`} onClick={() => onOpenPayment(reg)} />}
           {onOpenDelete && deletableIds.has(reg.id) &&
             <RecordActionButton variant="delete" recordName={`unpaid registration for ${formatClientName(reg)}`} onClick={() => onOpenDelete(reg)} />}
   {onOpenAddOn && !['released', 'cancelled'].includes(reg.status) && (

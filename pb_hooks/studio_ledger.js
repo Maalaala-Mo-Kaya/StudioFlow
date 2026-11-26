@@ -6,6 +6,17 @@
 
 const cents = (amount) => Math.round((Number(amount) || 0) * 100);
 
+function canEditDiscount(registration) {
+  return registration.getString("status") === "pending_payment"
+    && cents(registration.getFloat("paid_amount")) + cents(registration.getFloat("refunded_amount")) === 0;
+}
+
+function assertDiscountEditable(registration) {
+  if (!canEditDiscount(registration)) {
+    throw new ApiError(409, "Discounts can only be changed before the first payment on an unpaid order.");
+  }
+}
+
 /** Totals for one job order, in centavos. */
 function ledger(app, registration) {
   const id = registration.id;
@@ -60,4 +71,4 @@ function readReason(value) {
   return reason;
 }
 
-module.exports = { actorName, applyTotals, cents, ledger, nextNumber, readReason, refundable };
+module.exports = { actorName, applyTotals, assertDiscountEditable, canEditDiscount, cents, ledger, nextNumber, readReason, refundable };
