@@ -33,31 +33,20 @@ routerAdd("POST", "/api/studioflow/camera/{id}/{action}", (e) => {
   const body = e.requestInfo().body || {};
   const station = camera.findStation(e.app, id);
   const action = e.request.pathValue("action");
-  // Another photographer's session: anyone may free the camera ("end" first files the last shots
-  // to the client who was linked), but only the photographer who linked it, or an admin, may link
-  // a new client or hand it the waiting files.
+  // The Photo Floor is shared: any photographer (or admin) may link, unlink or take over any camera.
+  // Taking over another photographer's session ends it first, so its last shots still go to the
+  // client who was linked (and that visit is recorded) before the camera changes hands.
+  // Assigned photography sessions (session_task) keep their own rules (Mark Done).
   const owner = station.getString("session_photographer");
-  if ((action === "start" || action === "claim-waiting") && station.getString("active_registration") && owner
-    && owner !== e.auth.id && account.getString("role") !== "admin") {
-    let who = "another photographer";
-    try {
-      const user = e.app.findRecordById("users", owner);
-      who = user.getString("name") || user.getString("username") || who;
-    } catch (_) { /* removed account */ }
-    throw new ForbiddenError("This camera is still linked to a client by " + who + ". Press Return to Queue on that client first.");
-  }
+  const takeover = !!owner && owner !== account.id && !!station.getString("active_registration") && !station.getString("session_task");
   switch (action) {
     case "scan": camera.scan(e.app, id); break;
     case "start":
-      // An admin taking over another photographer's camera: end that session first (its last shots
-      // go to the client who was linked), then link the new client under the admin.
-      if (owner && owner !== e.auth.id && station.getString("active_registration") && !station.getString("session_task")) {
-        camera.endSession(e.app, id, "");
-      }
+      if (takeover) camera.endSession(e.app, id, "");
       camera.startSession(e.app, id, String(body.registration || ""), e.auth.id);
       break;
     case "end": camera.endSession(e.app, id, String(body.registration || "")); break;
-    case "claim-waiting": camera.claimWaiting(e.app, id, e.auth.id); break;
+    case "claim-waiting": camera.claimWaiting(e.app, id, owner || e.auth.id); break;
     default: throw new NotFoundError("Unknown camera action.");
   }
   return e.json(200, camera.status(e.app, camera.findStation(e.app, id)));
@@ -145,6 +134,24 @@ onRecordAfterUpdateSuccess((e) => {
     }
   } catch (err) {
     console.log("StudioFlow: could not unlink the camera of a client sent to makeup:", err);
+  }
+}, "registrations");
+
+// A single-session client who is done shooting (or cancelled / released) leaves every camera still
+// linked to them: each camera first files its last shots to them, then unlinks. So no shot lands in
+// the folder while the Chooser works on it, and no camera stays tied to a finished client.
+// Assigned photography sessions (session_task) finish through Mark Done instead.
+onRecordAfterUpdateSuccess((e) => {
+  e.next();
+  const status = e.record.getString("status");
+  if (!["done_shooting", "completed", "ready_for_pickup", "released", "cancelled"].includes(status)) return;
+  try {
+    const camera = require(__hooks + "/studio_camera_import.js");
+    const linked = e.app.findRecordsByFilter("camera_stations", "active_registration = {:id} && session_task = ''",
+      "", 0, 0, { id: e.record.id });
+    for (const station of linked) camera.endSession(e.app, station.id, e.record.id);
+  } catch (err) {
+    console.log("StudioFlow: could not unlink the cameras of a finished client:", err);
   }
 }, "registrations");
 

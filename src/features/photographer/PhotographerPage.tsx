@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Aperture, Camera, CheckCircle2, ChevronDown, ChevronUp, FolderInput, Maximize2, Undo2, Volume2 } from 'lucide-react';
+import { Aperture, Camera, CheckCircle2, ChevronDown, ChevronUp, FolderInput, Maximize2, Undo2, Users, Volume2 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 import { formatClientName, formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import { usePhotographerQueue } from './usePhotographerQueue';
-import { BoughtDetails, CopyPathButton, PhotographerQueueCard } from './components/PhotographerQueueCard';
+import { BoughtDetails, CopyPathButton, FloorVisits, PhotographerQueueCard } from './components/PhotographerQueueCard';
 import { PhotographerHistoryList } from './components/PhotographerHistoryList';
 import { CameraImportPanel } from './components/CameraImportPanel';
 import { ShootGallery } from './components/ShootGallery';
 import { ReshootModal } from './components/ReshootModal';
 import { useCameraLink } from './useCameraLink';
+import type { CameraStatus } from '../camera/cameraApi';
 import type { PhotographyTask, Registration } from '../../types';
 import { playStudioChime } from '../../utils/audio';
 import { StationLayout } from '../workflow/StationLayout';
@@ -65,7 +66,11 @@ export const PhotographerPage: React.FC = () => {
   const selectedId = station?.enabled ? linkedId : selectedWithoutCamera;
   const selected = queue.find((reg) => reg.id === selectedId);
   const selectedTask = selected && activePhotographyTasks(selected).find((task) => task.id === station?.taskId && task.photographerId === userId);
-  const unselected = queue.filter((reg) => reg.id !== selectedId);
+  // Clients this device's camera already shot go after the rest (they wait for another camera), so
+  // each station sees first who it still has to shoot.
+  const shotHere = (reg: Registration) => !!station && (reg.floor_visits ?? []).some((visit) => visit.camera === station.id);
+  const waiting = queue.filter((reg) => reg.id !== selectedId);
+  const unselected = [...waiting.filter((reg) => !shotHere(reg)), ...waiting.filter(shotHere)];
   const busy = queueBusy || camera.busy;
   // The on-set client's full card opens in a popup when they are called. Closing it only hides the card:
   // the client stays selected (and the camera linked) until Mark Done.
@@ -109,12 +114,35 @@ export const PhotographerPage: React.FC = () => {
     setOnSetOpenId(reg.id);
   });
 
-  const markDone = (reg: Registration) => runQueueAction(async () => {
+  // Single-session clients: several photographers may shoot the same client at once, each on their
+  // own camera. Mark Done while another camera is still linked to the client asks first: leave the
+  // client on the floor for the others, or finish them (the server then files the other cameras'
+  // last shots and unlinks them).
+  const [doneCheck, setDoneCheck] = useState<{ registration: Registration; others: CameraStatus[]; lastCamera: boolean }>();
+  const finishClient = (reg: Registration) => runQueueAction(async () => {
     if (linkedId === reg.id && !await camera.unlinkClient(reg.id)) return;
     if (await handleMarkDone(reg)) {
       setSelectedWithoutCamera((id) => id === reg.id ? '' : id);
       setOnSetOpenId((id) => id === reg.id ? '' : id);
     }
+  });
+  // With more than one camera turned on, Mark Done also asks when no other camera is linked yet: a
+  // client often goes from one camera (solo) to the next (group), so finishing must be a choice.
+  const markDone = (reg: Registration) => {
+    const others = camera.stations.filter((entry) => entry.client?.id === reg.id && !entry.taskId && entry.id !== station?.id);
+    const otherCameras = camera.stations.filter((entry) => entry.enabled && entry.id !== station?.id);
+    // Every other camera already shot this client: this is most likely the last stop.
+    const visits = reg.floor_visits ?? [];
+    const lastCamera = otherCameras.every((entry) => visits.some((visit) => visit.camera === entry.id));
+    if (others.length || otherCameras.length) setDoneCheck({ registration: reg, others, lastCamera });
+    else void finishClient(reg);
+  };
+  const leaveForOthers = (reg: Registration, others: CameraStatus[]) => runQueueAction(async () => {
+    if (linkedId === reg.id && !await camera.unlinkClient(reg.id)) return;
+    setSelectedWithoutCamera((id) => id === reg.id ? '' : id);
+    setOnSetOpenId((id) => id === reg.id ? '' : id);
+    const who = others.map((entry) => entry.photographerName || entry.name).join(', ');
+    toast.success(`Your camera is free. ${formatClientName(reg)} stays on the Photo Floor for ${who || 'the next camera'}.`);
   });
 
   // Back to the queue at their place (the queue is ordered by queue number). Their shots stay in
@@ -213,6 +241,7 @@ export const PhotographerPage: React.FC = () => {
                         )}
                       </div>
                     )}
+                    <FloorVisits registration={selected} dark />
                     <div className="border border-neutral-800 bg-obsidian-2 px-3 py-2">
                       <button type="button" aria-expanded={boughtOpen} onClick={() => setBoughtOpen((open) => !open)}
                         className="flex w-full items-center justify-between gap-2 font-mono text-[11px] font-black uppercase tracking-wider text-gold cursor-pointer">
@@ -247,7 +276,8 @@ export const PhotographerPage: React.FC = () => {
                 unselected={unselected.map((reg, index) => <PhotographerQueueCard
                   key={reg.id}
                   registration={reg}
-                  nextUp={index === 0}
+                  nextUp={index === 0 && !shotHere(reg)}
+                  shotHere={shotHere(reg)}
                   compact
                   busy={busy}
                   onSelect={selectClient}
@@ -263,7 +293,7 @@ export const PhotographerPage: React.FC = () => {
         {onSetOpen && selected && (
           // The on-set popup is for the shots: a slim toolbar, then the gallery across the full width.
           // What the client bought is on the Selected card (Show what was bought).
-          <Modal title={formatClientName(selected)} icon={Camera} size={sendingHere ? 'full' : 'md'}
+          <Modal title={formatClientName(selected)} icon={Camera} size="full"
             onClose={() => setOnSetOpenId('')}
             subtitle={<>On set · {formatJobOrderNo(selected.job_order_no)} · {formatQueueNumber(selected.queue_number)}</>}>
             <div className="flex flex-wrap items-center gap-2">
@@ -273,7 +303,7 @@ export const PhotographerPage: React.FC = () => {
                   {station?.name} → sending shots here
                 </span>
               ) : (
-                <span className="text-[11px] text-neutral-600">No camera is sending to this client. Pick this device's camera on the Photo Floor.</span>
+                <span className="text-[11px] text-neutral-600">No camera is sending to this client. Shot on a memory card? Use Add photos from card below.</span>
               )}
               <CopyPathButton registrationId={selected.id} className="min-h-10 px-3 text-[10px]" />
               {!activePhotographyTasks(selected).length && (
@@ -289,7 +319,7 @@ export const PhotographerPage: React.FC = () => {
                   onStart={startTask} onFinish={finishTask} />
               </div>
             )}
-            {sendingHere && <ShootGallery registrationId={selected.id} />}
+            <ShootGallery registrationId={selected.id} />
           </Modal>
         )}
 
@@ -297,9 +327,55 @@ export const PhotographerPage: React.FC = () => {
         {activeTab === 'history' && (loading && !recentlyDone.length
           ? <p role="status" className="text-sm text-neutral-600">Loading completed sessions…</p>
           : (recentlyDone.length > 0 || !loadError) && <PhotographerHistoryList recentlyDone={recentlyDone} busy={busy}
-            photographerId={photographerId} admin={user?.role === 'admin'}
+            admin={user?.role === 'admin'}
             onReshoot={(registration, task) => setReshooting({ registration, task })}
             onPaidRetake={(registration) => setReshooting({ registration, paid: true })} />)}
+
+        {doneCheck && (
+          <Modal title={doneCheck.others.length ? 'Others are still shooting' : 'Next camera or finish?'}
+            subtitle={formatClientName(doneCheck.registration)} icon={Users} size="md"
+            busy={busy} onClose={() => setDoneCheck(undefined)}
+            footer={<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" disabled={busy} onClick={() => { const { registration } = doneCheck; setDoneCheck(undefined); void finishClient(registration); }}
+                className={`btn-tactile min-h-[46px] px-4 text-xs font-black uppercase tracking-wider disabled:opacity-50 ${!doneCheck.others.length && doneCheck.lastCamera
+                  ? 'bg-gold text-on-gold' : 'border border-line text-ink'}`}>
+                {doneCheck.others.length ? 'Finish anyway' : 'Finish → Photo Chooser'}
+              </button>
+              <button type="button" disabled={busy} onClick={() => { const { registration, others } = doneCheck; setDoneCheck(undefined); void leaveForOthers(registration, others); }}
+                className={`btn-tactile min-h-[46px] px-5 text-xs font-black uppercase tracking-wider disabled:opacity-50 ${doneCheck.others.length || !doneCheck.lastCamera
+                  ? 'bg-gold text-on-gold' : 'border border-gold text-gold'}`}>
+                {doneCheck.others.length ? 'Leave them on the floor' : 'Send to next camera'}
+              </button>
+            </div>}>
+            {doneCheck.others.length ? (
+              <div className="space-y-3 text-sm text-ink">
+                <p className="m-0">Another camera is still linked to this client:</p>
+                <ul className="m-0 space-y-1 pl-4 list-disc">
+                  {doneCheck.others.map((entry) => (
+                    <li key={entry.id}><strong>{entry.name}</strong>{entry.photographerName && <> · {entry.photographerName}</>}</li>
+                  ))}
+                </ul>
+                <p className="m-0"><strong>Leave them on the floor:</strong> your camera is freed and the client stays on the Photo Floor, so the others keep shooting. Whoever finishes last presses Mark Done.</p>
+                <p className="m-0 text-neutral-600"><strong>Finish anyway:</strong> the client goes to the Photo Chooser now. The other cameras send their last shots to this client and are unlinked.</p>
+              </div>
+            ) : (
+              <div className="space-y-3 text-sm text-ink">
+                <p className="m-0">Is <strong>{formatClientName(doneCheck.registration)}</strong> going to another camera next (for example a group picture)?</p>
+                {(doneCheck.registration.floor_visits ?? []).length > 0 && (
+                  <div className="space-y-1">
+                    <p className="m-0 text-xs font-bold text-neutral-600">Already shot at:</p>
+                    <FloorVisits registration={doneCheck.registration} />
+                  </div>
+                )}
+                {doneCheck.lastCamera && (
+                  <p className="m-0 text-xs font-bold text-emerald-700">Every other camera has already shot this client, so this is probably the last stop.</p>
+                )}
+                <p className="m-0"><strong>Send to next camera:</strong> your camera is freed and the client stays on the Photo Floor. The next photographer calls them and presses Mark Done when they finish.</p>
+                <p className="m-0 text-neutral-600"><strong>Finish → Photo Chooser:</strong> this was the last camera. The client goes to the Photo Chooser.</p>
+              </div>
+            )}
+          </Modal>
+        )}
 
         {reshooting && (
           <ReshootModal registration={reshooting.registration} task={reshooting.task} paid={reshooting.paid}

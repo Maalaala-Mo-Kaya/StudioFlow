@@ -429,9 +429,18 @@ function status(app, station) {
       client = { ...workflow.summary(app, registration), photoCount: photoCount(app, registration), folder };
     } catch (_) { /* removed */ }
   }
+  let photographerName = "";
+  const photographerId = station.getString("session_photographer");
+  if (photographerId) {
+    try {
+      const user = app.findRecordById("users", photographerId);
+      photographerName = user.getString("name") || user.getString("username");
+    } catch (_) { /* removed account */ }
+  }
   return {
     id: station.id,
     name: station.getString("name"),
+    photographerName,
     watchFolder: watch,
     enabled: station.getBool("enabled"),
     includeSubfolders: station.getBool("include_subfolders"),
@@ -480,6 +489,11 @@ function startSession(app, id, registrationId, photographerId) {
         time: now(), skip: JSON.stringify(skip), waiting: skip.length }).execute();
     if (!linked.rowsAffected()) throw new ApiError(409, "The camera is busy. Check its active session and try again.");
   });
+  // Switching straight from one client to the next: the previous client was shot here.
+  const previous = before.getString("active_registration");
+  if (previous && previous !== registration.id && station.getString("active_registration") === previous) {
+    recordVisit(app, previous, { id: station.id, name: station.getString("name") }, station.getString("session_photographer"), station.getInt("session_imported"));
+  }
   require(__hooks + "/studio_station_events.js").notify(app);
 }
 
@@ -489,9 +503,40 @@ function endSession(app, id, registrationId) {
   if (!active || (registrationId && registrationId !== active)) return;
   if (station.getString("session_task")) throw new ApiError(409, "Use Mark Done to finish the assigned camera session.");
   scan(app, id, true);
-  app.db().newQuery(`UPDATE camera_stations SET active_registration = '', session_photographer = '', session_skip = '[]'
+  const flushed = findStation(app, id);
+  const ended = app.db().newQuery(`UPDATE camera_stations SET active_registration = '', session_photographer = '', session_skip = '[]'
       WHERE id = {:id} AND active_registration = {:reg} AND session_task = ''`).bind({ id, reg: active }).execute();
+  // Recorded after unlinking: saving the client runs the "client finished" hook, which must not
+  // find this camera still linked.
+  if (ended.rowsAffected() === 1 && flushed.getString("active_registration") === active) {
+    recordVisit(app, active, { id: flushed.id, name: flushed.getString("name") }, flushed.getString("session_photographer"), flushed.getInt("session_imported"));
+  }
   require(__hooks + "/studio_station_events.js").notify(app);
+}
+
+// registrations.floor_visits: one entry per camera and photographer that shot this client, so the
+// Photo Floor shows where a client has already been (solo, group...) and in any order.
+function recordVisit(app, registrationId, source, photographerId, shots) {
+  if (!(shots > 0)) return;
+  let photographerName = "";
+  try {
+    const user = app.findRecordById("users", photographerId);
+    photographerName = user.getString("name") || user.getString("username");
+  } catch (_) { /* removed or no account */ }
+  try {
+    workflow.withRegistration(app, registrationId, (tx, record) => {
+      const saved = workflow.json(record, "floor_visits");
+      const visits = Array.isArray(saved) ? saved : [];
+      const at = new Date().toISOString();
+      const same = visits.find((visit) => visit.camera === source.id && visit.photographer === photographerId);
+      if (same) Object.assign(same, { cameraName: source.name, photographerName, shots: (same.shots || 0) + shots, at });
+      else visits.push({ camera: source.id, cameraName: source.name, photographer: photographerId, photographerName, shots, at });
+      record.set("floor_visits", visits.slice(-20));
+      tx.save(record);
+    });
+  } catch (error) {
+    app.logger().warn("Camera import: could not record the floor visit", "registration", registrationId, "error", text(error));
+  }
 }
 
 // Sends the files that were waiting when the session started to the current client.
@@ -602,6 +647,6 @@ function createFolder(parent, name) {
 }
 
 module.exports = {
-  browse, claimWaiting, createFolder, endSession, findStation, scan, scanAll, sessionFields,
+  browse, claimWaiting, createFolder, endSession, findStation, rawFormats, recordVisit, scan, scanAll, sessionFields,
   startSession, status, validateWatchFolder, linkTask,
 };

@@ -24,6 +24,8 @@ export interface CameraStatus {
   };
   taskId: string;
   photographerId: string;
+  /** Name of the photographer who linked the camera's current client ('' when none). */
+  photographerName: string;
   finishing: boolean;
   sessionStarted: string;
   sessionImported: number;
