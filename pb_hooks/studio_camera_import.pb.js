@@ -28,18 +28,34 @@ routerAdd("POST", "/api/studioflow/camera/browse", (e) => {
 routerAdd("POST", "/api/studioflow/camera/{id}/{action}", (e) => {
   const workflow = require(__hooks + "/studio_workflow.js");
   const camera = require(__hooks + "/studio_camera_import.js");
-  workflow.staff(e.app, e.auth, ["admin", "photographer"]);
+  const account = workflow.staff(e.app, e.auth, ["admin", "photographer"]);
   const id = e.request.pathValue("id");
   const body = e.requestInfo().body || {};
   const station = camera.findStation(e.app, id);
   const action = e.request.pathValue("action");
-  if (action !== "scan" && station.getString("active_registration") && station.getString("session_photographer")
-    && station.getString("session_photographer") !== e.auth.id) {
-    throw new ForbiddenError("This camera is linked to another photographer.");
+  // Another photographer's session: anyone may free the camera ("end" first files the last shots
+  // to the client who was linked), but only the photographer who linked it, or an admin, may link
+  // a new client or hand it the waiting files.
+  const owner = station.getString("session_photographer");
+  if ((action === "start" || action === "claim-waiting") && station.getString("active_registration") && owner
+    && owner !== e.auth.id && account.getString("role") !== "admin") {
+    let who = "another photographer";
+    try {
+      const user = e.app.findRecordById("users", owner);
+      who = user.getString("name") || user.getString("username") || who;
+    } catch (_) { /* removed account */ }
+    throw new ForbiddenError("This camera is still linked to a client by " + who + ". Press Return to Queue on that client first.");
   }
   switch (action) {
     case "scan": camera.scan(e.app, id); break;
-    case "start": camera.startSession(e.app, id, String(body.registration || ""), e.auth.id); break;
+    case "start":
+      // An admin taking over another photographer's camera: end that session first (its last shots
+      // go to the client who was linked), then link the new client under the admin.
+      if (owner && owner !== e.auth.id && station.getString("active_registration") && !station.getString("session_task")) {
+        camera.endSession(e.app, id, "");
+      }
+      camera.startSession(e.app, id, String(body.registration || ""), e.auth.id);
+      break;
     case "end": camera.endSession(e.app, id, String(body.registration || "")); break;
     case "claim-waiting": camera.claimWaiting(e.app, id, e.auth.id); break;
     default: throw new NotFoundError("Unknown camera action.");
@@ -56,6 +72,8 @@ onRecordCreateRequest((e) => {
   e.record.set("watch_folder", camera.validateWatchFolder(e.app, e.record.getString("watch_folder"), ""));
   for (const field of camera.sessionFields) e.record.set(field, null);
   e.record.set("session_skip", []);
+  // The Photo Sender key is made only by /api/studioflow/camera-sender/:id/key.
+  if (e.record.collection().fields.getByName("sender_key")) e.record.set("sender_key", "");
   return e.next();
 }, "camera_stations");
 
@@ -71,6 +89,7 @@ onRecordUpdateRequest((e) => {
     const folder = camera.validateWatchFolder(tx, e.record.getString("watch_folder"), e.record.id);
     e.record.set("watch_folder", folder);
     for (const field of camera.sessionFields) e.record.set(field, before.get(field));
+    if (e.record.collection().fields.getByName("sender_key")) e.record.set("sender_key", before.getString("sender_key"));
     const changedFolder = folder.toLowerCase() !== before.getString("watch_folder").toLowerCase();
     if (changedFolder || !e.record.getBool("enabled") || e.record.getBool("import_raw") !== before.getBool("import_raw")
       || e.record.getBool("include_subfolders") !== before.getBool("include_subfolders")) {

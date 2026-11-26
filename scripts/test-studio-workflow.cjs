@@ -1251,6 +1251,14 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   camState = await cameraApi('claim-waiting');
   assert.equal(camState.waiting, 0);
   for (const name of ['before-session.jpg', 'fresh.jpg']) assert.ok((await readdir(clientDir)).includes(name), name);
+  // Another photographer (a new shift on the same device) may free this camera but not take it
+  // over; an admin may take it over.
+  const nextShift = await createStaff('nextshift', 'photographer');
+  assert.match((await cameraApi('claim-waiting', undefined, { token: nextShift.token, status: 403 })).message, /Return to Queue/);
+  assert.match((await cameraApi('start', { registration: onSet.id }, { token: nextShift.token, status: 403 })).message, /still linked to a client by /);
+  assert.equal((await cameraApi('start', { registration: onSet.id }, { token: admin })).client.id, onSet.id, 'An admin may take over.');
+  assert.equal((await cameraApi('end', { registration: onSet.id }, { token: nextShift.token })).client, null, 'Anyone may free the camera.');
+  assert.equal((await cameraApi('start', { registration: onSet.id })).client.id, onSet.id);
 
   // Shoot gallery: the linked photographer deletes bad shots before the Chooser sees them.
   // Deleting moves the shot (and its RAW twin) into _DELETED; nothing leaves the disk.
@@ -1389,13 +1397,46 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   camState = await cameraApi('scan');
   assert.equal(camState.waiting, 2, 'The status file is not a waiting photo.');
   assert.deepEqual({ ...camState.sender, seenAgo: camState.sender.seenAgo < 10, lastSentAgo: camState.sender.lastSentAgo >= 40 },
-    { host: 'BOOTH2', source: 'C:\\EOS_Out', seenAgo: true, lastSentName: 'IMG_9.JPG', lastSentAgo: true, waiting: 3, error: '' });
+    { host: 'BOOTH2', source: 'C:\\EOS_Out', seenAgo: true, lastSentName: 'IMG_9.JPG', lastSentAgo: true, waiting: 3, error: '', via: 'share' });
   const quiet = new Date(Date.now() - 5 * 60_000);
   await utimes(senderStatus, quiet, quiet);
   assert.ok((await cameraApi('scan')).sender.seenAgo >= 290, 'A sender that stopped writing shows as not heard from.');
   await writeFile(senderStatus, '{ broken');
   assert.deepEqual((await cameraApi('scan')).sender.waiting, null, 'A half-written status file is read as unknown.');
   await rm(senderStatus);
+  // Photo Sender over HTTP: the camera key (staff read, admin reset, hidden from the collection
+  // API) lets the laptop upload shots into the watch folder; retries are not saved twice.
+  const senderApi = `${api}/camera-sender/${camera.id}`;
+  await send(senderApi + '/key', { token: cashier, status: 403 });
+  const senderKey = (await send(senderApi + '/key', { token: photographer })).payload.key;
+  assert.match(senderKey, /^[A-Za-z0-9]{40}$/);
+  await send(records('camera_stations', camera.id), { token: admin, method: 'PATCH', body: { sender_key: 'x'.repeat(40) } });
+  assert.equal((await send(senderApi + '/key', { token: admin })).payload.key, senderKey, 'The key is never set through the collection API.');
+  assert.equal((await send(records('camera_stations', camera.id), { token: admin })).payload.sender_key, undefined);
+  await send(senderApi + '/key/reset', { token: photographer, method: 'POST', body: {}, status: 403 });
+  const upload = (name, key, uploadId = 'upload-0001') => fetch(`${host}${senderApi}/upload?name=${encodeURIComponent(name)}`, {
+    method: 'POST', body: png, headers: { 'X-Camera-Key': key, 'X-Upload-Id': uploadId, 'Content-Type': 'application/octet-stream' },
+  }).then(async (response) => ({ status: response.status, payload: await response.json() }));
+  assert.equal((await upload('sent.png', 'wrong-key')).status, 401);
+  assert.equal((await upload('..\\sent.png', senderKey)).status, 400);
+  assert.deepEqual((await upload('sent.png', senderKey)).payload, { status: 'saved', name: 'sent.png', size: png.length });
+  assert.deepEqual((await upload('sent.png', senderKey)).payload.status, 'already', 'A retried upload is not saved twice.');
+  assert.equal((await upload('sent.png', senderKey, 'upload-0002')).payload.name, 'sent_2.png', 'An upload never overwrites.');
+  assert.ok((await readdir(cameraDir)).every((name) => !name.startsWith('.sf-upload-')));
+  const beat = await fetch(`${host}${senderApi}/status`, {
+    method: 'POST', headers: { 'X-Camera-Key': senderKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host: 'LAPTOP1', source: 'C:\\EOS_Out', waiting: 0, lastSentName: 'sent.png', lastSentSecondsAgo: 1, error: '' }),
+  });
+  assert.equal(beat.status, 200);
+  camState = await cameraApi('scan');
+  assert.deepEqual([camState.waiting, camState.sender.host, camState.sender.via], [4, 'LAPTOP1', 'upload'],
+    'Uploaded shots wait in the folder like copied ones.');
+  const newKey = (await send(senderApi + '/key/reset', { token: admin, method: 'POST', body: {} })).payload.key;
+  assert.notEqual(newKey, senderKey);
+  assert.equal((await upload('late.png', senderKey, 'upload-0003')).status, 401, 'A reset key stops the old download.');
+  for (const name of ['sent.png', 'sent_2.png', '.studioflow-sender.json']) await rm(join(cameraDir, name));
+  await rm(join(cameraDir, '.studioflow-received'), { recursive: true });
+  assert.equal((await cameraApi('scan')).waiting, 2);
   assert.deepEqual((await send(api + '/camera/browse?path=' + encodeURIComponent(home), { token: photographer })).payload.folders
     .map((folder) => folder.name).includes('camera'), true);
   await send(records('camera_stations', camera.id), { token: photographer, method: 'DELETE', status: 404 });
@@ -1451,7 +1492,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       await act(student, primary, 'start', 'primary');
       await act(student, second, 'start', familyTask);
       await act(student, primary, 'done', familyTask, 403);
-      await scan({ ...primary, camera: familyCamera }, 'end', 403);
+      // An assigned session ends only through Mark Done, whoever asks.
+      await scan({ ...primary, camera: familyCamera }, 'end', 409);
       const [first, last] = familyFirst ? [second, primary] : [primary, second];
       const [firstTask, lastTask] = familyFirst ? [familyTask, 'primary'] : ['primary', familyTask];
       await shootImage(first, 'SAME_001.jpg');

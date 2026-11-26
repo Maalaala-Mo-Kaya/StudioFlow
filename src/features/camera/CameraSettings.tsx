@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Aperture, FolderSearch, Pencil, Plus, Save } from 'lucide-react';
+import { Aperture, FileDown, FolderSearch, Laptop, Pencil, Plus, Save } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 import { RecordActionButton, recordActionGroup } from '../../components/common/RecordActionButton';
 import { pb } from '../../db/pocketbase';
@@ -9,9 +9,13 @@ import { useWorkflowData, workflowError } from '../../hooks/useWorkflowData';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { formatJobOrderNo } from '../../utils/formatters';
 import { FolderPickerModal } from './FolderPickerModal';
+import { PhotoSenderModal } from './PhotoSenderModal';
 import { sinceLabel, type CameraConfig, type CameraStatus } from './cameraApi';
 
-const blank: CameraConfig = { name: '', watch_folder: '', enabled: true, include_subfolders: false, import_raw: false };
+/** Step-by-step Photo Sender manual, shipped with the app (public/manuals) so it works offline. */
+const PHOTO_SENDER_MANUAL = `${import.meta.env.BASE_URL}manuals/Photo_Sender_Manual.pdf`;
+
+const blank: CameraConfig ={ name: '', watch_folder: '', enabled: true, include_subfolders: false, import_raw: false };
 const label = 'block text-[11px] font-black text-ink uppercase tracking-wider mb-1.5';
 const input = 'w-full min-h-[44px] text-xs sm:text-sm px-3.5 py-2 border border-neutral-400 bg-canvas focus:bg-panel';
 
@@ -28,6 +32,7 @@ export const CameraSettings: React.FC = () => {
   // Which form the folder picker fills.
   const [picking, setPicking] = useState<'add' | 'edit' | null>(null);
   const [deleting, setDeleting] = useState<CameraStatus | null>(null);
+  const [senderFor, setSenderFor] = useState<CameraStatus | null>(null);
   const isAdmin = user?.role === 'admin';
 
   const set = <K extends keyof CameraConfig>(key: K, value: CameraConfig[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -136,7 +141,13 @@ export const CameraSettings: React.FC = () => {
         </form>
 
         <div className="bg-panel border-2 border-line shadow-lux p-6 text-xs text-neutral-700 space-y-2">
-          <h3 className="text-xs font-black uppercase tracking-wider text-ink m-0 mb-2">How it works</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h3 className="text-xs font-black uppercase tracking-wider text-ink m-0">How it works</h3>
+            <a href={PHOTO_SENDER_MANUAL} download="StudioFlow Photo Sender Manual.pdf" target="_blank" rel="noopener"
+              className="btn-tactile min-h-[36px] px-3 inline-flex items-center gap-1.5 border border-gold text-gold text-[10px] font-black uppercase tracking-wider no-underline">
+              <FileDown className="w-3.5 h-3.5" /> Photo Sender manual (PDF)
+            </a>
+          </div>
           <ol className="list-decimal pl-4 space-y-1.5">
             <li>Point the camera software (EOS Utility, Lightroom, Capture One, Nikon tether, Wi-Fi/FTP transfer…) at the folder above.</li>
             <li>On the Photo Floor, the photographer picks this camera under <strong>Camera Auto-Import</strong>.</li>
@@ -144,8 +155,9 @@ export const CameraSettings: React.FC = () => {
             <li>After your camera software finishes sending the last shot, press <strong>Mark Done</strong>. Assigned sessions keep the camera linked while StudioFlow checks for remaining files and syncs them.</li>
           </ol>
           <p className="text-neutral-500 pt-1">
-            If the camera is tethered to a different PC, share this folder on the network and save to that share.
-            The camera folder must be separate from the client photo folders.
+            If the camera is tethered to a laptop (EOS Utility can't save to the server), press <strong>Photo Sender</strong> on
+            the camera and install the download on that laptop. It sends each shot to StudioFlow over the network, with no
+            folder sharing. The camera folder must be separate from the client photo folders.
           </p>
         </div>
       </div>
@@ -176,6 +188,10 @@ export const CameraSettings: React.FC = () => {
                     <div className="font-mono text-[11px] text-neutral-500 truncate mt-1" title={station.watchFolder}>{station.watchFolder}</div>
                   </div>
                   <div className={recordActionGroup}>
+                    <button type="button" onClick={() => setSenderFor(station)} title={`Download the Photo Sender for ${station.name}`}
+                      className="btn-tactile min-h-[36px] px-2.5 inline-flex items-center gap-1.5 border border-gold text-gold text-[10px] font-black uppercase tracking-wider cursor-pointer">
+                      <Laptop className="w-3.5 h-3.5" /> Photo Sender
+                    </button>
                     <RecordActionButton variant="edit" recordName={station.name} onClick={() => edit(station)} />
                     {isAdmin && (
                       <RecordActionButton variant="delete" recordName={station.name} onClick={() => setDeleting(station)} />
@@ -223,6 +239,9 @@ export const CameraSettings: React.FC = () => {
           onClose={() => setPicking(null)}
           onPick={(path) => { (picking === 'edit' ? setEdit : set)('watch_folder', path); setPicking(null); }}
         />
+      )}
+      {senderFor && (
+        <PhotoSenderModal station={senderFor} isAdmin={isAdmin} onClose={() => setSenderFor(null)} />
       )}
       <ConfirmModal
         isOpen={!!deleting}

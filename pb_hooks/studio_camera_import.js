@@ -410,6 +410,8 @@ function sender(watch) {
     lastSentAgo: sentAgo === null ? null : sentAgo + seenAgo,
     waiting: senderCount(data.waiting),
     error: senderText(data.error, 300),
+    // "upload": the sender sends over HTTP (studio_camera_sender.js); "share": into a shared folder.
+    via: data.via === "upload" ? "upload" : "share",
   };
 }
 

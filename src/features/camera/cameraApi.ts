@@ -48,6 +48,8 @@ export interface CameraStatus {
     /** Shots still on the laptop (not finished writing yet, or waiting for the server). */
     waiting: number | null;
     error: string;
+    /** How it sends: over the network to StudioFlow ("upload") or into a shared folder ("share"). */
+    via: 'upload' | 'share';
   };
 }
 
