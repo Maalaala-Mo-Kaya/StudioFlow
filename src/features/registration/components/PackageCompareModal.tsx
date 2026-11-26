@@ -3,17 +3,16 @@ import { createPortal } from 'react-dom';
 import { X, Columns3, Gift } from 'lucide-react';
 import type { Package } from '../../../types';
 import { formatCurrency } from '../../../utils/formatters';
-import { exchangeNote, packageSummary, type PackageSummary } from '../../../utils/packageSummary';
+import { exchangeNote, type PackageSummary } from '../../../utils/packageSummary';
 
 interface PackageCompareModalProps {
-  packages: Package[];
+  cards: readonly { pkg: Package; summary: PackageSummary }[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onDetails: (id: string) => void;
   onClose: () => void;
 }
 
-interface Column { pkg: Package; s: PackageSummary }
 
 /** Lines a package has: for list rows, a line is marked when not every package has it. */
 const linesOf = (s: PackageSummary, row: Row): string[] => {
@@ -41,7 +40,7 @@ const norm = (line: string) => line.toLowerCase().replace(/\s+/g, ' ').trim();
  * freebies), with what differs marked, so choosing between "A" and "B" doesn't mean opening each.
  * Columns scroll sideways on narrow screens; the row names stay in view.
  */
-export const PackageCompareModal: React.FC<PackageCompareModalProps> = ({ packages, selectedId, onSelect, onDetails, onClose }) => {
+export const PackageCompareModal: React.FC<PackageCompareModalProps> = ({ cards, selectedId, onSelect, onDetails, onClose }) => {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -49,46 +48,47 @@ export const PackageCompareModal: React.FC<PackageCompareModalProps> = ({ packag
   }, [onClose]);
   if (typeof document === 'undefined') return null;
 
-  const cols: Column[] = packages.map((pkg) => ({ pkg, s: packageSummary(pkg) }));
   const differs = (values: string[]) => new Set(values).size > 1;
-  const shared = (row: Row) => {
-    const sets = cols.map((c) => new Set(linesOf(c.s, row).map(norm)));
-    return (line: string) => sets.every((set) => set.has(norm(line)));
-  };
   const mark = 'bg-gold-wash border-l-2 border-gold pl-1.5';
 
-  const scalar = (label: string, values: React.ReactNode[], keys: string[]) => (
+  const scalar = (label: string, values: React.ReactNode[], keys: string[]) => {
+    const different = differs(keys);
+    return (
     <tr key={label}>
       <th scope="row" className="sticky left-0 z-10 bg-panel p-2 text-left align-top text-[10px] font-black uppercase tracking-wider text-neutral-600 border-b border-line">
-        {label}{differs(keys) && <span className="block text-gold-soft normal-case tracking-normal">◆ differs</span>}
+        {label}{different && <span className="block text-gold-soft normal-case tracking-normal">◆ differs</span>}
       </th>
       {values.map((value, i) => (
-        <td key={cols[i].pkg.id} className={`p-2 align-top border-b border-line text-sm font-bold font-sans text-ink ${differs(keys) ? 'bg-gold-wash/60' : ''}`}>{value}</td>
+        <td key={cards[i].pkg.id} className={`p-2 align-top border-b border-line text-sm font-bold font-sans text-ink ${different ? 'bg-gold-wash/60' : ''}`}>{value}</td>
       ))}
     </tr>
-  );
+    );
+  };
   const list = (label: string, row: Row) => {
-    const isShared = shared(row);
-    if (cols.every((c) => !linesOf(c.s, row).length)) return null;
+    const columns = cards.map(({ summary }) => linesOf(summary, row).map((line) => ({ line, key: norm(line) })));
+    if (columns.every((lines) => !lines.length)) return null;
+    const packageCounts = new Map<string, number>();
+    for (const lines of columns) {
+      for (const key of new Set(lines.map((line) => line.key))) {
+        packageCounts.set(key, (packageCounts.get(key) ?? 0) + 1);
+      }
+    }
     return (
       <tr key={label}>
         <th scope="row" className="sticky left-0 z-10 bg-panel p-2 text-left align-top text-[10px] font-black uppercase tracking-wider text-neutral-600 border-b border-line">{label}</th>
-        {cols.map((c) => {
-          const lines = linesOf(c.s, row);
-          return (
-            <td key={c.pkg.id} className="p-2 align-top border-b border-line">
+        {columns.map((lines, column) => (
+            <td key={cards[column].pkg.id} className="p-2 align-top border-b border-line">
               {lines.length ? (
                 <ul className="space-y-1">
-                  {lines.map((line, i) => (
-                    <li key={i} className={`text-xs font-sans text-neutral-800 ${isShared(line) ? '' : mark}`}>
+                  {lines.map(({ line, key }, i) => (
+                    <li key={i} className={`text-xs font-sans text-neutral-800 ${packageCounts.get(key) === cards.length ? '' : mark}`}>
                       {row === 'free' && <Gift className="inline w-3 h-3 mr-1 text-gold" />}{line}
                     </li>
                   ))}
                 </ul>
               ) : <span className="text-xs italic text-neutral-400">None</span>}
             </td>
-          );
-        })}
+        ))}
       </tr>
     );
   };
@@ -96,7 +96,7 @@ export const PackageCompareModal: React.FC<PackageCompareModalProps> = ({ packag
   return createPortal(
     <div role="dialog" aria-modal="true" aria-labelledby="compare-title"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 backdrop-blur-xs animate-modal">
+      className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 modal-overlay">
       <div className="w-full sm:max-w-6xl h-full sm:h-auto sm:max-h-[94vh] bg-panel sm:border-2 border-line shadow-lux-gold font-mono text-xs flex flex-col">
         <div className="p-4 sm:px-6 border-b-2 border-line flex items-center justify-between gap-3">
           <div>
@@ -105,7 +105,7 @@ export const PackageCompareModal: React.FC<PackageCompareModalProps> = ({ packag
             </h3>
             <p className="text-[11px] font-sans text-neutral-600">
               <span className={`inline-block px-1 ${mark}`}>Highlighted</span> lines are not in every package.
-              {cols.length > 2 && ' Swipe sideways to see them all.'}
+              {cards.length > 2 && ' Swipe sideways to see them all.'}
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close"
@@ -116,7 +116,7 @@ export const PackageCompareModal: React.FC<PackageCompareModalProps> = ({ packag
             <thead>
               <tr>
                 <th className="sticky left-0 top-0 z-20 bg-panel w-24 sm:w-32 border-b-2 border-line" />
-                {cols.map(({ pkg, s }) => (
+                {cards.map(({ pkg, summary: s }) => (
                   <th key={pkg.id} scope="col" className="sticky top-0 z-10 bg-panel p-2 align-top text-left w-[15rem] sm:w-[17rem] border-b-2 border-line">
                     <span className="block text-[10px] font-black text-gold-soft uppercase tracking-widest">{pkg.code}</span>
                     <span className="block text-sm font-black uppercase text-ink">{pkg.name}</span>
@@ -128,16 +128,16 @@ export const PackageCompareModal: React.FC<PackageCompareModalProps> = ({ packag
               </tr>
             </thead>
             <tbody>
-              {scalar('Frame', cols.map((c) => c.s.frame || '—'), cols.map((c) => norm(c.s.frame)))}
-              {scalar('Prints', cols.map((c) => (c.s.prints ? `${c.s.prints} pcs` : '—')), cols.map((c) => String(c.s.prints)))}
-              {scalar('Shots', cols.map((c) => (c.s.shots ? (c.s.pick ? `Unlimited, pick ${c.s.pick}` : 'Unlimited') : '—')), cols.map((c) => `${c.s.shots}|${c.s.pick}`))}
+              {scalar('Frame', cards.map((c) => c.summary.frame || '—'), cards.map((c) => norm(c.summary.frame)))}
+              {scalar('Prints', cards.map((c) => (c.summary.prints ? `${c.summary.prints} pcs` : '—')), cards.map((c) => String(c.summary.prints)))}
+              {scalar('Shots', cards.map((c) => (c.summary.shots ? (c.summary.pick ? `Unlimited, pick ${c.summary.pick}` : 'Unlimited') : '—')), cards.map((c) => `${c.summary.shots}|${c.summary.pick}`))}
               {list('Print poses', 'prints')}
               {list('Poses', 'poses')}
               {list('Options', 'options')}
               {list('Free', 'free')}
               <tr>
                 <th className="sticky left-0 z-10 bg-panel" />
-                {cols.map(({ pkg }) => (
+                {cards.map(({ pkg }) => (
                   <td key={pkg.id} className="p-2 align-top space-y-1.5">
                     <button type="button" onClick={() => onDetails(pkg.id)}
                       className="w-full min-h-[38px] border border-neutral-400 bg-canvas text-[11px] font-bold uppercase cursor-pointer">Full details</button>

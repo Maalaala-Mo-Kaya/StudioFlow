@@ -152,7 +152,7 @@ function CatalogItemEditModal({ item, staffAccounts, onSave, onClose }: {
   return createPortal(
     <div role="dialog" aria-modal="true" aria-labelledby="edit-item-title"
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/85 backdrop-blur-xs animate-modal">
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/85 modal-overlay">
       <form onSubmit={save} className="w-full max-w-lg max-h-[92vh] overflow-y-auto bg-panel border-2 border-line shadow-lux-gold p-5 sm:p-6 space-y-4 font-mono text-xs">
         <div className="flex items-center justify-between pb-3 border-b-2 border-line">
           <h3 id="edit-item-title" className="flex items-center gap-2 text-xs sm:text-sm font-black uppercase tracking-wider text-ink">

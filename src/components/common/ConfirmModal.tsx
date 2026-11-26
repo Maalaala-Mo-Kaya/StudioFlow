@@ -46,7 +46,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/85 backdrop-blur-xs animate-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/85 modal-overlay"
     >
       <div className="w-full max-w-md sm:max-w-lg bg-panel border-2 border-line shadow-lux-gold p-6 sm:p-7 space-y-4 font-mono text-xs transition-all">
         {/* Modal Header */}

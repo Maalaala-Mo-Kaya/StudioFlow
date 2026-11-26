@@ -15,6 +15,7 @@ import type {
   Gender,
   Level,
   SchoolCourse,
+  SessionType,
 } from '../../../types';
 import { formatCurrency } from '../../../utils/formatters';
 import { getRegistrationAddOns, sumAddOnAmounts } from '../../../utils/registrationAddOns';
@@ -46,7 +47,7 @@ interface EditStudentModalProps {
   organizations: Organization[];
   courses: Course[];
   packages: Package[];
-  cashierCatalog?: { levels: Level[]; schoolCourses: SchoolCourse[] };
+  cashierCatalog?: { levels: Level[]; schoolCourses: SchoolCourse[]; sessionTypes: SessionType[] };
   /** Add-on catalog: active items can be added to the order. */
   addOnCatalog?: AddOn[];
   onClose: () => void;
@@ -88,7 +89,8 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
   const [notes, setNotes] = useState(reg.notes || '');
   // Walk-in clients have a session instead of a school and course.
   const walkIn = isWalkIn(reg);
-  const { sessionTypes } = useStudioSettings();
+  const { sessionTypes: adminSessionTypes } = useStudioSettings(walkIn && !cashierCatalog);
+  const sessionTypes = cashierCatalog?.sessionTypes ?? adminSessionTypes;
   const [sessionTypeId, setSessionTypeId] = useState(reg.session_type || '');
   const [clientOrg, setClientOrg] = useState(reg.client_org || '');
   const [eventDate, setEventDate] = useState(reg.event_date?.slice(0, 10) ?? '');
@@ -255,7 +257,7 @@ export const EditStudentModal: React.FC<EditStudentModalProps> = ({
     <>
       <Modal title={cashierCatalog ? 'Edit Client' : `Edit ${walkIn ? 'Walk-in Client' : 'Student'} Record`}
         subtitle={reg.job_order_no ? `JO № ${reg.job_order_no}` : `Registration ${reg.id}`}
-        onClose={requestClose} busy={isSubmitting} size="xl">
+        onClose={requestClose} busy={isSubmitting} size="xl" fixedHeight={!!cashierCatalog} animate={!cashierCatalog}>
         {!cashierCatalog && <PhotographyProgress registration={reg} audit />}
         <form onSubmit={handleSubmit} onChange={() => setDirty(true)} className="space-y-4">
           {!cashierCatalog && <fieldset className="border border-line p-3 space-y-2">

@@ -1,16 +1,18 @@
+import { lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { Navbar } from './components/Navbar';
 import { LoginPage } from './features/auth/LoginPage';
 import { RoleLoginGate } from './features/auth/RoleLoginGate';
 import { RegisterPage } from './features/registration/RegisterPage';
-import { CashierPage } from './features/cashier/CashierPage';
-import { PhotographerPage } from './features/photographer/PhotographerPage';
-import { AdminPage } from './features/admin/AdminPage';
-import { MakeupPage } from './features/workflow/MakeupPage';
-import { ChooserPage } from './features/workflow/ChooserPage';
 import { useHashNavigation } from './hooks/useHashNavigation';
 import { useRealtimeQueueCount } from './hooks/useRealtimeQueueCount';
+
+const CashierPage = lazy(() => import('./features/cashier/CashierPage').then(({ CashierPage }) => ({ default: CashierPage })));
+const PhotographerPage = lazy(() => import('./features/photographer/PhotographerPage').then(({ PhotographerPage }) => ({ default: PhotographerPage })));
+const AdminPage = lazy(() => import('./features/admin/AdminPage').then(({ AdminPage }) => ({ default: AdminPage })));
+const MakeupPage = lazy(() => import('./features/workflow/MakeupPage').then(({ MakeupPage }) => ({ default: MakeupPage })));
+const ChooserPage = lazy(() => import('./features/workflow/ChooserPage').then(({ ChooserPage }) => ({ default: ChooserPage })));
 
 export default function App() {
   const { currentTab, selectTab, routeByStaffRole } = useHashNavigation();
@@ -22,6 +24,7 @@ export default function App() {
         <Navbar currentTab={currentTab} onSelectTab={selectTab} queueCount={queueCount} />
 
         <main className="flex-1">
+          <Suspense fallback={<p role="status" className="mx-auto max-w-[1680px] px-4 py-8 text-sm sm:px-6">Loading station…</p>}>
           {/* Public Participant Portal */}
           {currentTab === 'register' && <ParticipantPortal />}
 
@@ -60,6 +63,7 @@ export default function App() {
               <AdminPage />
             </RoleLoginGate>
           )}
+          </Suspense>
         </main>
 
         <footer className="theme-night no-print group-has-[[data-student-overall]]/app-shell:hidden bg-obsidian text-neutral-400 py-6 mt-12 text-xs relative">

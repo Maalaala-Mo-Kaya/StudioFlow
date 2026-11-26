@@ -109,7 +109,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
       aria-modal="true"
       aria-labelledby="pkg-details-title"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 backdrop-blur-xs animate-modal"
+      className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 modal-overlay"
     >
       <div className="w-full sm:max-w-3xl xl:max-w-5xl h-full sm:h-auto sm:max-h-[92vh] bg-panel sm:border-2 border-line shadow-lux-gold font-mono text-xs flex flex-col">
         {/* Header: what it is, what it costs, the headline figures */}

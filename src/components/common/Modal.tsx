@@ -10,6 +10,10 @@ interface ModalProps {
   onClose: () => void;
   /** md: a small form · lg: details · xl: a wide table · full: a workspace (fills the screen). */
   size?: 'md' | 'lg' | 'xl' | 'full';
+  /** Reserve the full panel height while asynchronously loading a long form. */
+  fixedHeight?: boolean;
+  /** Keep an already visible loading dialog from replaying its entry animation. */
+  animate?: boolean;
   /** While saving: Esc, the ✕ and clicks outside do nothing. */
   busy?: boolean;
   /** false: only the ✕ closes it (a workspace where a stray click or Esc would lose work). */
@@ -27,7 +31,10 @@ const WIDTHS = { md: 'sm:max-w-lg', lg: 'sm:max-w-3xl', xl: 'sm:max-w-5xl', full
  * only when it is the top popup (a confirm or receipt opened from inside it closes first). It sits at
  * z-40, so the action popups (z-50) always open above it.
  */
-export const Modal: React.FC<ModalProps> = ({ title, subtitle, icon: Icon, onClose, size = 'lg', busy = false, dismissable = true, footer, children }) => {
+export const Modal: React.FC<ModalProps> = ({
+  title, subtitle, icon: Icon, onClose, size = 'lg', fixedHeight = false, animate = true,
+  busy = false, dismissable = true, footer, children,
+}) => {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const isTop = () => {
@@ -46,8 +53,8 @@ export const Modal: React.FC<ModalProps> = ({ title, subtitle, icon: Icon, onClo
   return createPortal(
     <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId}
       onMouseDown={(event) => { if (event.target === event.currentTarget && dismissable && !busy && isTop()) onClose(); }}
-      className="no-print fixed inset-0 z-40 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 backdrop-blur-xs animate-modal">
-      <div className={`w-full ${WIDTHS[size]} h-full sm:h-auto sm:max-h-[94dvh] flex flex-col bg-panel sm:border-2 border-line shadow-lux-gold font-mono text-xs text-ink`}>
+      className={`no-print fixed inset-0 z-40 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 ${animate ? 'modal-overlay' : ''}`}>
+      <div className={`w-full ${WIDTHS[size]} h-full ${fixedHeight ? 'sm:h-[min(94dvh,calc(100dvh-2rem))]' : 'sm:h-auto sm:max-h-[94dvh]'} flex flex-col bg-panel sm:border-2 border-line shadow-lux-gold font-mono text-xs text-ink`}>
         <div className="shrink-0 flex items-start justify-between gap-3 p-4 sm:px-6 border-b-2 border-line">
           <div className="min-w-0">
             <h3 id={titleId} className="flex items-center gap-2 text-sm sm:text-base font-black uppercase tracking-wider text-ink">
@@ -60,7 +67,7 @@ export const Modal: React.FC<ModalProps> = ({ title, subtitle, icon: Icon, onClo
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">{children}</div>
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6">{children}</div>
         {footer && <div className="shrink-0 flex flex-wrap items-center justify-end gap-2 p-3 sm:px-6 border-t-2 border-line">{footer}</div>}
       </div>
     </div>,

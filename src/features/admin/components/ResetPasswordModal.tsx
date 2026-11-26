@@ -37,7 +37,7 @@ export const ResetPasswordModal: React.FC<ResetPasswordModalProps> = ({ username
 
   return createPortal(
     <div role="dialog" aria-modal="true" aria-labelledby="reset-password-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/85 backdrop-blur-xs animate-modal">
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/85 modal-overlay">
       <form onSubmit={handleSubmit}
         className="w-full max-w-md bg-panel border-2 border-line shadow-lux-gold p-6 sm:p-7 space-y-4 text-xs">
         <div className="flex items-center justify-between pb-3 border-b-2 border-line">

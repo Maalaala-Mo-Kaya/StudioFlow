@@ -2680,7 +2680,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   });
 
   await t.test('cashiers edit and audit only unpaid registrations without an issued job order', async () => {
-    const eligible = async () => (await send(api + '/cashier-editable-registrations', { token: cashier })).payload;
+    const eligible = async (id) => (await send(api + '/cashier-editable-registrations' +
+      (id ? '?' + new URLSearchParams({ id }) : ''), { token: cashier })).payload;
     const load = async (client) => (await registrations(client, cashier)).payload;
     const edit = async (client, fields, status = 200, token = cashier) => (await registrations(client, token, {
       cashier_edit_version: client.updated, ...fields,
@@ -2696,6 +2697,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const extra = await create('add_ons', { code: 'CASHIER-EXTRA', name: 'Extra Print', amount: 500, is_active: true, revenue_category: 'studio' });
     const client = await load(await register(standard, [{ id: makeup.id }]));
     assert.ok((await eligible()).includes(client.id));
+    assert.deepEqual(await eligible(client.id), [client.id]);
     await edit(client, { notes: 'No access' }, 403, photographer);
     await registrations(client, cashier, { family_name: 'No authorization marker' }, 403);
     await edit(client, { other_fees: 1 }, 403);
@@ -2738,6 +2740,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const fullPayment = await pay(saved, saved.balance);
     assert.equal(fullPayment.balance_before, saved.balance);
     const fullyPaid = await load(client);
+    assert.deepEqual(await eligible(client.id), []);
     assert.ok(fullyPaid.job_order_no);
     await edit(saved, { family_name: 'Stale form after payment' }, 409);
     await edit(fullyPaid, { given_name: 'Still restricted' }, 409);

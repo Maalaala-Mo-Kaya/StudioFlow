@@ -17,18 +17,19 @@ export function useWorkflowData<T>(path: string | null, interval = 8_000, keepPr
 
   useEffect(() => {
     if (path === null) return;
-    let live = true;
+    const controller = new AbortController();
+    const { signal } = controller;
     let generation = 0;
     let debounce: number | undefined;
     const load = async () => {
       const request = ++generation;
       try {
         const data = await (publicTopic ? kioskPb : pb).send<T>(
-          workflowApi + path, publicTopic ? { cache: 'no-store' } : {},
+          workflowApi + path, { signal, ...(publicTopic ? { cache: 'no-store' } : {}) },
         );
-        if (live && request === generation) setResult({ path, data });
+        if (!signal.aborted && request === generation) setResult({ path, data });
       } catch (error) {
-        if (live && request === generation) {
+        if (!signal.aborted && request === generation) {
           setResult((current) => ({
             path, data: current?.path === path || keepPreviousData ? current?.data : undefined, error: workflowError(error),
           }));
@@ -39,12 +40,12 @@ export function useWorkflowData<T>(path: string | null, interval = 8_000, keepPr
       window.clearTimeout(debounce);
       debounce = window.setTimeout(load, 120);
     };
-    refreshRef.current();
+    void load();
     const stop = mountSubscription((listener) => realtime.realtime.subscribe(publicTopic || 'studioflow-workflow', listener), refresh);
     const timer = window.setInterval(refresh, interval);
     window.addEventListener('focus', refresh);
     return () => {
-      live = false;
+      controller.abort();
       refreshRef.current = () => {};
       window.clearTimeout(debounce);
       window.clearInterval(timer);

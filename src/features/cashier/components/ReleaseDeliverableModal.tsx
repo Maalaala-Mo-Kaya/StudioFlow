@@ -42,7 +42,7 @@ export const ReleaseDeliverableModal: React.FC<ReleaseDeliverableModalProps> = (
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/80 backdrop-blur-xs animate-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/80 modal-overlay">
       <div className="w-full max-w-lg sm:max-w-xl lg:max-w-2xl bg-canvas border-2 border-line shadow-lux p-6 space-y-5 transition-all">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b-2 border-line">

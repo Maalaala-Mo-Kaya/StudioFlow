@@ -419,8 +419,14 @@ button.bg-obsidian:not(:disabled):hover {
   animation: fadeSlideUp 0.38s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
 }
 
-.animate-modal {
-  animation: modalScaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+.animate-modal,
+.modal-overlay > :first-child {
+  animation: modalScaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-modal,
+  .modal-overlay > :first-child { animation: none; }
 }
 
 /* Kiosk package browser: the "next package" arrow nudges until the client first scrolls. */

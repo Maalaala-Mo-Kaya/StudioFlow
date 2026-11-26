@@ -34,7 +34,71 @@ interface PaymentModalProps {
   onCashReceivedChange: (amount: string) => void;
 }
 
-export const PaymentModal: React.FC<PaymentModalProps> = ({
+type PaymentDialogProps = Omit<PaymentModalProps, 'registration'> & {
+  preview: Registration;
+  registration: Registration | null;
+  loadError: string;
+  onRetry: () => void;
+};
+
+export function PaymentModal({ preview, registration, loadError, onRetry, ...form }: PaymentDialogProps) {
+  const titleId = React.useId();
+  const selectedReg = registration ?? preview;
+  const { onClose, isProcessing } = form;
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      className="fixed inset-0 bg-obsidian/80 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+    >
+      {/* Reserve the form's space while its balance loads so the header and close button stay put. */}
+      <div className="animate-modal bg-panel max-w-lg sm:max-w-xl lg:max-w-5xl w-full h-[92dvh] lg:h-[min(43rem,calc(100dvh-2rem))] p-6 sm:p-8 lg:px-6 lg:py-4 border-2 border-line shadow-lux-gold overflow-y-auto overscroll-contain">
+        <div className="flex justify-between items-start pb-4 border-b-2 border-line mb-5 lg:pb-2 lg:mb-3">
+          <div>
+            <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-gold-soft">
+              POS // PAYMENT VERIFICATION
+            </span>
+            <h3 id={titleId} className="text-xl font-black text-ink uppercase mt-0.5">
+              {formatClientName(selectedReg)}
+            </h3>
+            <p className="text-xs text-neutral-500 font-mono font-bold mt-0.5">
+              Job Order <span className="text-red-600">{formatJobOrderNo(selectedReg.job_order_no)}</span> •
+              Queue {formatQueueNumber(selectedReg.queue_number)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isProcessing}
+            aria-label="Close payment"
+            className="w-8 h-8 bg-obsidian text-gold flex items-center justify-center cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {registration ? (
+          <PaymentForm key={registration.id} registration={registration} {...form} />
+        ) : loadError ? (
+          <div className="space-y-3 text-sm">
+            <p role="alert" className="text-red-600">{loadError}</p>
+            <button type="button" onClick={onRetry}
+              className="btn-tactile min-h-11 border border-line px-4 font-bold text-ink cursor-pointer">
+              Try again
+            </button>
+          </div>
+        ) : (
+          <p role="status" className="text-sm text-neutral-600">Loading the latest payment balance…</p>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+const PaymentForm: React.FC<PaymentModalProps> = ({
   registration: selectedReg,
   onClose,
   onSubmit,
@@ -175,38 +239,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     onPaymentTypeChange(mode);
   };
 
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 bg-obsidian/80 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
-    >
-      {/* Two columns on wide screens (no scrolling); one scrolling column on phones and tablets. */}
-      <div className="animate-modal bg-panel max-w-lg sm:max-w-xl lg:max-w-5xl w-full p-6 sm:p-8 lg:px-6 lg:py-4 border-2 border-line shadow-lux-gold max-h-[92dvh] lg:max-h-[97dvh] overflow-y-auto transition-all">
-        <div className="flex justify-between items-start pb-4 border-b-2 border-line mb-5 lg:pb-2 lg:mb-3">
-          <div>
-            <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-gold-soft">
-              POS // PAYMENT VERIFICATION
-            </span>
-            <h3 className="text-xl font-black text-ink uppercase mt-0.5">
-              {formatClientName(selectedReg)}
-            </h3>
-            <p className="text-xs text-neutral-500 font-mono font-bold mt-0.5">
-              Job Order <span className="text-red-600">{formatJobOrderNo(selectedReg.job_order_no)}</span> •
-              Queue {formatQueueNumber(selectedReg.queue_number)}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isProcessing}
-            aria-label="Close payment"
-            className="w-8 h-8 bg-obsidian text-gold flex items-center justify-center cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
+  return (
         <form noValidate onSubmit={(event) => {
           event.preventDefault();
           if (canSubmit) onSubmit({
@@ -497,8 +530,5 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           </div>
           </div>
         </form>
-      </div>
-    </div>,
-    document.body
   );
 };

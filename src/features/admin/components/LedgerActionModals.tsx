@@ -10,7 +10,7 @@ const errorText = (err: unknown) => (err && typeof err === 'object' && 'response
   || (err instanceof Error ? err.message : 'Something went wrong. Please try again.');
 
 const shell = (title: string, icon: React.ReactNode, onClose: () => void, children: React.ReactNode) => createPortal(
-  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/80 backdrop-blur-xs animate-modal">
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/80 modal-overlay">
     <div role="dialog" aria-modal="true" aria-label={title}
       className="w-full max-w-md bg-canvas border-2 border-line shadow-lux p-6 space-y-4 font-mono text-xs max-h-[92vh] overflow-y-auto">
       <div className="flex items-center justify-between pb-3 border-b-2 border-line">

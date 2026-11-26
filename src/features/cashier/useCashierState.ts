@@ -81,6 +81,9 @@ export function useCashierState() {
   });
 
   // Payment Processing Modal State
+  const [paymentPreview, setPaymentPreview] = useState<Registration | null>(null);
+  const [paymentLoadError, setPaymentLoadError] = useState('');
+  const paymentRequest = useRef<AbortController | null>(null);
   const [selectedReg, setSelectedReg] = useState<Registration | null>(null);
   const [paymentType, setPaymentType] = useState<CollectionMode>('full');
   const [amountPaid, setAmountPaid] = useState('');
@@ -207,22 +210,33 @@ export function useCashierState() {
     };
   }, [studioDay, fetchRegistrations]);
 
+  useEffect(() => () => paymentRequest.current?.abort(), []);
+
   const openPaymentModal = useCallback(async (reg: Registration) => {
     if (submittingPayment.current) return;
+    paymentRequest.current?.abort();
+    const controller = new AbortController();
+    paymentRequest.current = controller;
+    const { signal } = controller;
+    const options = { requestKey: null, cache: 'no-store' as const, signal };
+    setPaymentPreview(reg);
+    setSelectedReg(null);
+    setPaymentLoadError('');
     try {
       const [latest, payments, refunds] = await Promise.all([
         pb.collection('registrations').getOne<Registration>(reg.id, {
-          expand: 'organization,level,course,package,session_type', requestKey: null, cache: 'no-store',
+          ...options, expand: 'organization,level,course,package,session_type',
         }),
         pb.collection('payments').getFullList<PaymentRecord>({
           filter: pb.filter('registration = {:registration}', { registration: reg.id }),
-          requestKey: null, cache: 'no-store',
+          ...options,
         }),
         pb.collection('refunds').getFullList<RefundRecord>({
           filter: pb.filter('registration = {:registration}', { registration: reg.id }),
-          requestKey: null, cache: 'no-store',
+          ...options,
         }).catch(() => [] as RefundRecord[]),
       ]);
+      if (signal.aborted) return;
       const refundedCentavos = refunds.reduce((sum, refund) => sum + toCentavos(refund.amount), 0);
       // Net paid: counted payments minus money given back.
       const paidCentavos = payments.reduce((sum, payment) =>
@@ -237,7 +251,6 @@ export function useCashierState() {
       };
       const mode: CollectionMode = !canUseCollectionMode(hydrated, 'full')
         ? 'additional' : latest.payment_type === 'downpayment' ? 'initial' : 'full';
-      if (submittingPayment.current) return;
       confirmationAttempt.current = null;
       setSelectedReg(hydrated);
       setPaymentType(mode);
@@ -245,13 +258,19 @@ export function useCashierState() {
       setRemarks('');
       setCashReceived('');
     } catch (err) {
+      if (signal.aborted) return;
       console.error('Failed to load current payment balance:', err);
-      toast.error('Could not load the latest payment balance. Please try again.');
+      setPaymentLoadError('Could not load the latest payment balance.');
+    } finally {
+      if (paymentRequest.current === controller) paymentRequest.current = null;
     }
-  }, [toast]);
+  }, []);
 
   const closePaymentModal = useCallback(() => {
-    if (!submittingPayment.current) setSelectedReg(null);
+    if (submittingPayment.current) return;
+    paymentRequest.current?.abort();
+    setSelectedReg(null);
+    setPaymentPreview(null);
   }, []);
 
   const openPrintModal = useCallback((reg: Registration, paymentId?: string) => {
@@ -318,6 +337,7 @@ export function useCashierState() {
       const updated = { ...result.registration, expand: selectedReg.expand };
       setRegistrations((prev) => prev.map((reg) => reg.id === updated.id ? updated : reg));
       setSelectedReg(null);
+      setPaymentPreview(null);
       setPrintReg(updated);
       setPrintPaymentId(result.paymentId || undefined);
       refreshClientDocuments(updated.id, toast.warning);
@@ -442,6 +462,8 @@ export function useCashierState() {
     lastPaymentAt,
     fetchRegistrations,
     // Payment Modal
+    paymentPreview,
+    paymentLoadError,
     selectedReg,
     openPaymentModal,
     closePaymentModal,

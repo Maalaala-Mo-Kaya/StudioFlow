@@ -43,7 +43,7 @@ export const NotifyPickupModal: React.FC<NotifyPickupModalProps> = ({ registrati
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/80 backdrop-blur-xs animate-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian/80 modal-overlay">
       <div role="dialog" aria-modal="true" aria-labelledby="notify-pickup-title"
         className="w-full max-w-lg bg-canvas border-2 border-line shadow-lux p-6 space-y-4 font-mono text-xs max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-3 border-b-2 border-line">

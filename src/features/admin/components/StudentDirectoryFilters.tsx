@@ -78,7 +78,9 @@ export function StudentDirectoryFilters<Column extends string, Key extends strin
   useEffect(() => {
     if (!open) return;
 
+    let frame = 0;
     const updatePanelHeight = () => {
+      frame = 0;
       if (!panel.current || window.innerWidth < 1024) {
         setDesktopMaxHeight(undefined);
         return;
@@ -94,17 +96,24 @@ export function StudentDirectoryFilters<Column extends string, Key extends strin
       setDesktopMaxHeight(Math.floor(Math.min(availableHeight, responsiveHeight)));
     };
 
+    const schedule = (event: Event) => {
+      // Scrolling inside the filter does not move its outer boundary.
+      if (event.type === 'scroll' && event.target instanceof Node && panel.current?.contains(event.target)) return;
+      if (!frame) frame = window.requestAnimationFrame(updatePanelHeight);
+    };
+
     updatePanelHeight();
-    window.addEventListener('resize', updatePanelHeight);
-    window.addEventListener('scroll', updatePanelHeight, true);
-    window.visualViewport?.addEventListener('resize', updatePanelHeight);
-    window.visualViewport?.addEventListener('scroll', updatePanelHeight);
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, { capture: true, passive: true });
+    window.visualViewport?.addEventListener('resize', schedule);
+    window.visualViewport?.addEventListener('scroll', schedule, { passive: true });
 
     return () => {
-      window.removeEventListener('resize', updatePanelHeight);
-      window.removeEventListener('scroll', updatePanelHeight, true);
-      window.visualViewport?.removeEventListener('resize', updatePanelHeight);
-      window.visualViewport?.removeEventListener('scroll', updatePanelHeight);
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+      window.visualViewport?.removeEventListener('resize', schedule);
+      window.visualViewport?.removeEventListener('scroll', schedule);
     };
   }, [open]);
 

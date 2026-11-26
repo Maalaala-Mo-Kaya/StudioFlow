@@ -19,7 +19,7 @@ import { useStudioSettings } from '../../hooks/useStudioSettings';
 export const CashierPage: React.FC = () => {
   const cashier = useCashierState();
   const { deleteReg } = cashier;
-  const { pickupMessage } = useStudioSettings();
+  const { pickupMessage, sessionTypes } = useStudioSettings();
   const { toast } = useToast();
   const [editId, setEditId] = useState('');
   // Add-ons the client asks for at the counter, then: print the updated job order or collect now.
@@ -78,7 +78,7 @@ export const CashierPage: React.FC = () => {
       />
 
       {editId && (
-        <CashierRegistrationEditor key={editId} id={editId} onClose={() => setEditId('')}
+        <CashierRegistrationEditor key={editId} id={editId} sessionTypes={sessionTypes} onClose={() => setEditId('')}
           onSaved={(saved) => {
             cashier.applyRegistrationEdit(saved);
             setEditId('');
@@ -116,9 +116,14 @@ export const CashierPage: React.FC = () => {
       )}
 
       {/* PAYMENT COLLECTION MODAL */}
-      {cashier.selectedReg && (
+      {cashier.paymentPreview && (
         <PaymentModal
+          preview={cashier.paymentPreview}
           registration={cashier.selectedReg}
+          loadError={cashier.paymentLoadError}
+          onRetry={() => {
+            if (cashier.paymentPreview) void cashier.openPaymentModal(cashier.paymentPreview);
+          }}
           onClose={cashier.closePaymentModal}
           onSubmit={cashier.handleConfirmPayment}
           isProcessing={cashier.isProcessing}

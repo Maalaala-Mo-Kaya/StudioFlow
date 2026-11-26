@@ -9,7 +9,7 @@ import { DEFAULT_PICKUP_MESSAGE } from '../utils/pickupMessage';
  * Studio switches (school / walk-in registrations), walk-in terms and session types.
  * Public data, so the kiosk can read it; updates live when the admin changes it.
  */
-export function useStudioSettings() {
+export function useStudioSettings(enabled = true) {
   const [settings, setSettings] = useState<StudioSettings | null>(null);
   const [sessionTypes, setSessionTypes] = useState<SessionType[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -31,11 +31,12 @@ export function useStudioSettings() {
 
   const live = useRealtimeClient();
   useEffect(() => {
+    if (!enabled) return;
     void refresh();
     const stops = ['studio_settings', 'session_types'].map((name) =>
       mountSubscription((listener) => live.collection(name).subscribe('*', listener), refresh));
     return () => stops.forEach((stop) => stop());
-  }, [live, refresh]);
+  }, [enabled, live, refresh]);
 
   return {
     settings,

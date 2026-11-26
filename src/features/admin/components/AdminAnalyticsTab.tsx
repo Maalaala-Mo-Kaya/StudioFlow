@@ -88,7 +88,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   // because payments in a period can belong to job orders from earlier periods.
   const [period, setPeriod] = useState<Period>('all');
   const since = period === 'today' ? studioDayStartUtc() : period === 'month' ? studioMonthStartUtc() : undefined;
-  const shown = period === 'all' ? metrics : overviewMetrics(registrations, payments, refunds, since);
+  const shown = view !== 'overview' || period === 'all' ? metrics : overviewMetrics(registrations, payments, refunds, since);
   const periodWords = { today: 'today', month: 'this month', all: 'to date' }[period];
   const periodNote = period === 'all'
     ? 'Everything since the system started.'
@@ -102,6 +102,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   const [slipTarget, setSlipTarget] = useState<{ registration: Registration; refund: RefundRecord; justRecorded?: boolean } | null>(null);
   // The ledger account open in the popup (by id, so it shows the latest payments and refunds).
   const [openAccountId, setOpenAccountId] = useState<string | null>(null);
+  const needsLedger = view === 'ledger' || openAccountId !== null;
   const actionOpen = Boolean(receiptTarget || voidTarget || refundTarget || slipTarget);
   useEffect(() => {
     if (!openAccountId) return;
@@ -112,12 +113,18 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
   }, [openAccountId, actionOpen]);
   const refundsByRegistration = useMemo(() => {
     const grouped = new Map<string, RefundRecord[]>();
-    for (const refund of refunds) grouped.set(refund.registration, [...(grouped.get(refund.registration) ?? []), refund]);
+    if (!needsLedger) return grouped;
+    for (const refund of refunds) {
+      const records = grouped.get(refund.registration);
+      if (records) records.push(refund);
+      else grouped.set(refund.registration, [refund]);
+    }
     return grouped;
-  }, [refunds]);
+  }, [needsLedger, refunds]);
 
   const paymentsByRegistration = useMemo(() => {
     const grouped = new Map<string, PaymentRecord[]>();
+    if (!needsLedger) return grouped;
     for (const payment of payments) {
       const records = grouped.get(payment.registration) ?? [];
       records.push(payment);
@@ -127,8 +134,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       records.sort((a, b) => Date.parse(a.created.replace(' ', 'T')) - Date.parse(b.created.replace(' ', 'T')) || a.id.localeCompare(b.id));
     }
     return grouped;
-  }, [payments]);
-  const ledgerRows = useMemo(() => registrations.map((registration) => {
+  }, [needsLedger, payments]);
+  const ledgerRows = useMemo(() => needsLedger ? registrations.map((registration) => {
     const transactions = paymentsByRegistration.get(registration.id) ?? [];
     const orderRefunds = refundsByRegistration.get(registration.id) ?? [];
     const cents = (value: number) => Math.round(value * 100);
@@ -155,31 +162,31 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       // Most that can be refunded now: everything held on a cancelled order, the overpayment otherwise.
       refundable: (cancelled ? Math.max(0, net) : overpaid) / 100,
     };
-  }), [registrations, paymentsByRegistration, refundsByRegistration]);
+  }) : [], [needsLedger, registrations, paymentsByRegistration, refundsByRegistration]);
 
   // Same rules as the cards and the Audit Export (auditData.ts), for the chosen period.
   const audit = useMemo(
-    () => buildAudit(registrations, payments, refunds, since, { organizations, packages }),
-    [registrations, payments, refunds, since, organizations, packages],
+    () => view === 'overview' ? buildAudit(registrations, payments, refunds, since, { organizations, packages }) : undefined,
+    [view, registrations, payments, refunds, since, organizations, packages],
   );
-  const isReconciled = audit.ordersBalanced && audit.paymentsBalanced;
+  const isReconciled = audit?.ordersBalanced && audit.paymentsBalanced;
   // School and package groups report Studio activity only.
   const hasActivity = (group: AuditGroup) => Boolean(group.count || group.billed || group.collected || group.discount || group.balance || group.held);
   // Revenue types that were never chosen: their sales can't be counted as Studio or MUA.
-  const untypedCatalog = [
+  const untypedCatalog = view === 'overview' ? [
     ...packages.filter((pkg) => !pkg.revenue_category).map((pkg) => `${pkg.name} (package)`),
     ...addOns.filter((add) => !add.revenue_category && !add.catalog_item).map((add) => `${add.name} (add-on)`),
-  ];
-  const untypedOrders = registrations
+  ] : [];
+  const untypedOrders = view === 'overview' ? registrations
     .filter((reg) => reg.status !== 'cancelled' && revenueTerms(reg).unallocated > 0)
-    .map((reg) => reg.job_order_no || reg.id);
+    .map((reg) => reg.job_order_no || reg.id) : [];
   const list = (names: string[], max: number) => names.slice(0, max).join(', ') + (names.length > max ? ` and ${names.length - max} more` : '');
-  const activeSchools = audit.bySchool.filter(hasActivity);
-  const hiddenSchools = audit.bySchool.length - activeSchools.length;
-  const activePackages = audit.byPackage.filter(hasActivity);
+  const activeSchools = audit?.bySchool.filter(hasActivity) ?? [];
+  const hiddenSchools = (audit?.bySchool.length ?? 0) - activeSchools.length;
+  const activePackages = audit?.byPackage.filter(hasActivity) ?? [];
   const [exportingAudit, setExportingAudit] = useState(false);
   const exportAudit = async () => {
-    if (exportingAudit) return;
+    if (exportingAudit || !audit) return;
     setExportingAudit(true);
     try {
       const { downloadAuditWorkbook } = await import('../auditWorkbook');
@@ -392,7 +399,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
 
   return (
     <div className="space-y-6 animate-enter">
-      {view === 'overview' && (<>
+      {audit && (<>
       {/* Period switch for the cards (dates in Philippine time). */}
       <div className="flex flex-wrap items-center gap-3">
         <div role="group" aria-label="Period" className="inline-flex border-2 border-line bg-panel shadow-lux font-mono text-xs font-black uppercase">
@@ -724,7 +731,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       {openAccount && createPortal(
         <div role="dialog" aria-modal="true" aria-labelledby="ledger-account-title"
           onClick={(e) => { if (e.target === e.currentTarget && !actionOpen) setOpenAccountId(null); }}
-          className="no-print fixed inset-0 z-40 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 backdrop-blur-xs animate-modal">
+          className="no-print fixed inset-0 z-40 flex items-stretch sm:items-center justify-center sm:p-4 bg-obsidian/85 modal-overlay">
           <div className="w-full sm:max-w-6xl h-full sm:h-auto sm:max-h-[92vh] flex flex-col bg-panel sm:border-2 border-line shadow-lux-gold font-mono text-xs">
             <div className="p-4 sm:px-6 border-b-2 border-line flex items-start justify-between gap-3">
               <div className="min-w-0">
