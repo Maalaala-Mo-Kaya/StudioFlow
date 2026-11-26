@@ -1,4 +1,5 @@
 import { DataFeedback } from '../../../components/common/DataFeedback';
+import { DataTable, type DataTableColumn } from '../../../components/common/DataTable';
 import React, { useState } from 'react';
 import { Ban, HandCoins, Users, Wallet } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
@@ -29,7 +30,8 @@ export const MuaPayoutsPanel: React.FC = () => {
   const today = manilaDay();
   const [range, setRange] = useState({ from: monthStart(today), to: today });
   // From the studio's first day to today.
-  const { start } = useStudioCalendar();
+  const calendar = useStudioCalendar();
+  const { start } = calendar;
   const within = (from: string, to: string) => ({ from: clampDay(from, start, today), to: clampDay(to, start, today) });
   const valid = range.from && range.to && range.from <= range.to;
   const { data: report, loading, refreshing, error, refresh } = useWorkflowData<MuaPayoutReport>(
@@ -43,6 +45,26 @@ export const MuaPayoutsPanel: React.FC = () => {
   const open = artists.find((artist) => artist.artistId === openArtist);
   const period = periodLabel(range.from, range.to);
   const sum = (key: 'earned' | 'paid' | 'unpaid' | 'clientPaid') => artists.reduce((total, artist) => total + artist[key], 0);
+  const columns: DataTableColumn<MuaArtistTotals>[] = [
+    { id: 'artist', header: 'Makeup artist', minWidth: 172, cell: (artist) => <div className="font-black uppercase">
+      <span className="flex items-center gap-1.5"><Users className="size-3.5 shrink-0 text-gold" />{artist.artistName}</span>
+      {artist.review > 0 && <span className="block text-[10px] normal-case text-amber-700">{artist.review} need review</span>}
+    </div> },
+    { id: 'clients', header: 'Clients', align: 'right', width: 70, accessor: (artist) => artist.clients },
+    { id: 'services', header: 'Services', align: 'right', width: 78, accessor: (artist) => artist.services },
+    { id: 'earned', header: 'Earned', align: 'right', minWidth: 94, cellClassName: 'font-black', cell: (artist) => peso(artist.earned) },
+    { id: 'paid', header: 'Paid out', align: 'right', minWidth: 94, cellClassName: 'text-emerald-700', cell: (artist) => peso(artist.paid) },
+    { id: 'unpaid', header: 'Unpaid', align: 'right', minWidth: 94, cellClassName: 'font-black', cell: (artist) => (
+      <span className={artist.unpaid > 0 ? 'text-red-700' : undefined}>{peso(artist.unpaid)}</span>
+    ) },
+    { id: 'clientPaid', header: 'On fully paid orders', align: 'right', minWidth: 108, cell: (artist) => peso(artist.clientPaid) },
+    { id: 'actions', header: 'Actions', align: 'right', width: 200, cell: (artist) => artist.payable > 0 && (
+      <button type="button" onClick={() => setPaying(artist)}
+        className="btn-tactile inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 whitespace-nowrap border border-line bg-gold px-3 text-[10px] font-black uppercase text-on-gold">
+        <Wallet className="size-3.5 shrink-0" /> Mark {peso(artist.payable)} paid
+      </button>
+    ) },
+  ];
 
   return (
     <section className={`${stationCard} space-y-4`} aria-label="MUA payouts">
@@ -68,12 +90,9 @@ export const MuaPayoutsPanel: React.FC = () => {
         </div>
       </div>
 
+      <DataFeedback {...calendar} loadingMessage="Loading available dates…" />
       {!valid && <p role="alert" className="text-sm text-red-700">Choose a From date on or before the To date.</p>}
-      {valid && <DataFeedback loading={loading} refreshing={refreshing} error={error} onRetry={refresh}
-        loadingMessage="Loading payouts…" className="min-h-16 p-3" />}
-
-      {valid && report && (
-        <>
+      {valid && (
           <div className="grid gap-3 sm:grid-cols-4">
             {([
               ['Earned by artists', sum('earned')], ['Paid out', sum('paid')], ['Still owed', sum('unpaid')],
@@ -81,48 +100,20 @@ export const MuaPayoutsPanel: React.FC = () => {
             ] as const).map(([label, amount]) => (
               <div key={label} className="border-2 border-line bg-canvas p-3">
                 <p className="text-[10px] font-black uppercase text-gold-soft">{label}</p>
-                <p className={`font-mono text-lg font-black ${label === 'Still owed' && amount > 0 ? 'text-red-700' : 'text-ink'}`}>{peso(amount)}</p>
+                {report ? <p className={`font-mono text-lg font-black ${label === 'Still owed' && amount > 0 ? 'text-red-700' : 'text-ink'}`}>{peso(amount)}</p>
+                  : loading ? <div aria-hidden="true" className="my-1 h-5 w-20 bg-line motion-safe:animate-pulse" />
+                    : <p className="font-mono text-lg text-neutral-600">—</p>}
               </div>
             ))}
           </div>
+      )}
+      {valid && <DataTable label="Makeup artist payouts" rows={artists} columns={columns} getRowId={(artist) => artist.artistId}
+        loading={loading} refreshing={refreshing} error={error} onRetry={refresh} loadingMessage="Loading payouts…"
+        emptyMessage="No services completed in this period." pagination={false} viewportClassName="min-h-44"
+        headerClassName="uppercase" tableClassName="font-mono" onRowClick={(artist) => setOpenArtist(artist.artistId)} />}
 
-          <div className="overflow-x-auto border-2 border-line">
-            <table className="w-full min-w-[720px] text-xs font-mono">
-              <thead className="bg-obsidian text-gold text-[10px] uppercase">
-                <tr>
-                  {['Makeup artist', 'Clients', 'Services', 'Earned', 'Paid out', 'Unpaid', 'On fully paid orders', ''].map((label) => (
-                    <th key={label} className={`p-2 ${label === 'Makeup artist' ? 'text-left' : 'text-right'}`}>{label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-200">
-                {!artists.length && <tr><td colSpan={8} className="p-4 text-center text-neutral-500">No services completed in this period.</td></tr>}
-                {artists.map((artist) => (
-                  <tr key={artist.artistId} className="cursor-pointer hover:bg-gold-wash" onClick={() => setOpenArtist(artist.artistId)}>
-                    <td className="p-2 font-black uppercase text-ink">
-                      <span className="flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-gold shrink-0" />{artist.artistName}</span>
-                      {artist.review > 0 && <span className="block text-[10px] font-bold normal-case text-amber-700">{artist.review} need review</span>}
-                    </td>
-                    <td className="p-2 text-right">{artist.clients}</td>
-                    <td className="p-2 text-right">{artist.services}</td>
-                    <td className="p-2 text-right font-black">{peso(artist.earned)}</td>
-                    <td className="p-2 text-right text-emerald-700">{peso(artist.paid)}</td>
-                    <td className={`p-2 text-right font-black ${artist.unpaid > 0 ? 'text-red-700' : ''}`}>{peso(artist.unpaid)}</td>
-                    <td className="p-2 text-right text-neutral-600">{peso(artist.clientPaid)}</td>
-                    <td className="p-2 text-right" onClick={(event) => event.stopPropagation()}>
-                      {artist.payable > 0 && (
-                        <button type="button" onClick={() => setPaying(artist)}
-                          className="btn-tactile min-h-[34px] px-3 inline-flex items-center gap-1.5 bg-gold text-on-gold border border-line text-[10px] font-black uppercase cursor-pointer whitespace-nowrap">
-                          <Wallet className="w-3.5 h-3.5" /> Mark {peso(artist.payable)} paid
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
+      {valid && report && (
+        <>
           {pool && (
             <div className="border-2 border-line bg-canvas p-3 text-xs space-y-1">
               <p className="font-black uppercase text-ink">Wardrobe / shared MUA money · {peso(pool.total)} · {new Set(report.shared.map((line) => line.jobId)).size} job orders

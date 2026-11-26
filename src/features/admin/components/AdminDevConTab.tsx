@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Database, Images, Lock, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
 import { useToast } from '../../../context/ToastContext';
+import { DataFeedback } from '../../../components/common/DataFeedback';
 
 interface DevConSummary {
   clients: Record<string, number>;
@@ -51,7 +52,8 @@ const keptLabels: Record<string, string> = {
 export const AdminDevConTab: React.FC = () => {
   const { toast } = useToast();
   const [summary, setSummary] = useState<DevConSummary | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [photos, setPhotos] = useState(true);
@@ -60,14 +62,16 @@ export const AdminDevConTab: React.FC = () => {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       setSummary(await pb.send<DevConSummary>(api + '/summary', { method: 'GET' }));
     } catch (err) {
-      toast.error(errorText(err));
+      console.error('Failed to load the system summary:', err);
+      setLoadError('Could not load the system summary.');
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -148,6 +152,8 @@ export const AdminDevConTab: React.FC = () => {
           </button>
         </div>
 
+        <DataFeedback loading={loading && !summary} refreshing={loading && !!summary} error={loadError} onRetry={load}
+          loadingMessage="Loading system summary…" className="mb-4" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <section className="border border-red-300 bg-red-50 p-4">
             <h4 className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-red-700 m-0 mb-2">
@@ -186,7 +192,7 @@ export const AdminDevConTab: React.FC = () => {
           <span>
             <span className="font-black uppercase tracking-wider text-ink">Also clear the client photo folders</span>
             <span className="block text-neutral-600 mt-0.5">
-              Moves the {summary?.photoFolders ?? 0} folder(s) in <span className="font-mono">{summary?.photoRoot || '…'}</span> into
+              Moves the {summary?.photoFolders ?? '—'} folder(s) in <span className="font-mono">{summary?.photoRoot || '…'}</span> into
               a <span className="font-mono">…_DEVCON_&lt;date&gt;</span> folder beside it (not deleted, so new job orders don't meet old folders).
               Delete that folder yourself when you no longer need it.
             </span>

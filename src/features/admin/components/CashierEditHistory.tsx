@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import { pb } from '../../../db/pocketbase';
 
 interface CashierEditRecord {
@@ -35,7 +36,8 @@ export function CashierEditHistory({ registrationId }: { registrationId: string 
       setEntries(await pb.collection('cashier_registration_edits').getFullList<CashierEditRecord>({
         filter: pb.filter('registration = {:id}', { id: registrationId }), sort: '-created,-id', cache: 'no-store',
       }));
-    } catch {
+    } catch (error) {
+      console.error('Failed to load cashier edit history:', error);
       setFailed(true);
     } finally {
       setLoading(false);
@@ -47,9 +49,9 @@ export function CashierEditHistory({ registrationId }: { registrationId: string 
       if (event.currentTarget.open && !entries) void load();
     }}>
       <summary className="cursor-pointer font-black uppercase tracking-wide">Cashier Edit History</summary>
-      {loading && <p role="status" className="mt-2">Loading history…</p>}
-      {failed && <p role="alert" className="mt-2 text-red-600">Could not load edit history. Close and reopen this section to retry.</p>}
-      {entries?.length === 0 && <p className="mt-2">No cashier edits recorded.</p>}
+      <DataFeedback loading={loading} error={failed ? 'Could not load edit history.' : undefined}
+        onRetry={load} loadingMessage="Loading history…"
+        emptyMessage={entries?.length === 0 ? 'No cashier edits recorded.' : undefined} className="mt-2" />
       {entries?.map((entry) => (
         <details key={entry.id} className="mt-3 border-t border-line pt-2">
           <summary className="cursor-pointer">

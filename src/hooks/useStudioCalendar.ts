@@ -13,8 +13,12 @@ function load(): Promise<StudioCalendar> {
   const day = studioDate();
   if (!cached || cachedOn !== day) {
     cachedOn = day;
-    cached = pb.send<StudioCalendar>('/api/studioflow/studio-calendar', { requestKey: null })
-      .catch(() => { cached = null; return { start: '', today: day }; });
+    const request = pb.send<StudioCalendar>('/api/studioflow/studio-calendar', { requestKey: null });
+    cached = request;
+    void request.catch((error: unknown) => {
+      if (cached === request) cached = null;
+      console.error('Failed to load the studio calendar:', error);
+    });
   }
   return cached;
 }
@@ -23,14 +27,24 @@ function load(): Promise<StudioCalendar> {
  * Bounds for report / export date pickers: `start` (empty until loaded, or when unknown) and `today`.
  * Use with `clampDay` so a typed date outside the range is pulled back in.
  */
-export function useStudioCalendar(): StudioCalendar {
-  const [calendar, setCalendar] = useState<StudioCalendar>(() => ({ start: '', today: studioDate() }));
+export function useStudioCalendar() {
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{ attempt: number; calendar?: StudioCalendar }>();
   useEffect(() => {
     let live = true;
-    void load().then((value) => { if (live) setCalendar(value); });
+    void load().then(
+      (calendar) => { if (live) setResult({ attempt, calendar }); },
+      () => { if (live) setResult({ attempt }); },
+    );
     return () => { live = false; };
-  }, []);
-  return calendar;
+  }, [attempt]);
+  const loading = result?.attempt !== attempt;
+  return {
+    ...(result?.calendar ?? { start: '', today: studioDate() }),
+    loading,
+    error: !loading && !result?.calendar ? 'Could not load the studio calendar.' : undefined,
+    onRetry: () => setAttempt((current) => current + 1),
+  };
 }
 
 /**

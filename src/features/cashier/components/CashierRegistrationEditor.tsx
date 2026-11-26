@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { pb } from '../../../db/pocketbase';
 import type { AddOn, Course, Level, Organization, Package, Registration, SchoolCourse, SessionType } from '../../../types';
 import { Modal } from '../../../components/common/Modal';
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import { EditStudentModal } from '../../admin/components/EditStudentModal';
 
 interface EditData {
@@ -23,7 +24,9 @@ export function CashierRegistrationEditor({ id, sessionTypes, onClose, onSaved }
   onSaved: (record: Registration) => void;
 }) {
   const [data, setData] = useState<EditData | null>(null);
-  const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
+  const [failure, setFailure] = useState<{ attempt: number; ineligible?: boolean }>();
+  const error = failure?.attempt === attempt ? failure : undefined;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -40,18 +43,25 @@ export function CashierRegistrationEditor({ id, sessionTypes, onClose, onSaved }
     ]).then(([registration, organizations, courses, packages, addOns, levels, schoolCourses, eligible]) => {
       if (signal.aborted) return;
       if (!eligible.includes(id) || registration.status !== 'pending_payment' || registration.paid_amount !== 0 || registration.job_order_no) {
-        setError('This client is no longer eligible for editing. Check for a payment or an issued job order.');
+        setFailure({ attempt, ineligible: true });
       } else {
         setData({ registration, organizations, courses, packages, addOns, levels, schoolCourses });
       }
-    }).catch(() => { if (!signal.aborted) setError('Could not open this registration. Refresh the pending client list and try again.'); });
+    }).catch((reason: unknown) => {
+      if (signal.aborted) return;
+      console.error('Failed to load registration editor:', reason);
+      setFailure({ attempt });
+    });
     return () => controller.abort();
-  }, [id]);
+  }, [id, attempt]);
 
   if (!data) {
     return (
       <Modal title="Edit Client" subtitle={`Registration ${id}`} onClose={onClose} size="xl" fixedHeight>
-        {error ? <p role="alert" className="text-red-600">{error}</p> : <p role="status">Loading registration…</p>}
+        <DataFeedback loading={!error} loadingMessage="Loading registration…"
+          error={error?.ineligible ? 'This client is no longer eligible for editing. Check for a payment or an issued job order.'
+            : error ? 'Could not open this registration.' : undefined}
+          onRetry={error?.ineligible ? undefined : () => setAttempt((current) => current + 1)} />
       </Modal>
     );
   }

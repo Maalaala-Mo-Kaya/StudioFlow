@@ -294,7 +294,7 @@ export const PhotographerPage: React.FC = () => {
                   onStart={startTask} onFinish={finishTask} />
               </div>
             )}
-            {sendingHere && <ShootGallery registrationId={selected.id} />}
+            {sendingHere && <ShootGallery key={selected.id} registrationId={selected.id} />}
           </Modal>
         )}
 

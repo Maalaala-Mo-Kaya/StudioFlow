@@ -38,6 +38,27 @@ The table now keeps compact columns at their configured widths and allocates rem
 
 The visual regression pass used local fixtures at widths of 1,920, 768 and 390 pixels with the full Pending and Paid action sets, Reprint and Void, long course and session names, MUA assignment, and queue cards with different name lengths. Wide tables remain horizontally scrollable on smaller screens.
 
+## Follow-up implementation and verification
+
+| Area | Before the follow-up | After the follow-up |
+| --- | --- | --- |
+| Shared tables and Chooser paging | The shared refresh message moved the table header down. Chooser dropped its paging controls after loading a complete first page or an empty result. | Initial failures and skeletons stay in the body. Refresh feedback sits below retained rows without pushing down the header. Chooser keeps its pager mounted even when both buttons are disabled. |
+| MUA payouts | Date changes unmounted the entire raw table. Loading and errors appeared outside the table. | The shared `DataTable` keeps eight columns mounted with the same widths. Report cards reserve their space during loading and show dashes on failure. Payout and artist-detail actions stay distinct and keyboard reachable. |
+| Cashier and audit logs | A failed editor load required leaving the modal. Cashier edit history required closing and reopening the section. DEV CON summary failures were shown in a toast only. | The editor and both admin history/summary paths use inline feedback and Retry. A client who is no longer eligible for edit still gets the existing eligibility message. |
+| Calendar and exports | The calendar converted failed requests into an unknown first day. An admin could open the export picker before its client records were ready. | A failed calendar request can be retried where dates are used. Client exports wait for a successful admin snapshot, and the separate MUA export can still use its own backend report. |
+| Photo galleries | A shoot-gallery request could retain another client's photo data across a client switch. Gallery refresh failures offered no inline retry. | Shoot data and local gallery state are scoped to the client. Both galleries retain the current client's content and offer Retry when their background read fails. |
+
+The follow-up reran the ledger measurements at 1,440, 768 and 390 pixels, with zero column-width change across pages, including the shorter final page and a page-size change. It also reran the Cashier, Chooser and admin request-state cases, including search results arriving out of order, and the action-button checks at 1,920, 768 and 390 pixels. New Chrome scenarios checked payout headers across loading, initial error, retry, success, refresh failure and empty results. They also checked horizontal scrolling, long artist names, separate payout and detail dialogs, calendar retry, and cashier editor retry at all three widths. These runs used local synthetic responses, including delayed responses and injected server errors.
+
+The latest TypeScript check, ESLint run and local production build passed. All 40 automated tests passed. The build repeated the existing ExcelJS chunk-size advisory. The local fixtures verified Photo Chooser's Copy Path placements, DEV CON summary retry and the photography gallery while switching between two simulated cameras with separate on-set clients. The isolated PocketBase workflow covered real photo folders.
+
+### Files changed in the follow-up
+
+- `docs/TABLE_DATA_STATES_AUDIT.md`, `src/components/common/DataTable.tsx`, `src/hooks/useStudioCalendar.ts`
+- `src/features/admin/AdminPage.tsx`, `src/features/admin/components/AdminDevConTab.tsx`, `src/features/admin/components/AdminHeader.tsx`, `src/features/admin/components/CashierEditHistory.tsx`, `src/features/admin/components/MuaPayoutsPanel.tsx`, `src/features/admin/components/MuaPerformancePanel.tsx`
+- `src/features/cashier/components/CashierRegistrationEditor.tsx`, `src/features/photographer/PhotographerPage.tsx`, `src/features/photographer/components/ShootGallery.tsx`
+- `src/features/workflow/ChooserPage.tsx`, `src/features/workflow/MakeupPage.tsx`, `src/features/workflow/MuaTeamOverview.tsx`
+
 ## Scope and remaining limits
 
 Raw catalog lists and the overview use a section-level status because they do not have a shared table body. Reports whose column labels arrive with the payload show a reserved loading area until those labels are known. Natural row height can still change when text wraps or a page contains fewer rows. Table orientation and column settings can also change the layout by design.

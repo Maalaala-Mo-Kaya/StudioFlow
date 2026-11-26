@@ -17,7 +17,8 @@ const sourceLabels: Record<string, string> = {
 export function MuaPerformancePanel() {
   const [date, setDate] = useState('');
   const [tab, setTab] = useState<'performance' | 'earnings'>('performance');
-  const { start, today } = useStudioCalendar();
+  const calendar = useStudioCalendar();
+  const { start, today } = calendar;
   const { data: report, loading, refreshing, error, refresh } = useWorkflowData<MuaPerformanceReport>(`/mua-performance?date=${encodeURIComponent(date)}`);
 
   return (
@@ -34,6 +35,7 @@ export function MuaPerformancePanel() {
           {date && <button type="button" className={stationButton} onClick={() => setDate('')}>Today</button>}
         </div>
       </div>
+      <DataFeedback {...calendar} loadingMessage="Loading available dates…" />
       <DataFeedback loading={loading} refreshing={refreshing} error={error} onRetry={refresh}
         loadingMessage="Loading daily report…" className="min-h-16 p-3" />
       {report && (

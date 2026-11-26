@@ -65,7 +65,8 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
   const availableArtists = targets.filter((artist) => artist.id !== assignment?.artistId);
   const selectedArtist = availableArtists.find((artist) => artist.id === artistId);
   const activeError = activeTab === 'team' ? teamError : activeTab === 'completed' ? completedError : error;
-  const loading = !activeError && (activeTab === 'team' ? team?.date !== date : activeTab === 'completed' ? !completed : !data);
+  const loading = !activeError && (activeTab === 'team' ? team?.date !== date || (!team.report && teamRefreshing)
+    : activeTab === 'completed' ? !completed : !data);
   const view = views[activeTab] ?? {};
 
   function updateView(change: MakeupTableView) {
@@ -176,13 +177,16 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
         {queueTab && teamError && <DataFeedback error="Could not load artist availability."
           onRetry={refreshTeam} className="border border-line p-3" />}
         {activeTab === 'completed' && (
-          <label className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-            <CalendarDays className="size-4 text-gold-soft" aria-hidden="true" /> Completion date
-            <input type="date" className={makeupField} value={date}
-              min={calendar.start || undefined} max={studioDate()}
-              onChange={(event) => setDate(clampDay(event.target.value || studioDate(), calendar.start, studioDate()))} />
-            <span className="font-normal text-ink/70">Philippine time</span>
-          </label>
+          <>
+            <label className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+              <CalendarDays className="size-4 text-gold-soft" aria-hidden="true" /> Completion date
+              <input type="date" className={makeupField} value={date}
+                min={calendar.start || undefined} max={studioDate()}
+                onChange={(event) => setDate(clampDay(event.target.value || studioDate(), calendar.start, studioDate()))} />
+              <span className="font-normal text-ink/70">Philippine time</span>
+            </label>
+            <DataFeedback {...calendar} loadingMessage="Loading available dates…" />
+          </>
         )}
         {activeTab === 'team' ? (
           <MuaTeamOverview team={team} date={date} onDateChange={setDate} request={{ loading, refreshing: !loading && teamRefreshing, error: teamError, onRetry: refreshTeam }} embedded={embedded}

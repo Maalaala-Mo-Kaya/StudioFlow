@@ -87,7 +87,8 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
   // Date created (studio day, Manila): all, today, yesterday or a picked date.
   const [dayMode, setDayMode] = useState<'' | 'today' | 'yesterday' | 'pick'>('');
   const [pickedDay, setPickedDay] = useState(() => studioDate());
-  const { start: firstDay } = useStudioCalendar();
+  const calendar = useStudioCalendar();
+  const { start: firstDay } = calendar;
   const day = dayMode === 'today' ? studioDate() : dayMode === 'yesterday' ? studioDate(1) : dayMode === 'pick' ? pickedDay : '';
   const [opening, setOpening] = useState(false);
   const [gallery, setGallery] = useState<Gallery>();
@@ -206,6 +207,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
                     </div>
                   </div>
                 </div>
+                {dayMode === 'pick' && <DataFeedback {...calendar} loadingMessage="Loading available dates…" />}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-[11px] text-neutral-600">
                     Showing photographed clients only{search.trim() ? ' that match the search' : ''}.
@@ -247,11 +249,9 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
               </Modal>
             );
           })()}
-          {(loading || error || page > 1 || data?.hasMore) && (
           <TablePagination label="Photo Chooser pagination" pageLabel={`Page ${page}`}
-              previous={page > 1 ? () => setPages({ ...pages, [done]: page - 1 }) : undefined}
-              next={!loading && data?.hasMore ? () => setPages({ ...pages, [done]: page + 1 }) : undefined} />
-          )}
+            previous={page > 1 ? () => setPages((current) => ({ ...current, [done]: page - 1 })) : undefined}
+            next={data?.hasMore ? () => setPages((current) => ({ ...current, [done]: page + 1 })) : undefined} />
         </StationTabs>
       )}
     </StationLayout>
@@ -365,7 +365,8 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
         <p role="status" className="font-bold text-amber-700">Notes changed. Press Confirm selection to save them.</p>
       )}
       {stale && <p role="alert" className="font-bold text-red-700">The gallery changed. Reload it to see the latest photos and saved selection.</p>}
-      {(error || live.error) && <p role="alert" className="font-bold text-red-700">{error || live.error}</p>}
+      {error && <p role="alert" className="font-bold text-red-700">{error}</p>}
+      <DataFeedback refreshing={live.loading || live.refreshing} error={live.error} onRetry={live.refresh} />
       {status && <p role="status" className="font-bold text-emerald-800">{status}</p>}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         {gallery.photos.map((photo) => (

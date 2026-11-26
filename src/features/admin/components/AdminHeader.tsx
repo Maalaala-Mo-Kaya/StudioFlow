@@ -6,6 +6,7 @@ import { SearchableSelect } from '../../../components/common/SearchableSelect';
 import { isWalkIn } from '../../../utils/clientInfo';
 import { clampDay, useStudioCalendar } from '../../../hooks/useStudioCalendar';
 import { workflowError } from '../../../hooks/useWorkflowData';
+import { DataFeedback, type DataRequestState } from '../../../components/common/DataFeedback';
 
 interface AdminHeaderProps {
   onExportCsv: () => void;
@@ -13,6 +14,8 @@ interface AdminHeaderProps {
   exportingExcel: boolean;
   organizations: Organization[];
   registrations: Registration[];
+  recordsReady: boolean;
+  request: DataRequestState;
 }
 
 type ExportKind = 'master' | 'school' | 'walkin' | 'levels' | 'csv' | 'mua';
@@ -32,13 +35,14 @@ const OTHER_EXPORTS: typeof KINDS = [
 /**
  * Admin export picker for client lists and the combined MUA workbook.
  */
-export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportExcel, exportingExcel, organizations, registrations }) => {
+export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportExcel, exportingExcel, organizations, registrations, recordsReady, request }) => {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<ExportKind>('master');
   const [schoolId, setSchoolId] = useState('');
   const [clientRange, setClientRange] = useState({ from: '', to: '' });
   const [muaRange, setMuaRange] = useState<{ from: string; to: string }>();
-  const { start, today } = useStudioCalendar();
+  const calendar = useStudioCalendar();
+  const { start, today } = calendar;
   const [busy, setBusy] = useState(false);
   const [exportError, setExportError] = useState('');
   const panelRef = useRef<HTMLDivElement>(null);
@@ -80,7 +84,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportE
   const { from, to } = mua ? muaRange ?? { from: monthStart, to: today } : clientRange;
   const setRange = mua ? setMuaRange : setClientRange;
   const badRange = Boolean(from && to && from > to);
-  const canExport = !exporting && !badRange && (kind !== 'school' || Boolean(school)) && (!mua || Boolean(from && to));
+  const canExport = !exporting && !badRange && (kind !== 'school' || Boolean(school)) && (mua ? Boolean(from && to) : recordsReady);
 
   const setQuick = (preset: 'all' | 'month' | 'today') => {
     if (preset === 'all') setRange(mua ? { from: start, to: today } : { from: '', to: '' });
@@ -221,6 +225,8 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({ onExportCsv, onExportE
               </p>
             </fieldset>
 
+            {kind !== 'csv' && <DataFeedback {...calendar} loadingMessage="Loading available dates…" />}
+            {!mua && <DataFeedback {...request} loadingMessage="Loading records for export…" />}
             {exportError && <p role="alert" className="text-red-400">{exportError}</p>}
             <button
               type="button"

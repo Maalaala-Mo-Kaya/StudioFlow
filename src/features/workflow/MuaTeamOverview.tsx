@@ -31,7 +31,8 @@ export function MuaTeamOverview({ team, date, onDateChange, sort, onSort, reques
   const report = current?.report;
   const workload = current?.workload;
   const today = team?.today ?? studioDate();
-  const { start } = useStudioCalendar();
+  const calendar = useStudioCalendar();
+  const { start } = calendar;
   const metrics = report && workload ? [
     ['Artists', current.artists.length],
     ['Pending', workload.pending],
@@ -52,6 +53,7 @@ export function MuaTeamOverview({ team, date, onDateChange, sort, onSort, reques
   return (
     <section aria-label="MUA Team Overview" className={embedded ? 'min-w-0 border border-line bg-panel' : 'min-w-0 space-y-3'}>
       {!embedded && reportDate}
+      <DataFeedback {...calendar} loadingMessage="Loading available dates…" className="p-2" />
       <StationTabs label="MUA team analytics views" tabs={views} active={view} onChange={setView}
         variant={embedded ? 'underline' : 'default'} toolbar={embedded ? reportDate : undefined}>
         {view !== 'overview' && <DataFeedback {...request} loadingMessage="Loading team report…" className="min-h-12 p-3" />}

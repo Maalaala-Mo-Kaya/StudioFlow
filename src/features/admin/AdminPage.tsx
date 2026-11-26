@@ -31,7 +31,7 @@ export const AdminPage: React.FC = () => {
     <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8">
       {/* Executive Header */}
       <AdminHeader onExportCsv={admin.exportCsv} onExportExcel={admin.exportExcel} exportingExcel={admin.exportingExcel}
-        organizations={admin.organizations} registrations={admin.registrations} />
+        organizations={admin.organizations} registrations={admin.registrations} recordsReady={admin.hasLoaded} request={admin.request} />
 
       {/* Main Admin Two-Column Layout with Sidebar Navigation */}
       <div className="flex flex-col lg:flex-row gap-6 mt-6 items-start">

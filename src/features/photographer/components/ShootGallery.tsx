@@ -5,6 +5,7 @@ import { pb } from '../../../db/pocketbase';
 import { useWorkflowData, workflowApi, workflowError } from '../../../hooks/useWorkflowData';
 import { useAuthedImage } from '../../../hooks/useAuthedImage';
 import { useToast } from '../../../context/ToastContext';
+import { DataFeedback } from '../../../components/common/DataFeedback';
 
 interface Shot { id: string; name: string; size: number; modified: number }
 interface ShootData { photos: Shot[]; deleted: Shot[]; canEdit: boolean; reason: string; moved?: string[] }
@@ -20,7 +21,7 @@ const imageUrl = (registrationId: string, shot: Shot, deleted: boolean) =>
  */
 export const ShootGallery: React.FC<{ registrationId: string }> = ({ registrationId }) => {
   const { toast } = useToast();
-  const live = useWorkflowData<ShootData>(`/shoot/${registrationId}/photos`, 5_000, true);
+  const live = useWorkflowData<ShootData>(`/shoot/${registrationId}/photos`, 5_000);
   // A delete or restore answer is newer than the last poll, until the next poll arrives.
   const [override, setOverride] = useState<{ base?: ShootData; data: ShootData }>();
   const [busy, setBusy] = useState(false);
@@ -48,9 +49,8 @@ export const ShootGallery: React.FC<{ registrationId: string }> = ({ registratio
   }, [busy, registrationId, toast, refresh, base]);
 
   if (!data) {
-    return live.error
-      ? <p role="alert" className="mt-4 text-xs font-bold text-red-700">{live.error}</p>
-      : <p role="status" className="mt-4 text-xs text-neutral-600">Loading shots…</p>;
+    return <DataFeedback loading={live.loading} error={live.error} onRetry={refresh}
+      loadingMessage="Loading shots…" className="mt-4 min-h-16 border-t-2 border-line pt-4" />;
   }
   const { photos, deleted, canEdit, reason } = data;
   const index = photos.findIndex((shot) => shot.id === viewing);
@@ -75,7 +75,7 @@ export const ShootGallery: React.FC<{ registrationId: string }> = ({ registratio
           All shots were deleted. Restore at least one, or take more, before Mark Done.
         </p>
       )}
-      {live.error && <p role="alert" className="m-0 mt-2 text-[11px] font-bold text-red-700">{live.error}</p>}
+      <DataFeedback refreshing={live.refreshing} error={live.error} onRetry={refresh} className="mt-2" />
 
       {photos.length > 0 ? (
         <div className="mt-3 grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 md:grid-cols-3 2xl:grid-cols-4">

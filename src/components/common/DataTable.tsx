@@ -174,7 +174,6 @@ export function DataTable<Row, Id extends string = string>({
           </button>
         </div>
       ) : toolbar}
-      {!blocked && (refreshing || error) && <DataFeedback {...feedback} className="border-b border-line px-3 py-2 text-center" />}
       <div ref={viewport} role="region" aria-label={label} tabIndex={0}
         className={`@container min-w-0 flex-auto overflow-auto [scrollbar-gutter:stable] ${pagination !== false || loading ? 'min-h-44' : ''} focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold ${renderCompactRow ? 'hidden md:block' : ''} ${viewportClassName}`}>
         <table aria-label={label} style={{ width: `max(100%, ${minimumWidth}px)` }}
@@ -277,6 +276,7 @@ export function DataTable<Row, Id extends string = string>({
             : paged.map((row) => <Fragment key={getRowId(row)}>{renderCompactRow(row)}</Fragment>)}
         </div>
       )}
+      {!blocked && (refreshing || error) && <DataFeedback {...feedback} className="border-t border-line px-3 py-2 text-center" />}
       {pagination !== false && (
         <TablePagination label={`${label} pagination`} pageLabel={`${range.page} / ${range.totalPages}`}
           summary={loading || (error && !paged.length) ? undefined : `Showing ${range.start}–${range.end} of ${total}`}
