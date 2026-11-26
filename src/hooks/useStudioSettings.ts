@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { pb } from '../db/pocketbase';
 import { mountSubscription, useRealtimeClient } from './useRealtimeClient';
 import type { SessionType, StudioSettings } from '../types';
@@ -13,19 +13,29 @@ export function useStudioSettings(enabled = true) {
   const [settings, setSettings] = useState<StudioSettings | null>(null);
   const [sessionTypes, setSessionTypes] = useState<SessionType[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [pending, setPending] = useState(true);
+  const [error, setError] = useState('');
+  const generation = useRef(0);
 
   const refresh = useCallback(async () => {
+    const request = ++generation.current;
+    setPending(true);
+    setError('');
     try {
       const [main, sessions] = await Promise.all([
         pb.collection('studio_settings').getFirstListItem<StudioSettings>("key = 'main'", { requestKey: null, cache: 'no-store' }),
         pb.collection('session_types').getFullList<SessionType>({ sort: 'order,name', requestKey: null, cache: 'no-store' }),
       ]);
+      if (request !== generation.current) return;
       setSettings(main);
       setSessionTypes(sessions);
-    } catch (err) {
-      console.error('Failed to load studio settings:', err);
-    } finally {
       setLoaded(true);
+    } catch (err) {
+      if (request !== generation.current) return;
+      console.error('Failed to load studio settings:', err);
+      setError('Could not load the latest studio settings.');
+    } finally {
+      if (request === generation.current) setPending(false);
     }
   }, []);
 
@@ -35,12 +45,18 @@ export function useStudioSettings(enabled = true) {
     void refresh();
     const stops = ['studio_settings', 'session_types'].map((name) =>
       mountSubscription((listener) => live.collection(name).subscribe('*', listener), refresh));
-    return () => stops.forEach((stop) => stop());
+    return () => {
+      generation.current += 1;
+      stops.forEach((stop) => stop());
+    };
   }, [enabled, live, refresh]);
 
   return {
     settings,
     loaded,
+    loading: enabled && pending && !loaded,
+    refreshing: enabled && pending && loaded,
+    error,
     /** Older databases without the settings record behave like before: school only. */
     schoolEnabled: settings ? settings.school_enabled : true,
     walkinEnabled: settings ? settings.walkin_enabled : false,

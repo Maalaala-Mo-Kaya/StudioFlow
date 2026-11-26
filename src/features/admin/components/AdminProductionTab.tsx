@@ -1,3 +1,4 @@
+import type { DataRequestState } from '../../../components/common/DataFeedback';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Frame, Copy, Check, Layers, MessageSquare, Save } from 'lucide-react';
 import type { PhotographyTask, Registration, ProductionStatus, StaffUser } from '../../../types';
@@ -22,6 +23,7 @@ import { PhotographyProgress } from '../../photographer/components/PhotographyPr
 import { photographyAction } from '../../photographer/photographyTasks';
 
 interface AdminProductionTabProps {
+  request: DataRequestState;
   registrations: Registration[];
   staffAccounts: StaffUser[];
   onSetProductionStatus: (ids: string[], status: ProductionStatus) => Promise<void>;
@@ -142,7 +144,7 @@ const uniqueSorted = (values: string[]) => [...new Set(values.filter(Boolean))].
  * one order or of a whole group at once (e.g. every ACLC College order is In Production).
  * Release happens at the cashier, which records who claimed the order.
  */
-export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registrations, staffAccounts, onSetProductionStatus }) => {
+export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ request, registrations, staffAccounts, onSetProductionStatus }) => {
   const { toast } = useToast();
   const [filterGroup, setFilterGroup] = useState(ALL_CLIENTS);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
@@ -262,7 +264,7 @@ export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registra
 
   const columns: DataTableColumn<Registration>[] = [
     {
-      id: 'select',
+      id: 'select', width: 52,
       header: (
         <input type="checkbox" aria-label="Select all shown orders" checked={allShownSelected}
           onChange={toggleAllShown} disabled={!selectable.length} className="w-4 h-4 accent-gold cursor-pointer" />
@@ -273,7 +275,7 @@ export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registra
       ),
     },
     {
-      id: 'job', header: 'JO №', sortable: true, accessor: (reg) => reg.job_order_no,
+      id: 'job', width: 86, header: 'JO №', sortable: true, accessor: (reg) => reg.job_order_no,
       cellClassName: 'font-mono',
       cell: (reg) => <div className="font-black text-red-600">{reg.job_order_no}</div>,
     },
@@ -447,7 +449,7 @@ export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registra
         </span>
       </div>
 
-      <DataTable
+      <DataTable {...request}
         label="Production Ledger"
         rows={filtered}
         columns={columns}
@@ -457,6 +459,7 @@ export const AdminProductionTab: React.FC<AdminProductionTabProps> = ({ registra
         pagination={false}
         viewportClassName="max-h-[640px]"
         headerClassName="font-mono uppercase tracking-wider"
+        searching={Boolean(q)}
         filtered={filtersActive}
         emptyMessage="No paid job orders yet."
         filteredEmptyMessage="No job orders match the selected filters."

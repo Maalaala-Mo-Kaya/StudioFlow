@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../components/common/DataFeedback';
 import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { CalendarDays, Check, ChevronDown, Clock3, Settings2, UserPlus } from 'lucide-react';
@@ -37,15 +38,15 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
   // Completion dates from the studio's first day to today.
   const calendar = useStudioCalendar();
   const teamPath = `/makeup-team?date=${encodeURIComponent(date)}${selection === 'team' ? '&overview=1' : ''}`;
-  const { data: team, error: teamError, refresh: refreshTeam } = useWorkflowData<MuaTeam>(teamPath, undefined, true);
+  const { data: team, error: teamError, refreshing: teamRefreshing, refresh: refreshTeam } = useWorkflowData<MuaTeam>(teamPath, undefined, true);
   const admin = user?.role === 'admin';
   const manage = admin || !!team?.manage;
   const availableTabs = tabs.filter(({ id }) => id === 'team' ? manage : id === 'waiting' ? manage || team?.canClaim : true);
   const defaultTab = admin ? 'waiting' : 'assigned';
   const activeTab = selection && availableTabs.some(({ id }) => id === selection) ? selection : defaultTab;
   const queueTab = activeTab === 'waiting' || activeTab === 'assigned';
-  const { data, error, refresh } = useWorkflowData<MakeupAssignment[]>(queueTab ? '/makeup?completed=0' : null);
-  const { data: completed, error: completedError, refresh: refreshCompleted } =
+  const { data, error, refreshing, refresh } = useWorkflowData<MakeupAssignment[]>(queueTab ? '/makeup?completed=0' : null);
+  const { data: completed, error: completedError, refreshing: completedRefreshing, refresh: refreshCompleted } =
     useWorkflowData<MakeupAssignment[]>(activeTab === 'completed' ? `/makeup-completed?date=${encodeURIComponent(date)}` : null);
   const workingLock = useRef(false);
   const [working, setWorking] = useState(false);
@@ -116,7 +117,7 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
     const hasArtists = targets.some((artist) => artist.id !== row.artistId);
     return (
       <button type="button" aria-label={`${row.artistId ? 'Reassign' : 'Assign'} ${row.name}`}
-        className={row.artistId ? makeupSecondary : makeupPrimary} disabled={working || !hasArtists}
+        className={(row.artistId ? makeupSecondary : makeupPrimary) + ' whitespace-nowrap'} disabled={working || !hasArtists}
         onClick={() => { setArtistId(''); setAssignment(row); }}>
         <UserPlus className="size-4 shrink-0" aria-hidden="true" />
         {teamError ? 'Artist list unavailable' : !team ? 'Loading artists…' : !hasArtists ? 'No eligible artist'
@@ -127,7 +128,7 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
 
   function waitingActions(row: MakeupAssignment) {
     return manage ? assignControl(row) : team?.canClaim && (
-      <button type="button" className={makeupPrimary} disabled={working || !row.eligible} onClick={() => void update(row, 'claim')}>
+      <button type="button" className={makeupPrimary + ' whitespace-nowrap'} disabled={working || !row.eligible} onClick={() => void update(row, 'claim')}>
         <UserPlus className="size-4 shrink-0" aria-hidden="true" /> Claim client
       </button>
     );
@@ -172,9 +173,8 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
           count: id === 'team' ? team && artists.length : id === 'completed' ? completed?.length
             : id === 'waiting' ? waiting?.length : assigned?.length,
         }))}>
-        {(activeError || (queueTab && teamError)) && <p role="alert" className="border border-red-500/40 bg-red-500/10 p-3 text-sm text-ink">
-          {activeError || teamError} Use Sync to try again.
-        </p>}
+        {queueTab && teamError && <DataFeedback error="Could not load artist availability."
+          onRetry={refreshTeam} className="border border-line p-3" />}
         {activeTab === 'completed' && (
           <label className="flex flex-wrap items-center gap-2 text-sm font-semibold">
             <CalendarDays className="size-4 text-gold-soft" aria-hidden="true" /> Completion date
@@ -185,14 +185,15 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
           </label>
         )}
         {activeTab === 'team' ? (
-          <MuaTeamOverview team={team} date={date} onDateChange={setDate} failed={!!teamError} embedded={embedded}
+          <MuaTeamOverview team={team} date={date} onDateChange={setDate} request={{ loading, refreshing: !loading && teamRefreshing, error: teamError, onRetry: refreshTeam }} embedded={embedded}
             sort={view.sort ?? null} onSort={(sort) => updateView({ sort })} />
         ) : (
           <MakeupClientsView key={activeTab} kind={activeTab} view={view} onViewChange={updateView}
             title={activeTab === 'completed' ? 'Completed services' : activeTab === 'waiting'
               ? 'Unassigned clients' : manage ? 'Assigned clients' : 'Your assignments'}
             rows={(activeTab === 'completed' ? completed : queueRows) ?? noRows}
-            loading={loading} failed={!!activeError}
+            request={{ loading, error: activeError, refreshing: activeTab === 'completed' ? completedRefreshing : refreshing,
+              onRetry: activeTab === 'completed' ? refreshCompleted : refresh }}
             renderAction={activeTab === 'waiting' ? waitingActions : activeTab === 'assigned' ? assignedActions : undefined} />
         )}
       </StationTabs>

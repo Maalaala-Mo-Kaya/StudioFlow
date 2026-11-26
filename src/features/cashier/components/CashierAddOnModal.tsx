@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, Plus } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
@@ -23,6 +24,8 @@ export const CashierAddOnModal: React.FC<{
 }> = ({ registration: reg, onClose, onSaved }) => {
   const { toast } = useToast();
   const [catalog, setCatalog] = useState<AddOn[] | null>(null);
+  const [catalogError, setCatalogError] = useState('');
+  const [attempt, setAttempt] = useState(0);
   const [picked, setPicked] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const onOrder = useMemo(() => getRegistrationAddOns(reg.add_ons), [reg.add_ons]);
@@ -35,9 +38,13 @@ export const CashierAddOnModal: React.FC<{
     let live = true;
     pb.collection('add_ons').getFullList<AddOn>({ filter: 'is_active = true', sort: 'name', requestKey: null })
       .then((list) => { if (live) setCatalog(list); })
-      .catch((err) => { if (live) { setCatalog([]); toast.error(err instanceof Error ? err.message : 'Add-ons could not be loaded.'); } });
+      .catch((error) => {
+        if (!live) return;
+        console.error('Failed to load the cashier add-on catalog:', error);
+        setCatalogError('Could not load available add-ons.');
+      });
     return () => { live = false; };
-  }, [toast]);
+  }, [attempt]);
 
   // Offered to this client, not already on the order, and not the automatic no-makeup add-on.
   const choices = (catalog ?? []).filter((add) => [kind, 'both'].includes(add.client_kind || 'both')
@@ -89,7 +96,8 @@ export const CashierAddOnModal: React.FC<{
           <p className="font-sans text-[11px] text-neutral-600"><b>Already on the order:</b> {onOrder.map((item) => item.name).join(', ')}.</p>
         )}
         {catalog === null ? (
-          <p className="text-neutral-500">Loading add-ons…</p>
+          <DataFeedback loading={!catalogError} error={catalogError} loadingMessage="Loading add-ons…"
+            className="min-h-24 p-3" onRetry={() => { setCatalogError(''); setAttempt((value) => value + 1); }} />
         ) : !choices.length ? (
           <p className="text-neutral-500 font-sans">No other add-ons are offered to this client.</p>
         ) : (

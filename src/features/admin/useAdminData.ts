@@ -57,6 +57,7 @@ export function useAdminData() {
   // Master Data
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const loadGeneration = useRef(0);
+  const [request, setRequest] = useState({ ready: false, pending: true, error: '' });
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -90,8 +91,9 @@ export function useAdminData() {
 
   const loadAllData = useCallback(async () => {
     const generation = ++loadGeneration.current;
+    setRequest((current) => ({ ...current, pending: true, error: '' }));
     try {
-      const [regsRes, orgsRes, levelsRes, coursesRes, schoolCoursesRes, pkgsRes, addonsRes, rosterRes, usersRes, paymentsRes, refundsRes] =
+      const [regsRes, orgsRes, levelsRes, coursesRes, schoolCoursesRes, pkgsRes, addonsRes, rosterRes, usersRes, paymentsRes, refundsRes, itemsRes, setsRes] =
         await Promise.all([
           pb.collection('registrations').getFullList<Registration>({
             sort: '-created',
@@ -105,10 +107,15 @@ export function useAdminData() {
           pb.collection('packages').getFullList<Package>({ requestKey: null }),
           pb.collection('add_ons').getFullList<AddOn>({ requestKey: null }),
           pb.collection('master_lists').getFullList<MasterListItem>({ requestKey: null }),
-          pb.collection('users').getFullList<StaffUser>({ requestKey: null }).catch(() => []),
+          pb.collection('users').getFullList<StaffUser>({ requestKey: null }),
           pb.collection('payments').getFullList<PaymentRecord>({ sort: 'created', requestKey: null }),
           // An older server without the refunds collection: treat as no refunds.
-          pb.collection('refunds').getFullList<RefundRecord>({ sort: 'created', requestKey: null }).catch(() => []),
+          pb.collection('refunds').getFullList<RefundRecord>({ sort: 'created', requestKey: null }).catch((error: unknown) => {
+            if (error instanceof ClientResponseError && error.status === 404) return [];
+            throw error;
+          }),
+          pb.collection('catalog_items').getFullList<CatalogItem>({ sort: 'name', requestKey: null }),
+          pb.collection('item_packages').getFullList<ItemPackage>({ sort: 'name', requestKey: null }),
         ]);
 
       if (generation !== loadGeneration.current) return;
@@ -120,10 +127,6 @@ export function useAdminData() {
       setCourseCatalogStatus('ready');
       setPackages(pkgsRes);
       setAddOns(addonsRes);
-      const [itemsRes, setsRes] = await Promise.all([
-        pb.collection('catalog_items').getFullList<CatalogItem>({ sort: 'name', requestKey: null }).catch(() => []),
-        pb.collection('item_packages').getFullList<ItemPackage>({ sort: 'name', requestKey: null }).catch(() => []),
-      ]);
       setCatalogItems(itemsRes);
       setItemPackages(setsRes);
       setMasterList(rosterRes);
@@ -132,9 +135,10 @@ export function useAdminData() {
       setRefunds(refundsRes);
       setRosterOrgId((current) => current === 'unassigned' || orgsRes.some((org) => org.id === current)
         ? current : orgsRes[0]?.id ?? 'unassigned');
+      setRequest({ ready: true, pending: false, error: '' });
     } catch (err) {
       if (generation !== loadGeneration.current) return;
-      if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
+      setRequest((current) => ({ ...current, pending: false, error: 'Could not load the latest admin records.' }));
       setCourseCatalogStatus((status) => status === 'ready' ? status : 'error');
       console.error('Failed to load admin data:', err);
     }
@@ -146,7 +150,10 @@ export function useAdminData() {
     const stops = ['registrations', 'packages', 'payments', 'refunds'].map((name) =>
       mountSubscription((listener) => live.collection(name).subscribe('*', listener), loadAllData));
     stops.push(mountSubscription((listener) => live.realtime.subscribe('studioflow-registration-deleted', listener), loadAllData));
-    return () => stops.forEach((stop) => stop());
+    return () => {
+      loadGeneration.current += 1;
+      stops.forEach((stop) => stop());
+    };
   }, [live, loadAllData]);
 
   // Metrics Calculations
@@ -719,6 +726,11 @@ export function useAdminData() {
   };
 
   return {
+    request: {
+      loading: request.pending && !request.ready, refreshing: request.pending && request.ready,
+      error: request.error, onRetry: loadAllData,
+    },
+    hasLoaded: request.ready,
     activeTab,
     setActiveTab,
     registrations,

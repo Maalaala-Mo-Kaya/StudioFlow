@@ -17,7 +17,8 @@ function savedStation() {
  */
 export function useCameraLink() {
   const { toast } = useToast();
-  const { data: stations, refresh } = useWorkflowData<CameraStatus[]>('/camera');
+  const stationList = useWorkflowData<CameraStatus[]>('/camera');
+  const { data: stations, refresh } = stationList;
   const [selectedId, setSelectedId] = useState(savedStation);
   const [live, setLive] = useState<CameraStatus | null>(null);
   const [error, setError] = useState('');
@@ -83,6 +84,7 @@ export function useCameraLink() {
 
   return {
     stations: stations ?? [],
+    stationList,
     selectedId: listed ? selectedId : '',
     select,
     camera: listed ? camera : null,

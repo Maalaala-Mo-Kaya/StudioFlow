@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../components/common/DataFeedback';
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Folder, FolderPlus, HardDrive, CornerLeftUp, X, Check } from 'lucide-react';
@@ -15,16 +16,24 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({ initialPat
   const [listing, setListing] = useState<FolderListing | null>(null);
   const [error, setError] = useState('');
   const [newName, setNewName] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
+  const [failedPath, setFailedPath] = useState<string>();
 
   const open = async (path: string, fallback = true) => {
     setBusy(true);
+    setError('');
+    setFailedPath(undefined);
     try {
       setListing(await browseFolders(path));
       setError('');
     } catch (err) {
-      setError(workflowError(err));
-      if (fallback && path) setListing(await browseFolders('').catch(() => null));
+      console.error('Failed to browse camera folders:', err);
+      setError('Could not open that folder.');
+      setFailedPath(path);
+      if (fallback && path) {
+        try { setListing(await browseFolders('')); }
+        catch (error) { console.error('Failed to list camera folder roots:', error); }
+      }
     } finally {
       setBusy(false);
     }
@@ -43,6 +52,8 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({ initialPat
     event.preventDefault();
     if (!listing?.path || !newName.trim()) return;
     setBusy(true);
+    setError('');
+    setFailedPath(undefined);
     try {
       setListing(await createFolder(listing.path, newName.trim()));
       setNewName('');
@@ -85,17 +96,17 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({ initialPat
           <span className="font-mono text-xs text-ink truncate" title={listing?.path}>{listing?.path || 'This PC'}</span>
         </div>
 
-        {error && <div role="alert" className="mx-4 mt-3 p-2.5 border border-red-300 bg-red-50 text-red-800 text-xs">{error}</div>}
-
         <ul className="flex-1 min-h-[200px] overflow-y-auto p-2" aria-busy={busy}>
-          {listing?.folders.length === 0 && (
-            <li className="p-4 text-center text-xs text-neutral-500">No subfolders here.</li>
-          )}
+          {(busy || error || listing?.folders.length === 0) && <li className="p-3 text-center">
+            <DataFeedback loading={busy} error={error} loadingMessage="Loading folders…"
+              emptyMessage="No subfolders here."
+              onRetry={failedPath === undefined ? undefined : () => void open(failedPath)} />
+          </li>}
           {listing?.folders.map((folder) => (
             <li key={folder.path}>
               <button
                 type="button"
-                onClick={() => void open(folder.path, false)}
+                disabled={busy} onClick={() => void open(folder.path, false)}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-ink hover:bg-gold-wash cursor-pointer"
               >
                 {listing.path ? <Folder className="w-4 h-4 text-gold shrink-0" /> : <HardDrive className="w-4 h-4 text-gold shrink-0" />}

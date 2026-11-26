@@ -30,7 +30,7 @@ export function MuaAnalyticsTable({ report, earnings, renderDetails, compact = f
     <>
     <DataTable label={earnings ? 'Daily MUA earnings' : 'Daily MUA counts'}
       rows={rows} columns={columns} getRowId={({ artist }) => artist.id} pagination={renderDetails ? false : undefined}
-      emptyMessage="No completions recorded for this date." tableClassName="whitespace-nowrap" headerClassName="uppercase"
+      emptyMessage="No completions recorded for this date." headerClassName="uppercase"
       className={compact ? makeupTable : undefined}
       renderCompactRow={compact ? ({ artist, values }) => (
         <article className={`${stationCard} flex flex-wrap items-center justify-between gap-3`}>

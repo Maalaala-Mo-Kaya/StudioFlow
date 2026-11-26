@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import React, { useState } from 'react';
 import { Ban, HandCoins, Users, Wallet } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
@@ -31,7 +32,7 @@ export const MuaPayoutsPanel: React.FC = () => {
   const { start } = useStudioCalendar();
   const within = (from: string, to: string) => ({ from: clampDay(from, start, today), to: clampDay(to, start, today) });
   const valid = range.from && range.to && range.from <= range.to;
-  const { data: report, error, refresh } = useWorkflowData<MuaPayoutReport>(
+  const { data: report, loading, refreshing, error, refresh } = useWorkflowData<MuaPayoutReport>(
     valid ? `/mua-payouts?from=${range.from}&to=${range.to}` : null);
   const [openArtist, setOpenArtist] = useState<string | null>(null);
   const [paying, setPaying] = useState<MuaArtistTotals | null>(null);
@@ -68,8 +69,8 @@ export const MuaPayoutsPanel: React.FC = () => {
       </div>
 
       {!valid && <p role="alert" className="text-sm text-red-700">Choose a From date on or before the To date.</p>}
-      {valid && error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      {valid && !report && !error && <p role="status" className="text-sm">Loading payouts…</p>}
+      {valid && <DataFeedback loading={loading} refreshing={refreshing} error={error} onRetry={refresh}
+        loadingMessage="Loading payouts…" className="min-h-16 p-3" />}
 
       {valid && report && (
         <>

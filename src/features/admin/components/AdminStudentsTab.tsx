@@ -1,3 +1,4 @@
+import type { DataRequestState } from '../../../components/common/DataFeedback';
 import React, { useState, useMemo, useEffect } from 'react';
 import { Ban, Camera, Users, FileDown, RotateCcw } from 'lucide-react';
 import { ReshootModal } from '../../photographer/components/ReshootModal';
@@ -15,7 +16,7 @@ import { StudentDirectoryFilters } from './StudentDirectoryFilters';
 import { StudentOverall } from './StudentOverall';
 import { overallLevelKey } from '../studentOverallData';
 import { RegistrationAddOnsDropdown } from './RegistrationAddOnsDropdown';
-import { DataTable } from '../../../components/common/DataTable';
+import { tableActions, DataTable } from '../../../components/common/DataTable';
 import { ClientGroupFilter } from '../../../components/common/ClientGroupFilter';
 import { matchesClientGroup } from '../../../utils/clientGroup';
 import type { DataTableColumn } from '../../../components/common/DataTable';
@@ -69,6 +70,7 @@ const statusOptions = (values: string[]) => [...new Set(values.filter(Boolean))]
 }));
 
 interface AdminStudentsTabProps {
+  request: DataRequestState;
   registrations: Registration[];
   organizations: Organization[];
   levels: Level[];
@@ -134,6 +136,7 @@ export function AdminStudentsTab(props: AdminStudentsTabProps) {
 }
 
 const StudentList: React.FC<AdminStudentsTabProps> = ({
+  request,
   registrations,
   organizations,
   levels,
@@ -341,7 +344,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
     </>,
     status: (reg: Registration) => <RegistrationStatusBadge status={reg.status} />,
     actions: (reg: Registration) => (
-      <div className="flex items-center justify-end gap-1.5">
+      <div className={tableActions + ' justify-end gap-1.5'}>
         {reg.job_order_no && <button
           type="button"
           onClick={() => void import('../../receipts/receiptPdf')
@@ -402,6 +405,8 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
   };
   const tableColumns: DataTableColumn<Registration, ColumnId>[] = columns.map(({ id, label, heading, cell }) => ({
     id, header: label, headerClassName: heading, cellClassName: cell, cell: cells[id],
+    width: id === 'actions' ? 232 : id === 'job' ? 104 : undefined,
+    minWidth: id === 'student' ? 164 : id === 'school' ? 152 : undefined,
     align: id === 'status' ? 'center' : id === 'actions' || id === 'balance' ? 'right' : 'left',
     sortable: id !== 'actions',
     accessor: id === 'actions' ? undefined : accessors[id],
@@ -432,7 +437,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
       />
 
       {/* Student Roster Table */}
-      <DataTable
+      <DataTable {...request}
         label="Client Registrations"
         rows={filtered}
         columns={tableColumns}
@@ -440,7 +445,8 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
         getRowId={(reg) => reg.id}
         defaultSort={{ column: 'student', direction: 'ascending' }}
         headerClassName="uppercase tracking-wider"
-        filtered={Boolean(searchQuery.trim()) || clientGroupFilter !== 'all' || Object.values(filters).some((values) => values.length > 0)}
+        searching={Boolean(searchQuery.trim())}
+        filtered={clientGroupFilter !== 'all' || Object.values(filters).some((values) => values.length > 0)}
         emptyMessage="No client registrations yet."
         filteredEmptyMessage="No client registrations match the selected filters."
         toolbar={(
@@ -452,7 +458,7 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
               </h3>
             </div>
             <span className="text-[11px] text-neutral-500 font-bold">
-              Showing {filtered.length} of {registrations.length} Clients
+              {request.loading || (request.error && !registrations.length) ? null : <>Showing {filtered.length} of {registrations.length} Clients</>}
             </span>
           </div>
         )}

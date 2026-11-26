@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../components/common/DataFeedback';
 import React, { useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Pencil } from 'lucide-react';
 import { useRegistrationForm } from './useRegistrationForm';
@@ -189,9 +190,11 @@ export const RegisterPage: React.FC = () => {
             </div>
           )}
 
-          {!form.studioLoaded && <p role="status" className="border border-line bg-panel p-5 text-sm text-ink">
-            {form.catalogError ? 'Could not load the registration form. StudioFlow will try again.' : 'Loading the registration form…'}
-          </p>}
+          {(!form.studioLoaded || form.catalogError) && <DataFeedback
+            loading={!form.studioLoaded && !form.catalogError}
+            error={form.catalogError ? 'Could not load the latest registration catalog.' : undefined}
+            onRetry={form.refreshCatalog} loadingMessage="Loading the registration form…"
+            className="min-h-20 border border-line bg-panel p-5 text-center" />}
           {!closed && form.studioLoaded && <form
             id="client-registration-form"
             noValidate
@@ -219,8 +222,7 @@ export const RegisterPage: React.FC = () => {
                   amountDueNow={amountDueNow}
                   errors={form.errors}
                   gender={gender}
-                  emptyMessage={form.catalogError || (form.catalogLoading ? 'Loading packages and add-ons…'
-                    : form.clientKind ? undefined : 'Choose the type of client above to see the packages.')}
+                  emptyMessage={form.clientKind ? undefined : 'Choose the type of client above to see the packages.'}
                 />
               </>)}
 

@@ -1,3 +1,5 @@
+import { ClientResponseError } from 'pocketbase';
+import type { DataRequestState } from '../../../components/common/DataFeedback';
 import { useEffect, useMemo, useState } from 'react';
 import { pb } from '../../../db/pocketbase';
 import { mountSubscription, useRealtimeClient } from '../../../hooks/useRealtimeClient';
@@ -62,6 +64,7 @@ const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP'
 const money = (amount: number | null | undefined) => amount == null ? '—' : peso.format(amount / 100);
 
 interface StudentOverallProps {
+  request: DataRequestState;
   title: string;
   level: OverallLevel;
   registrations: Registration[];
@@ -84,7 +87,7 @@ function readMapping(): PackageMapping {
 }
 
 function usePaymentLedger() {
-  const [ledger, setLedger] = useState<{ status: 'loading' | 'error' } | { status: 'ready'; records: PaymentRecord[]; refunds: RefundRecord[] }>({ status: 'loading' });
+  const [ledger, setLedger] = useState<{ pending: boolean; error?: string; records?: PaymentRecord[]; refunds?: RefundRecord[] }>({ pending: true });
   const [attempt, setAttempt] = useState(0);
   const live = useRealtimeClient();
 
@@ -95,15 +98,22 @@ function usePaymentLedger() {
 
     async function refresh() {
       const request = ++version;
+      setLedger((current) => ({ ...current, pending: true, error: undefined }));
       try {
         // status is needed so voided payments are left out.
         const [records, refunds] = await Promise.all([
           collection.getFullList<PaymentRecord>({ fields: 'id,registration,amount,payment_type,status,created' }),
-          pb.collection('refunds').getFullList<RefundRecord>({ fields: 'id,registration,amount,created' }).catch(() => [] as RefundRecord[]),
+          pb.collection('refunds').getFullList<RefundRecord>({ fields: 'id,registration,amount,created' }).catch((error: unknown) => {
+            if (error instanceof ClientResponseError && error.status === 404) return [];
+            throw error;
+          }),
         ]);
-        if (active && request === version) setLedger({ status: 'ready', records, refunds });
-      } catch {
-        if (active && request === version) setLedger({ status: 'error' });
+        if (active && request === version) setLedger({ pending: false, records, refunds });
+      } catch (error) {
+        if (active && request === version) {
+          console.error('Failed to load overall-report payments:', error);
+          setLedger((current) => ({ ...current, pending: false, error: 'Could not load payment records.' }));
+        }
       }
     }
 
@@ -123,7 +133,7 @@ function usePaymentLedger() {
   return {
     ledger,
     retry: () => {
-      setLedger({ status: 'loading' });
+      setLedger((current) => ({ ...current, pending: true, error: undefined }));
       setAttempt((previous) => previous + 1);
     },
   };
@@ -170,14 +180,14 @@ function reportCell(row: OverallRow, id: Column) {
   }
 }
 
-export function StudentOverall({ title, level, registrations, organizations, levels, courses, packages }: StudentOverallProps) {
+export function StudentOverall({ request, title, level, registrations, organizations, levels, courses, packages }: StudentOverallProps) {
   const { ledger, retry } = usePaymentLedger();
   const [mapping] = useState(readMapping);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState(emptyFilters);
   const [columnOverrides, setColumnOverrides] = useState<Partial<Record<Column, boolean>>>({});
 
-  const allRows = useMemo(() => ledger.status === 'ready'
+  const allRows = useMemo(() => ledger.records && ledger.refunds
     ? buildOverallRows({ registrations, payments: ledger.records, refunds: ledger.refunds, organizations, levels, courses, packages, mapping })
     : [], [registrations, ledger, organizations, levels, courses, packages, mapping]);
   const rows = useMemo(() => allRows.filter((row) => row.level === level), [allRows, level]);
@@ -224,6 +234,7 @@ export function StudentOverall({ title, level, registrations, organizations, lev
     sortable: column.id !== 'date' && column.id !== 'studio',
     accessor: (row) => sortValue(row, column.id),
     cell: (row) => reportCell(row, column.id),
+    minWidth: column.id === 'name' ? 156 : ['course', 'packageCode', 'addOns', 'fullyPaid'].includes(column.id) ? 144 : undefined,
     align: isMonetary(column.id) ? 'right' : 'left',
     headerClassName: 'p-2.5',
     cellClassName: `px-2.5 align-top ${isMonetary(column.id) ? 'whitespace-nowrap' : ''}`,
@@ -261,12 +272,14 @@ export function StudentOverall({ title, level, registrations, organizations, lev
         defaultSort={{ column: 'name', direction: 'ascending' }}
         tableClassName="tabular-nums"
         rowClassName={() => 'even:bg-canvas hover:bg-gold-wash'}
-        loading={ledger.status === 'loading'}
+        loading={request.loading || (ledger.pending && !ledger.records)}
+        refreshing={request.refreshing || (ledger.pending && !!ledger.records)}
+        error={request.error || ledger.error}
+        onRetry={request.error ? request.onRetry : retry}
         loadingMessage="Loading payment records…"
-        filtered={ledger.status === 'ready' && (Boolean(query.trim()) || Object.values(filters).some((values) => values.length > 0))}
-        emptyMessage={ledger.status === 'error'
-          ? <>Payment records could not be loaded. <button type="button" onClick={retry} className="font-bold underline">Retry</button></>
-          : 'No students available.'}
+        searching={Boolean(query.trim())}
+        filtered={Object.values(filters).some((values) => values.length > 0)}
+        emptyMessage="No students available."
         footer={shownRows.length ? (visibleColumns) => (
           <>
             <tr>

@@ -1,3 +1,4 @@
+import type { DataRequestState } from '../../../components/common/DataFeedback';
 import React, { useState } from 'react';
 import { UserPlus, Eye, EyeOff, KeyRound } from 'lucide-react';
 import { RecordActionButton } from '../../../components/common/RecordActionButton';
@@ -6,13 +7,14 @@ import type { StaffUser, StaffRole } from '../../../types';
 import { PROTECTED_SYSTEM_USERNAMES } from '../../../constants/studio';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
 import { useAuth } from '../../../context/AuthContext';
-import { DataTable, tableFilterControl, type DataTableColumn } from '../../../components/common/DataTable';
+import { tableActions, DataTable, tableFilterControl, type DataTableColumn } from '../../../components/common/DataTable';
 
 const roles: Record<StaffRole, string> = {
   cashier: 'Cashier', photographer: 'Photographer', mua: 'MUA', chooser: 'Chooser', admin: 'Studio Admin',
 };
 
 interface AdminStaffTabProps {
+  request: DataRequestState;
   staffAccounts: StaffUser[];
   staffUsername: string;
   onStaffUsernameChange: (val: string) => void;
@@ -29,6 +31,7 @@ interface AdminStaffTabProps {
 }
 
 export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
+  request,
   staffAccounts,
   staffUsername,
   onStaffUsernameChange,
@@ -90,8 +93,8 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
         </select>
       ) },
     { id: 'status', header: 'Status', sortable: true, accessor: (account) => account.disabled ? 'Disabled' : 'Enabled' },
-    { id: 'actions', header: 'Actions', cell: (account) => (
-      <div className="flex flex-wrap items-center gap-1.5">
+    { id: 'actions', width: 256, header: 'Actions', cell: (account) => (
+      <div className={tableActions + ' gap-1.5'}>
         <button type="button" disabled={account.id === user?.id || !!updating}
           onClick={() => void update(account, { disabled: !account.disabled })}
           className="min-h-8 border border-line px-2 disabled:opacity-45">
@@ -229,7 +232,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
             {staffAccounts.length} Staff
           </span>
         </div>
-        <DataTable label="Staff accounts" rows={staffAccounts} columns={columns} getRowId={(account) => account.id}
+        <DataTable {...request} label="Staff accounts" rows={staffAccounts} columns={columns} getRowId={(account) => account.id}
           pagination={false} tableClassName="min-w-[460px]" headerClassName="uppercase"
           emptyMessage="No staff accounts found." />
       </div>

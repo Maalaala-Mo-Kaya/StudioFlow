@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Megaphone, CheckCircle2, Folder, Copy, Check, Aperture, Gift, ListChecks, MousePointer2, Maximize2, Camera } from 'lucide-react';
+import { Folder, Aperture, Gift, ListChecks, MousePointer2, Maximize2, Camera } from 'lucide-react';
 import type { Registration } from '../../../types';
 import { Modal } from '../../../components/common/Modal';
 import { chosenOptionLines } from '../../../utils/packageOptions';
@@ -10,46 +10,8 @@ import {
   orderInclusions,
   orderFreebies,
 } from '../../../utils/formatters';
-import { getPhotoFolderPath, copyFolderPathToClipboard } from '../../../utils/folderPath';
-import { useToast } from '../../../context/ToastContext';
-import { workflowError } from '../../../hooks/useWorkflowData';
+import { CopyPathButton } from '../../../components/common/CopyPathButton';
 import { clientDetail, clientGroup } from '../../../utils/clientInfo';
-
-/** Copies the client's photo folder path; shows it in a field when the clipboard isn't available. */
-export const CopyPathButton: React.FC<{ registrationId: string; className?: string }> = ({ registrationId, className = '' }) => {
-  const [copied, setCopied] = useState(false);
-  const [folderPath, setFolderPath] = useState('');
-  const { toast } = useToast();
-  const copy = async () => {
-    try {
-      const path = await getPhotoFolderPath(registrationId);
-      if (await copyFolderPathToClipboard(path)) {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } else {
-        setFolderPath(path);
-      }
-    } catch (error) {
-      toast.error(workflowError(error));
-    }
-  };
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => void copy()}
-        className={`btn-tactile inline-flex items-center gap-1 px-2 py-0.5 font-bold uppercase bg-obsidian text-gold hover:bg-neutral-800 cursor-pointer ${className}`}
-      >
-        {copied ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
-        <span>{copied ? 'Copied' : 'Copy Path'}</span>
-      </button>
-      {folderPath && (
-        <input type="text" aria-label="Pictorial folder path" value={folderPath} readOnly
-          onFocus={(event) => event.target.select()} className="mt-2 w-full bg-panel text-black border border-neutral-400 p-1 font-mono text-xs" />
-      )}
-    </>
-  );
-};
 
 /** What the client bought: the package's inclusions, the options they picked and the freebies. */
 export const BoughtDetails: React.FC<{ registration: Registration; dark?: boolean }> = ({ registration: reg, dark = false }) => {
@@ -99,7 +61,6 @@ interface PhotographerQueueCardProps {
   nextUp?: boolean;
   busy: boolean;
   onSelect?: (reg: Registration) => void;
-  onMarkDone: (reg: Registration) => void;
   sessionActions?: React.ReactNode;
   /** Name of the camera currently sending photos to this client. */
   cameraName?: string;
@@ -113,60 +74,48 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
   nextUp = false,
   busy,
   onSelect,
-  onMarkDone,
   sessionActions,
   cameraName = '',
   compact = false,
 }) => {
   const [fullView, setFullView] = useState(false);
-  const alreadyOnSet = reg.status === 'shooting';
 
-  const actions = sessionActions ?? <div className={`grid gap-2.5 pt-3 border-t border-neutral-500/20 ${onSelect ? 'grid-cols-2' : 'grid-cols-1'}`}>
-    {onSelect && (
+  const actions = sessionActions ?? (onSelect && (
+    <div className="border-t border-neutral-500/20 pt-3">
       <button
         type="button"
         disabled={busy}
         onClick={() => { setFullView(false); onSelect(reg); }}
-        className="btn-tactile flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 border border-line bg-obsidian px-1 py-2.5 text-xs font-black uppercase tracking-wider text-white hover:border-gold disabled:cursor-default disabled:opacity-50"
+        className="btn-tactile flex min-h-[46px] w-full cursor-pointer items-center justify-center gap-1.5 border border-line bg-obsidian px-1 py-2.5 text-xs font-black uppercase tracking-wider text-white hover:border-gold disabled:cursor-default disabled:opacity-50"
       >
-        {alreadyOnSet ? <MousePointer2 className="size-4 shrink-0 text-gold" /> : <Megaphone className="size-4 shrink-0 text-gold" />}
-        <span>{alreadyOnSet ? 'Select' : 'Call Client'}</span>
+        <MousePointer2 className="size-4 shrink-0 text-gold" aria-hidden="true" />
+        <span>Select</span>
       </button>
-    )}
-
-    <button
-      type="button"
-      disabled={busy}
-      onClick={() => { setFullView(false); onMarkDone(reg); }}
-      className="btn-tactile flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 border border-line bg-gold px-1 py-2.5 text-xs font-black uppercase tracking-wider text-on-gold disabled:cursor-default disabled:opacity-50"
-    >
-      <CheckCircle2 className="size-4 shrink-0 stroke-[2.5]" />
-      <span>Mark Done</span>
-    </button>
-  </div>;
+    </div>
+  ));
 
   if (compact) {
     return (
       <article className={`card-interactive min-w-0 border-2 p-3.5 flex flex-col gap-3 bg-panel text-ink border-line ${nextUp ? 'shadow-lux-gold' : 'shadow-lux'}`}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
               <span className="font-mono text-sm font-black px-2 py-0.5 bg-obsidian text-gold">{formatQueueNumber(reg.queue_number)}</span>
               {nextUp && (
                 <span className="bg-gold-wash text-gold-soft font-mono text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 border border-gold">
                   Next up
                 </span>
               )}
-            </div>
-            <h3 className="mt-2 text-base font-black uppercase tracking-tight leading-snug text-ink wrap-break-word">{formatClientName(reg)}</h3>
-            <p className="m-0 font-mono text-xs font-black text-red-500">{formatJobOrderNo(reg.job_order_no)}</p>
           </div>
           <button type="button" onClick={() => setFullView(true)} aria-label={`Full view of ${formatClientName(reg)}`}
-            className="btn-tactile shrink-0 inline-flex items-center gap-1 border border-line bg-canvas px-2 py-1 text-[10px] font-black uppercase tracking-wider text-ink hover:border-gold cursor-pointer">
+            className="btn-tactile ml-auto shrink-0 inline-flex items-center gap-1 border border-line bg-canvas px-2 py-1 text-[10px] font-black uppercase tracking-wider text-ink hover:border-gold cursor-pointer">
             <Maximize2 className="w-3 h-3 text-gold" /> Full view
           </button>
         </div>
-        <div className="text-[10px] font-mono">
+        <div className="min-w-0">
+          <h3 className="text-base font-black uppercase tracking-tight leading-snug text-ink wrap-anywhere">{formatClientName(reg)}</h3>
+          <p className="m-0 font-mono text-xs font-black text-red-500">{formatJobOrderNo(reg.job_order_no)}</p>
+        </div>
+        <div className="mt-auto text-[10px] font-mono">
           <div className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-1 text-neutral-500"><Folder className="w-3 h-3 text-gold" /> Folder</span>
             <CopyPathButton registrationId={reg.id} />
@@ -177,7 +126,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
           <Modal title={formatClientName(reg)} icon={Camera} size="md" onClose={() => setFullView(false)}
             subtitle={<>{formatJobOrderNo(reg.job_order_no)} · {formatQueueNumber(reg.queue_number)}</>}>
             <PhotographerQueueCard registration={reg} nextUp={nextUp} busy={busy} onSelect={onSelect && ((item) => { setFullView(false); onSelect(item); })}
-              onMarkDone={(item) => { setFullView(false); onMarkDone(item); }} sessionActions={sessionActions} cameraName={cameraName} />
+              sessionActions={sessionActions} cameraName={cameraName} />
           </Modal>
         )}
       </article>

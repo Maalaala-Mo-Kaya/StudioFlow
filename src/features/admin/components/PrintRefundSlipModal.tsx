@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FileDown, Loader2, PenLine, Printer, X } from 'lucide-react';
@@ -29,6 +30,7 @@ export const PrintRefundSlipModal: React.FC<PrintRefundSlipModalProps> = ({ regi
   const { toast } = useToast();
   const [data, setData] = useState<RefundSlipData | null>(null);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [paper, setPaper] = useState<ReceiptPaper>(savedReceiptPaper);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -58,7 +60,7 @@ export const PrintRefundSlipModal: React.FC<PrintRefundSlipModalProps> = ({ regi
     });
     return () => { live = false; };
     // initialRefund is the same object while the window is open; the signature step updates `refund` locally.
-  }, [registration.id, refundId, initialRefund]);
+  }, [registration.id, refundId, initialRefund, attempt]);
 
   const saveSignature = async () => {
     if (!drawn) return;
@@ -196,8 +198,9 @@ export const PrintRefundSlipModal: React.FC<PrintRefundSlipModalProps> = ({ regi
           </div>
 
           <div ref={previewRef} className="flex-1 min-h-[200px] overflow-auto p-3 sm:p-4 bg-canvas">
-            {failed && <p role="alert" className="text-center text-sm text-red-600 py-10">Could not load the refund. Close and try again.</p>}
-            {!data && !failed && <p className="text-center text-sm text-neutral-500 py-10">Loading…</p>}
+            <DataFeedback loading={!data && !failed} error={failed ? 'Could not load the refund.' : undefined}
+              loadingMessage="Loading preview…" className="min-h-36 p-6 text-center"
+              onRetry={() => { setFailed(false); setAttempt((value) => value + 1); }} />
             {sheet && (
               <div className="mx-auto shadow-lux border border-neutral-300" style={{ zoom: scale, width: 'fit-content' }}>
                 {sheet}

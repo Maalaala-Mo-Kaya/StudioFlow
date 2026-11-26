@@ -18,12 +18,15 @@ export function usePhotographerQueue() {
   const [recentlyDone, setRecentlyDone] = useState<Registration[]>([]);
   const [photographyRecords, setPhotographyRecords] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<'queue' | 'history'>('queue');
   const queueRequest = useRef(0);
 
   const fetchLiveQueue = useCallback(async () => {
     const request = ++queueRequest.current;
+    setLoading(true);
+    setLoadError('');
     try {
       const [queueRes, doneRes] = await Promise.all([
         pb.collection('registrations').getFullList<Registration>({
@@ -49,13 +52,14 @@ export function usePhotographerQueue() {
       const mine = (reg: Registration) => activePhotographyTasks(reg)
         .some((task) => task.status === 'completed' && task.photographerId === photographerId);
       setRecentlyDone([...queueRes.filter(mine), ...doneRes.items.filter((reg) => admin || !activePhotographyTasks(reg).length || mine(reg))]);
-      setLoadError('');
+      setReady(true);
     } catch (err) {
       if (request !== queueRequest.current) return;
       if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) {
         return;
       }
-      setLoadError(workflowError(err));
+      console.error('Failed to load photography records:', err);
+      setLoadError('Could not load the latest photography records.');
     } finally {
       if (request === queueRequest.current) setLoading(false);
     }
@@ -64,16 +68,17 @@ export function usePhotographerQueue() {
   const live = useRealtimeClient();
   useEffect(() => {
     void fetchLiveQueue();
-    return mountSubscription<RecordSubscription<Registration>>(
+    const stop = mountSubscription<RecordSubscription<Registration>>(
       (listener) => live.collection('registrations').subscribe('*', listener),
       (event) => {
         if (event.action === 'create' || event.action === 'update') playStudioChime();
         void fetchLiveQueue();
       },
     );
+    return () => { queueRequest.current += 1; stop(); };
   }, [live, fetchLiveQueue]);
 
-  const handleCallStudent = useCallback(
+  const startPhotography = useCallback(
     async (reg: Registration) => {
       try {
         await pb.collection('registrations').update(reg.id, {
@@ -113,12 +118,13 @@ export function usePhotographerQueue() {
     queue,
     photographyRecords,
     recentlyDone,
-    loading,
+    loading: loading && !ready,
+    refreshing: loading && ready,
     loadError,
     activeTab,
     setActiveTab,
     fetchLiveQueue,
-    handleCallStudent,
+    startPhotography,
     handleMarkDone,
   };
 }

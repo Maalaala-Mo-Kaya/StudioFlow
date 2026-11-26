@@ -29,7 +29,7 @@ Camera Auto-Import moves each photo from the camera into the correct client's fo
 ```
 
 - Each camera has its own **camera folder**, where the camera software saves new photos.
-- On the Photo Floor, the photographer **links** the camera to the client being shot by pressing **Call Client**.
+- On the Photo Floor, the photographer **links** the camera to the client being shot by pressing **Select**.
 - StudioFlow checks the camera folder every few seconds. It moves each finished photo into that client's folder.
 - **Mark Done** sends the last photos and unlinks the camera, ready for the next client.
 
@@ -53,7 +53,7 @@ The device remembers this choice. You only do it again if you change booths or d
 
 | Step | What you do | What StudioFlow does |
 |---|---|---|
-| 1 | Press **Call Client** on the next card. | Marks the client *On Set* and **links your camera to them**. The panel shows **SENDING PHOTOS TO** and the client's name. The card shows *Booth 1 → sending photos here*. |
+| 1 | Press **Select** on the next card. | Marks the client *On Set* and **links your camera to them**. The panel shows **SENDING PHOTOS TO** and the client's name. The card shows *Booth 1 → sending photos here*. |
 | 2 | Shoot normally. | Moves every new photo into the client's folder within about **4 seconds**. The panel counts them: *"14 this session · 14 in client folder · last photo 3s ago"*. |
 | 3 | Press **Mark Done** when finished. | Sends any last photos, **unlinks the camera** and moves the client to *Completed Today*. |
 
@@ -80,7 +80,7 @@ The panel then shows a yellow notice, for example: *"2 photos are in the camera 
 
 ### 2.5 Good habits
 
-- **Link first, then shoot.** Press **Call Client** before the first frame. Shots taken earlier become *waiting*.
+- **Link first, then shoot.** Press **Select** before the first frame. Shots taken earlier become *waiting*.
 - **Keep the Photo Floor page open** while shooting. It checks every 4 seconds. If the page is closed, the server still checks **once a minute**, so nothing is lost, only slower.
 - **Watch the counter.** If it stops going up while you shoot, see [Troubleshooting](#8-troubleshooting).
 - **Don't rename or move files** inside the client folder's `selected` and `unselected` folders. The Chooser station manages those.
@@ -344,7 +344,7 @@ Do this once after setup, and again after any change to PCs or the network:
 3. Register a **test client** at the kiosk and pay for it at the cashier, so it appears on the Photo Floor. Cancel it in Admin afterwards.
 4. On the Photo Floor, choose the camera under **This device**.
 5. Take one photo **before** calling the client. The panel should show **1 photo waiting**.
-6. Press **Call Client** on the test client. The panel shows **SENDING PHOTOS TO** and the test client.
+6. Press **Select** on the test client. The panel shows **SENDING PHOTOS TO** and the test client.
 7. Take 3–5 photos. Within a few seconds the counter shows them.
 8. Press **Copy Path** on the card, open that folder, and check the photos are there.
 9. Press **Mark Done**. The panel goes back to *No client linked*.
@@ -362,7 +362,7 @@ If every step behaves as described, the camera is ready.
 |---|---|---|
 | **The camera folder can't be found on the server PC** / badge **Folder missing** | The folder was deleted or renamed, or the drive is disconnected. | Recreate the folder, or **Edit** the camera and **Browse** to the right one. |
 | **The camera folder cannot be read** | The server can't open the folder (permissions). | Make sure the account running `run.bat` can read and write the folder. |
-| **No client linked** | No session is active. | Press **Call Client**, or **Link Camera** on the on-set card. |
+| **No client linked** | No session is active. | Press **Select**, or **Link Camera** on the on-set card. |
 | **N photos are … not assigned to anyone** | Photos taken before linking, or with no client linked. | **Send them to <name>** if they belong to the current client; otherwise leave or delete them. |
 | **The linked client is no longer on the photo floor** | The client was cancelled or released while linked. | Link the next client. |
 | **This camera is turned off** | The camera was switched off in settings. | **Set Up → Edit →** tick **Camera is on**. |
@@ -390,7 +390,7 @@ If every step behaves as described, the camera is ready.
 
 - **A photo was imported to the wrong client.** Open both client folders with **Copy Path** and move the file by hand, *before* the Chooser starts selection for either client.
 - **Two photos had the same name.** The second one is saved as `IMG_0001_2.jpg`. Nothing is overwritten.
-- **Can two devices control the same camera?** Yes. Both show the same status; the most recent **Call Client** decides which client is linked.
+- **Can two devices control the same camera?** Yes. Both show the same status; the most recent **Select** decides which client is linked.
 - **Can one client be shot by two cameras?** Yes. Link each camera to the same client; both send photos to that client's folder.
 - **The server was off during the shoot.** Photos wait in the camera folder. When the server is back on, link the client and press **Send them to <name>**.
 
@@ -403,7 +403,7 @@ If every step behaves as described, the camera is ready.
 **Photographer (every client)**
 
 ```
-Choose camera (once per device) ─► Call Client ─► Shoot ─► Mark Done ─► next client
+Choose camera (once per device) ─► Select ─► Shoot ─► Mark Done ─► next client
 ```
 
 **Admin (once per camera)**

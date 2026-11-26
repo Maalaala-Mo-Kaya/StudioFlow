@@ -1,3 +1,4 @@
+import { DataFeedback, type DataRequestState } from '../../components/common/DataFeedback';
 import { useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 import type { TableSort } from '../../components/common/dataTableModel';
@@ -16,17 +17,17 @@ const views = [
   { id: 'earnings', label: 'Earnings' },
 ] as const;
 
-export function MuaTeamOverview({ team, date, onDateChange, sort, onSort, failed, embedded }: {
+export function MuaTeamOverview({ team, date, onDateChange, sort, onSort, request, embedded }: {
   team?: MuaTeam;
   date: string;
   onDateChange: (date: string) => void;
   sort: TableSort;
   onSort: (sort: TableSort) => void;
-  failed: boolean;
+  request: DataRequestState;
   embedded: boolean;
 }) {
   const [view, setView] = useState<typeof views[number]['id']>('overview');
-  const current = !failed && team?.date === date ? team : undefined;
+  const current = team?.date === date ? team : undefined;
   const report = current?.report;
   const workload = current?.workload;
   const today = team?.today ?? studioDate();
@@ -53,7 +54,7 @@ export function MuaTeamOverview({ team, date, onDateChange, sort, onSort, failed
       {!embedded && reportDate}
       <StationTabs label="MUA team analytics views" tabs={views} active={view} onChange={setView}
         variant={embedded ? 'underline' : 'default'} toolbar={embedded ? reportDate : undefined}>
-        {!report && !failed && <p role="status" className="text-sm">Loading team report…</p>}
+        {view !== 'overview' && <DataFeedback {...request} loadingMessage="Loading team report…" className="min-h-12 p-3" />}
         {report && view === 'overview' && (
           <>
             <dl className={embedded
@@ -69,9 +70,9 @@ export function MuaTeamOverview({ team, date, onDateChange, sort, onSort, failed
               ))}
             </dl>
             {date < today && <p className="text-xs text-ink">Pending and in-progress services reflect recorded assignments at the end of this date.</p>}
-            <MakeupTeamTable artists={current.artists} loading={false} sort={sort} onSort={onSort} />
           </>
         )}
+        {view === 'overview' && <MakeupTeamTable artists={current?.artists ?? []} request={request} sort={sort} onSort={onSort} />}
         {report && view !== 'overview' &&
           <MuaAnalyticsTable key={`${report.date}:${view}`} report={report} earnings={view === 'earnings'} compact />}
       </StationTabs>

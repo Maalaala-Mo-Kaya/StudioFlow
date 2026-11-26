@@ -1,3 +1,4 @@
+import type { DataRequestState } from '../../../components/common/DataFeedback';
 import React, { useState, useMemo } from 'react';
 import { UploadCloud, CheckCircle2, Search } from 'lucide-react';
 import { RecordActionButton } from '../../../components/common/RecordActionButton';
@@ -9,6 +10,7 @@ import type { DataTableColumn } from '../../../components/common/DataTable';
 import { parseRosterCsv, type RosterImportResult, type RosterImportRow } from '../../../utils/csv';
 
 interface AdminRosterTabProps {
+  request: DataRequestState;
   organizations: Organization[];
   masterList: MasterListItem[];
   rosterOrgId: string;
@@ -21,6 +23,7 @@ interface AdminRosterTabProps {
 }
 
 export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
+  request,
   organizations,
   masterList,
   rosterOrgId,
@@ -135,7 +138,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
     { id: 'student', header: 'Student ID', sortable: true, accessor: (item) => item.student_id },
     { id: 'section', header: 'Section', sortable: true, accessor: (item) => item.section },
     { id: 'mobile', header: 'Mobile', accessor: (item) => item.mobile_number },
-    { id: 'actions', header: 'Actions', cell: (item) => (
+    { id: 'actions', width: 82, header: 'Actions', cell: (item) => (
       <RecordActionButton variant="delete" recordName={`roster record for ${item.full_name}`} onClick={() => promptDeleteItem(item)} />
     ) },
   ];
@@ -245,7 +248,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
               </h3>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] bg-obsidian text-gold px-2 py-0.5 font-bold">
-                  {orgMasterList.length} Students
+                  {request.loading || (request.error && !masterList.length) ? '—' : `${orgMasterList.length} Students`}
                 </span>
                 {selectedOrg && scopedRoster.length > 0 && (
                   <button
@@ -259,9 +262,9 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
               </div>
             </div>
 
-            <DataTable label="Master roster records" rows={orgMasterList} columns={rosterColumns}
+            <DataTable {...request} label="Master roster records" rows={orgMasterList} columns={rosterColumns}
               getRowId={(item) => item.id} pagination={false} viewportClassName="max-h-[380px]"
-              tableClassName="min-w-[410px]" headerClassName="uppercase" filtered={Boolean(searchRoster.trim())}
+              tableClassName="min-w-[410px]" headerClassName="uppercase" searching={Boolean(searchRoster.trim())}
               emptyMessage={selectedOrg ? `No roster entries found for ${selectedOrg.name}.` : 'No roster entries without a school.'}
               toolbar={<div className="relative p-2">
                 <Search aria-hidden="true" className="pointer-events-none absolute left-5 top-1/2 size-3.5 -translate-y-1/2 text-neutral-400" />
@@ -275,7 +278,7 @@ export const AdminRosterTab: React.FC<AdminRosterTabProps> = ({
 
           <div className="mt-4 pt-3 border-t border-neutral-200 flex justify-between items-center text-neutral-500 text-[10px]">
             <span>School: <strong>{selectedOrg?.name || 'Unassigned'}</strong></span>
-            <span>Total Ingested: <strong>{masterList.length}</strong></span>
+            <span>Total Ingested: <strong>{request.loading || (request.error && !masterList.length) ? '—' : masterList.length}</strong></span>
           </div>
         </div>
       </div>

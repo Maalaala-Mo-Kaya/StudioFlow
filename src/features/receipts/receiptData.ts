@@ -1,3 +1,4 @@
+import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { PAYMENT_METHOD_OPTIONS, RECEIPT_TERMS_CLAUSES, STUDIO_INFO } from '../../constants/studio';
 import { formatJobOrderNo } from '../../utils/formatters';
@@ -56,7 +57,10 @@ export async function loadReceiptData(registrationId: string): Promise<ReceiptDa
     pb.collection('refunds').getFullList<RefundRecord>({
       filter: pb.filter('registration = {:id}', { id: registrationId }),
       sort: 'created,id', requestKey: null, cache: 'no-store',
-    }).catch(() => [] as RefundRecord[]),
+    }).catch((error: unknown) => {
+      if (error instanceof ClientResponseError && error.status === 404) return [];
+      throw error;
+    }),
   ]);
   let terms: readonly string[] = RECEIPT_TERMS_CLAUSES;
   if (isWalkIn(registration)) {

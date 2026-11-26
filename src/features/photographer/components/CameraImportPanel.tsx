@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import React, { useState } from 'react';
 import { Aperture, FolderInput, AlertTriangle, Laptop, Undo2, Send, Settings2 } from 'lucide-react';
 import { CameraSettings } from '../../camera/CameraSettings';
@@ -8,7 +9,7 @@ import type { useCameraLink } from '../useCameraLink';
 type CameraLink = ReturnType<typeof useCameraLink>;
 
 export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }> = ({ link, disabled }) => {
-  const { stations, selectedId, select, camera, error } = link;
+  const { stations, stationList, selectedId, select, camera, error } = link;
   const client = camera?.client;
   const [showSettings, setShowSettings] = useState(false);
 
@@ -27,6 +28,7 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 min-w-0">
+        {stations.length > 0 && stationList.error && <DataFeedback error={stationList.error} onRetry={stationList.refresh} />}
         {stations.length > 0 ? (
           <label className="flex items-center gap-2 min-w-0 w-full sm:w-auto text-[11px] font-black uppercase tracking-wider text-ink">
             <span className="shrink-0">This device:</span>
@@ -45,9 +47,8 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
             </select>
           </label>
         ) : (
-          <p className="text-[11px] text-neutral-500 sm:text-right">
-            No camera is set up yet. Press <strong className="text-ink">Set Up</strong> to add one.
-          </p>
+          <DataFeedback loading={stationList.loading} error={stationList.error} onRetry={stationList.refresh}
+            loadingMessage="Loading cameras…" emptyMessage="No camera is set up yet." />
         )}
         <button
           type="button"
@@ -116,7 +117,7 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
             </div>
           ) : camera.enabled && (
             <p className="text-xs text-neutral-600">
-              No client linked. Press <strong className="text-ink">Call Client</strong> or <strong className="text-ink">Select</strong> on a card to send photos to that client.
+              No client linked. Press <strong className="text-ink">Select</strong> on a card to send photos to that client.
             </p>
           )}
 

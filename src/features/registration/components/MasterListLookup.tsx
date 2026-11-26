@@ -23,7 +23,7 @@ export const MasterListLookup: React.FC<MasterListLookupProps> = ({
 
   const filteredItems =
     searchName.trim().length > 1
-      ? masterList.filter((m) => m.full_name.toLowerCase().includes(searchName.toLowerCase()))
+      ? masterList.filter((m) => m.full_name.toLowerCase().includes(searchName.trim().toLowerCase()))
       : [];
 
   return (
@@ -63,6 +63,9 @@ export const MasterListLookup: React.FC<MasterListLookupProps> = ({
               className="w-full min-h-[44px] text-sm pl-10 pr-4 py-2 border border-line focus:outline-none bg-panel font-semibold"
             />
           </div>
+          {searchName.trim().length > 1 && filteredItems.length === 0 && (
+            <p role="status" className="mt-2 text-xs text-neutral-600">No roster entries match your search.</p>
+          )}
           {filteredItems.length > 0 && (
             <div className="mt-2 max-h-48 overflow-y-auto bg-panel border border-line divide-y divide-neutral-200 text-xs">
               {filteredItems.map((item) => (

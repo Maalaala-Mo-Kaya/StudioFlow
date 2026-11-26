@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../components/common/DataFeedback';
 import React, { useState } from 'react';
 import { Aperture, FolderSearch, Pencil, Plus, Save } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
@@ -19,7 +20,7 @@ const input = 'w-full min-h-[44px] text-xs sm:text-sm px-3.5 py-2 border border-
 export const CameraSettings: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const { data: stations, refresh } = useWorkflowData<CameraStatus[]>('/camera');
+  const { data: stations, loading, refreshing, error, refresh } = useWorkflowData<CameraStatus[]>('/camera');
   const [form, setForm] = useState<CameraConfig>(blank);
   // Editing has its own copy (in a popup), so the "Add Camera" form stays ready.
   const [editForm, setEditForm] = useState<CameraConfig>(blank);
@@ -140,7 +141,7 @@ export const CameraSettings: React.FC = () => {
           <ol className="list-decimal pl-4 space-y-1.5">
             <li>Point the camera software (EOS Utility, Lightroom, Capture One, Nikon tether, Wi-Fi/FTP transfer…) at the folder above.</li>
             <li>On the Photo Floor, the photographer picks this camera under <strong>Camera Auto-Import</strong>.</li>
-            <li>Pressing <strong>Call Client</strong> links the camera to that client. Every finished shot moves into the client's folder within a few seconds.</li>
+            <li>Pressing <strong>Select</strong> links the camera to that client. Every finished shot moves into the client's folder within a few seconds.</li>
             <li>After your camera software finishes sending the last shot, press <strong>Mark Done</strong>. Assigned sessions keep the camera linked while StudioFlow checks for remaining files and syncs them.</li>
           </ol>
           <p className="text-neutral-500 pt-1">
@@ -155,11 +156,12 @@ export const CameraSettings: React.FC = () => {
           <div className="w-8 h-8 bg-obsidian text-gold flex items-center justify-center shrink-0">
             <Aperture className="w-4 h-4" />
           </div>
-          <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink m-0">Cameras ({stations?.length ?? 0})</h3>
+          <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink m-0">Cameras{stations ? ` (${stations.length})` : ''}</h3>
         </div>
-        {!stations?.length ? (
-          <p className="text-xs text-neutral-500 py-8 text-center">No cameras yet. Add the first one on the left.</p>
-        ) : (
+        <DataFeedback loading={loading} refreshing={refreshing} error={error} onRetry={refresh}
+          loadingMessage="Loading cameras…" className="min-h-16 p-4 text-center"
+          emptyMessage={stations?.length === 0 ? 'No cameras configured yet.' : undefined} />
+        {!!stations?.length && (
           <ul className="space-y-3">
             {stations.map((station) => (
               <li key={station.id} className={`border p-4 ${editingId === station.id ? 'border-gold bg-gold-wash' : 'border-neutral-300 bg-canvas'}`}>

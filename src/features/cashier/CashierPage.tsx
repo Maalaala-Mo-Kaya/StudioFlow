@@ -1,3 +1,4 @@
+import { ALL_CLIENTS } from '../../utils/clientGroup';
 import React, { useState } from 'react';
 import type { Registration } from '../../types';
 import { CashierAddOnModal } from './components/CashierAddOnModal';
@@ -29,7 +30,7 @@ export const CashierPage: React.FC = () => {
   return (
     <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8">
       {/* Header Banner */}
-      <CashierHeader
+      <CashierHeader hasLoaded={cashier.hasLoaded} loading={cashier.request.loading}
         totalCollectedToday={cashier.totalCollectedToday}
         paymentsToday={cashier.paymentsToday}
         refundsToday={cashier.refundsToday}
@@ -63,8 +64,9 @@ export const CashierPage: React.FC = () => {
       <CashierTable
         registrations={cashier.filteredRegistrations}
         visibleColumns={cashier.visibleColumns}
-        loading={cashier.loading}
-        filtered={Boolean(cashier.searchQuery.trim()) || cashier.registrations.length > 0}
+        request={cashier.request}
+        searching={Boolean(cashier.searchQuery.trim())}
+        filtered={cashier.clientGroup !== ALL_CLIENTS || Object.values(cashier.filters).some((values) => values.length > 0)}
         onOpenPayment={cashier.openPaymentModal}
         onOpenEdit={cashier.activeTab === 'pending' ? (reg) => setEditId(reg.id) : undefined}
         editableIds={cashier.editableIds}
@@ -103,7 +105,7 @@ export const CashierPage: React.FC = () => {
               toast.warning(`JO ${saved.job_order_no} is back in production for the new item. Don't release it until an admin marks it ready.`);
             }
             if (saved.job_order_no) refreshClientDocuments(saved.id, toast.warning);
-            void cashier.fetchRegistrations(true);
+            void cashier.fetchRegistrations();
             if (saved.job_order_no) setAfterAdd({ reg: saved, added });
             else if (saved.balance > 0) void cashier.openPaymentModal(saved);
           }} />

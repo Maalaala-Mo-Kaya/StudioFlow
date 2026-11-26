@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import { useEffect, useState } from 'react';
 import { Archive, Eye, Pencil, QrCode, Trash2, Wifi } from 'lucide-react';
 import { ConfirmModal } from '../../../components/common/ConfirmModal';
@@ -106,6 +107,8 @@ function SavedPreview({ record, onClose, onEdit }: { record: SavedQr; onClose: (
 export function SavedQrCodes({ onEdit }: { onEdit: (record: SavedQr) => void }) {
   const [records, setRecords] = useState<SavedQr[]>([]);
   const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [loadRequest, setLoadRequest] = useState(0);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState('');
@@ -119,14 +122,23 @@ export function SavedQrCodes({ onEdit }: { onEdit: (record: SavedQr) => void }) 
   useEffect(() => {
     let active = true;
     void listQrs().then((result) => {
-      if (active) setRecords(result);
+      if (active) { setRecords(result); setReady(true); }
     }).catch((problem) => {
-      if (active) setError(qrError(problem, 'Saved QR codes could not be loaded.'));
+      if (active) {
+        console.error('Failed to load saved QR codes:', problem);
+        setLoadError('Could not load saved QR codes.');
+      }
     }).finally(() => {
       if (active) setLoading(false);
     });
     return () => { active = false; };
   }, [loadRequest]);
+
+  function refresh() {
+    setLoadError('');
+    setLoading(true);
+    setLoadRequest((current) => current + 1);
+  }
 
   async function toggle(record: SavedQr) {
     setPending(record.id);
@@ -158,16 +170,13 @@ export function SavedQrCodes({ onEdit }: { onEdit: (record: SavedQr) => void }) 
     <section className="space-y-4" aria-labelledby="saved-qr-heading">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="saved-qr-heading" className="font-black uppercase tracking-wide text-ink">Saved QR Codes</h2>
-        <button type="button" className={secondary} disabled={loading || !!pending} onClick={() => {
-          setError('');
-          setLoading(true);
-          setLoadRequest((current) => current + 1);
-        }}>Refresh</button>
+        <button type="button" className={secondary} disabled={loading || !!pending} onClick={refresh}>Refresh</button>
       </div>
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-      {loading && <p role="status" className={stationCard}>Loading saved QR codes…</p>}
-      {!loading && !error && !records.length && <p className={stationCard}>No saved QR codes yet.</p>}
-      {!loading && visible.map((record) => {
+      <DataFeedback loading={loading && !ready} refreshing={loading && ready} error={loadError} onRetry={refresh}
+        loadingMessage="Loading saved QR codes…" emptyMessage={ready && !records.length ? 'No saved QR codes yet.' : undefined}
+        className={stationCard} />
+      {visible.map((record) => {
         const isWifi = record.kind === 'wifi';
         const title = qrTitle(record.kind, record.name);
         const created = dateFormat.format(new Date(record.created.replace(' ', 'T')));
@@ -205,7 +214,7 @@ export function SavedQrCodes({ onEdit }: { onEdit: (record: SavedQr) => void }) 
           </article>
         );
       })}
-      {!loading && pageCount > 1 && <TablePagination label="Saved QR pages" pageLabel={`${currentPage} / ${pageCount}`}
+      {pageCount > 1 && <TablePagination label="Saved QR pages" pageLabel={`${currentPage} / ${pageCount}`}
         previous={currentPage > 1 ? () => { setPage(currentPage - 1); setSelected(''); } : undefined}
         next={currentPage < pageCount ? () => { setPage(currentPage + 1); setSelected(''); } : undefined} />}
       <ConfirmModal isOpen={!!deleting} title="Delete QR Code" confirmText="Delete" isDestructive

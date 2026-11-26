@@ -1,9 +1,12 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, Key, MouseEvent, ReactNode } from 'react';
+import type { Key, MouseEvent, ReactNode } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight } from 'lucide-react';
 import { defaultTableExpansion, keepVisibleTableRows, nextTableSort, sortTableRows, tablePageRange, toggleTableMultiExpand, toggleTableRow } from './dataTableModel';
 import type { SortValue, TableExpansion, TablePage, TableSort, TableSortColumn } from './dataTableModel';
 import { TablePagination } from './TablePagination';
+import { DataFeedback, type DataRequestState } from './DataFeedback';
+
+export const tableActions = 'flex flex-wrap items-center [&>button]:shrink-0 [&>button]:whitespace-nowrap [&>button>svg]:shrink-0';
 
 export const tableFilterControl = 'min-h-10 min-w-0 max-w-full border border-line bg-panel px-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-gold';
 
@@ -15,8 +18,10 @@ export interface DataTableColumn<Row, Id extends string = string> extends TableS
   sortable?: boolean;
   visible?: boolean;
   align?: 'left' | 'center' | 'right';
-  width?: CSSProperties['width'];
-  minWidth?: CSSProperties['minWidth'];
+  /** Width in pixels for compact values or controls. */
+  width?: number;
+  /** Starting width in pixels for a column that can grow with available space. */
+  minWidth?: number;
   headerClassName?: string;
   cellClassName?: string;
 }
@@ -39,10 +44,11 @@ type DataTableProps<Row, Id extends string> = {
   sorting?: { value: TableSort; onChange: (value: TableSort) => void };
   /** Enabled by default. Supply value and onChange to control the page externally. */
   pagination?: false | PaginationOptions;
-  loading?: boolean;
   loadingMessage?: ReactNode;
   emptyMessage?: ReactNode;
   filteredEmptyMessage?: ReactNode;
+  searching?: boolean;
+  searchEmptyMessage?: ReactNode;
   filtered?: boolean;
   toolbar?: ReactNode;
   footer?: (visibleColumns: readonly DataTableColumn<Row, Id>[]) => ReactNode;
@@ -58,7 +64,7 @@ type DataTableProps<Row, Id extends string> = {
   viewportClassName?: string;
   tableClassName?: string;
   headerClassName?: string;
-} & ({ mode?: 'client'; totalItems?: never } | { mode: 'server'; totalItems: number });
+} & DataRequestState & ({ mode?: 'client'; totalItems?: never } | { mode: 'server'; totalItems: number });
 
 const defaultSizes = [10, 25, 50, 100];
 const alignment = {
@@ -77,8 +83,9 @@ function clickedControl(event: MouseEvent<HTMLTableRowElement>) {
 
 export function DataTable<Row, Id extends string = string>({
   label, rows, columns, getRowId, visibleColumnIds, defaultSort = null, sorting, pagination,
-  mode = 'client', totalItems, loading = false, loadingMessage = 'Loading records…',
+  mode = 'client', totalItems, loading = false, refreshing = false, error, onRetry, loadingMessage = 'Loading records…',
   emptyMessage = 'No records available.', filteredEmptyMessage = 'No records match the selected filters.',
+  searching = false, searchEmptyMessage = 'No records match your search.',
   filtered = false, toolbar, footer, onRowClick, renderExpanded, expansion, detailsColumnId, renderCompactRow,
   rowClassName, className = '', viewportClassName = '', tableClassName = '', headerClassName = '',
 }: DataTableProps<Row, Id>) {
@@ -143,9 +150,17 @@ export function DataTable<Row, Id extends string = string>({
   }
 
   const interactive = Boolean(renderExpanded || onRowClick);
-  const message = loading ? loadingMessage : filtered ? filteredEmptyMessage : emptyMessage;
+  const blocked = loading || !paged.length;
+  const feedback = { loading, refreshing, error, onRetry, loadingMessage };
+  const empty = searching ? searchEmptyMessage : filtered ? filteredEmptyMessage : emptyMessage;
+  const columnSizes = visible.map((column) => ({
+    base: Math.max(column.width ?? column.minWidth ?? 96, column.minWidth ?? 0),
+    grows: column.width === undefined,
+  }));
+  const minimumWidth = columnSizes.reduce((sum, { base }) => sum + base, 0);
+  const flexibleWidth = columnSizes.reduce((sum, { base, grows }) => sum + (grows ? base : 0), 0);
   return (
-    <div aria-busy={loading || undefined} className={`flex min-w-0 flex-col overflow-hidden border-2 border-line bg-panel shadow-lux ${className}`}>
+    <div aria-busy={loading || refreshing || undefined} className={`flex min-w-0 flex-col overflow-hidden border-2 border-line bg-panel shadow-lux ${className}`}>
       {renderExpanded ? (
         <div className="flex flex-wrap items-end justify-end border-b border-line">
           {toolbar && <div className="min-w-0 grow basis-[min(100%,34rem)]">{toolbar}</div>}
@@ -159,9 +174,18 @@ export function DataTable<Row, Id extends string = string>({
           </button>
         </div>
       ) : toolbar}
+      {!blocked && (refreshing || error) && <DataFeedback {...feedback} className="border-b border-line px-3 py-2 text-center" />}
       <div ref={viewport} role="region" aria-label={label} tabIndex={0}
-        className={`@container min-h-0 min-w-0 flex-auto overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold ${renderCompactRow ? 'hidden md:block' : ''} ${viewportClassName}`}>
-        <table aria-label={label} className={`studio-data-table w-full border-separate border-spacing-0 text-left text-xs ${tableClassName}`}>
+        className={`@container min-w-0 flex-auto overflow-auto [scrollbar-gutter:stable] ${pagination !== false || loading ? 'min-h-44' : ''} focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold ${renderCompactRow ? 'hidden md:block' : ''} ${viewportClassName}`}>
+        <table aria-label={label} style={{ width: `max(100%, ${minimumWidth}px)` }}
+          className={`studio-data-table table-fixed border-separate border-spacing-0 text-left text-xs ${tableClassName}`}>
+          <colgroup>{visible.map((column, index) => {
+            const { base, grows } = columnSizes[index];
+            const width = grows && flexibleWidth
+              ? `calc(${base}px + max(0px, 100cqw - ${minimumWidth}px) * ${base / flexibleWidth})`
+              : base;
+            return <col key={column.id} style={{ width }} />;
+          })}</colgroup>
           <thead className={`sticky top-0 z-10 bg-obsidian text-[11px] font-black text-gold ${headerClassName}`}>
             <tr>
               {visible.map((column) => {
@@ -169,7 +193,6 @@ export function DataTable<Row, Id extends string = string>({
                 const Icon = direction === 'ascending' ? ArrowUp : direction === 'descending' ? ArrowDown : ArrowUpDown;
                 return (
                   <th key={column.id} scope="col" aria-sort={direction}
-                    style={{ width: column.width, minWidth: column.minWidth }}
                     className={`px-3 py-2.5 align-top ${alignment[column.align ?? 'left']} ${column.headerClassName ?? ''}`}>
                     {column.sortable ? (
                       <button type="button" onClick={() => changeSort(column.id)}
@@ -177,17 +200,26 @@ export function DataTable<Row, Id extends string = string>({
                         <span>{column.header}</span><Icon className="size-3 shrink-0" aria-hidden="true" />
                       </button>
                     ) : column.header}
-                    {column.description && <span className="mt-1 block whitespace-nowrap font-normal text-white">{column.description}</span>}
+                    {column.description && <span className="mt-1 block font-normal text-white">{column.description}</span>}
                   </th>
                 );
               })}
             </tr>
           </thead>
           <tbody>
-            {loading || !paged.length ? (
-              <tr><td colSpan={Math.max(1, visible.length)} className="p-8 text-center text-neutral-600">
-                <div role="status">{message}</div>
-              </td></tr>
+            {blocked ? (
+              <>
+                <tr><td colSpan={Math.max(1, visible.length)} className="px-3 py-3 text-center">
+                  <div className="sticky left-3 w-[calc(100cqw-1.5rem)]"><DataFeedback {...feedback} emptyMessage={empty} /></div>
+                </td></tr>
+                {loading && Array.from({ length: Math.min(4, pageState.pageSize) }, (_, index) => (
+                  <tr key={index} aria-hidden="true">
+                    {visible.map((column) => <td key={column.id} className="border-b border-line px-3 py-3">
+                      <div className="h-3 w-3/4 bg-line motion-safe:animate-pulse" />
+                    </td>)}
+                  </tr>
+                ))}
+              </>
             ) : paged.map((row) => {
               const key = getRowId(row);
               const isOpen = expansionState.keys.includes(key);
@@ -198,7 +230,7 @@ export function DataTable<Row, Id extends string = string>({
                   <tr className={`${interactive ? 'cursor-pointer' : ''} ${isOpen ? 'bg-gold-wash' : ''} ${rowClassName?.(row) ?? 'hover:bg-canvas'}`}
                     onClick={interactive ? (event) => { if (!clickedControl(event)) activateRow(row, key); } : undefined}>
                     {visible.map((column) => (
-                      <td key={column.id} className={`border-b border-neutral-200 px-3 py-4 md:py-2 ${alignment[column.align ?? 'left']} ${column.cellClassName ?? ''}`}>
+                      <td key={column.id} className={`border-b border-neutral-200 px-3 py-4 md:py-2 [overflow-wrap:anywhere] ${alignment[column.align ?? 'left']} ${column.cellClassName ?? ''}`}>
                         {column === detailsColumn && interactive && (
                           <button type="button" aria-label={detailsColumnId ? (isOpen ? 'Hide details' : 'View details')
                             : renderExpanded ? (isOpen ? 'Collapse row' : 'Expand row') : 'Open row'}
@@ -232,13 +264,22 @@ export function DataTable<Row, Id extends string = string>({
       </div>
       {renderCompactRow && (
         <div className="grid min-w-0 gap-4 p-3 md:hidden">
-          {loading || !paged.length ? <div role="status" className="p-5 text-center text-neutral-600">{message}</div>
+          {blocked ? <>
+            <DataFeedback {...feedback} emptyMessage={empty} className="p-3 text-center" />
+            {loading && Array.from({ length: Math.min(2, pageState.pageSize) }, (_, index) => (
+              <div key={index} aria-hidden="true" className="space-y-3 border border-line bg-canvas p-4 motion-safe:animate-pulse">
+                <div className="h-4 w-1/2 bg-line" />
+                <div className="h-3 w-3/4 bg-line" />
+                <div className="h-8 w-full bg-line" />
+              </div>
+            ))}
+          </>
             : paged.map((row) => <Fragment key={getRowId(row)}>{renderCompactRow(row)}</Fragment>)}
         </div>
       )}
       {pagination !== false && (
         <TablePagination label={`${label} pagination`} pageLabel={`${range.page} / ${range.totalPages}`}
-          summary={`Showing ${range.start}–${range.end} of ${total}`}
+          summary={loading || (error && !paged.length) ? undefined : `Showing ${range.start}–${range.end} of ${total}`}
           previous={!loading && range.page > 1 ? () => changePage({ ...pageState, page: range.page - 1 }) : undefined}
           next={!loading && range.page < range.totalPages ? () => changePage({ ...pageState, page: range.page + 1 }) : undefined}
           controls={

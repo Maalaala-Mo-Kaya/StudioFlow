@@ -1,3 +1,4 @@
+import type { DataRequestState } from '../../../components/common/DataFeedback';
 import { CreditCard, Banknote, Printer, PackageCheck, MessageSquare, Plus } from 'lucide-react';
 import { PickupNoticeInfo } from './PickupNoticeInfo';
 import type { Registration } from '../../../types';
@@ -5,7 +6,7 @@ import { RegistrationStatusBadge } from '../../../components/RegistrationStatusB
 import { isReadyForRelease, releaseBlocker } from '../../../utils/releaseReadiness';
 import { formatClientName, formatCurrency } from '../../../utils/formatters';
 import { discountRate } from '../../../utils/revenue';
-import { DataTable } from '../../../components/common/DataTable';
+import { DataTable, tableActions } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { CashierMobileCard } from './CashierMobileCard';
 import { RecordActionButton } from '../../../components/common/RecordActionButton';
@@ -13,8 +14,9 @@ import { clientDetail, clientGroup, clientSummary } from '../../../utils/clientI
 
 interface CashierTableProps {
   registrations: Registration[];
-  loading: boolean;
+  request: DataRequestState;
   filtered: boolean;
+  searching: boolean;
   onOpenPayment: (reg: Registration) => void;
   onOpenEdit?: (reg: Registration) => void;
   editableIds: ReadonlySet<string>;
@@ -32,12 +34,12 @@ interface CashierTableProps {
 }
 
 export function CashierTable({
-  registrations, loading, filtered, onOpenPayment, onOpenEdit, editableIds, onOpenDelete, deletableIds, onOpenPrint, onOpenRelease, onOpenAddOn,
+  registrations, request, filtered, searching, onOpenPayment, onOpenEdit, editableIds, onOpenDelete, deletableIds, onOpenPrint, onOpenRelease, onOpenAddOn,
   pickupMode = false, onOpenNotify, visibleColumns,
 }: CashierTableProps) {
   const columns: DataTableColumn<Registration>[] = [
     {
-      id: 'job', header: 'JOB ORDER №', sortable: true, accessor: (reg) => reg.job_order_no,
+      id: 'job', width: 112, header: 'JOB ORDER №', sortable: true, accessor: (reg) => reg.job_order_no,
       headerClassName: 'whitespace-nowrap',
       cell: (reg) => (
         <span className="whitespace-nowrap font-mono font-black text-red-600 text-sm">
@@ -46,7 +48,7 @@ export function CashierTable({
       ),
     },
     {
-      id: 'name', header: 'Client Name', sortable: true,
+      id: 'name', minWidth: 176, header: 'Client Name', sortable: true,
       accessor: (reg) => `${reg.family_name} ${reg.given_name}`,
       cell: (reg) => <>{formatClientName(reg)}
         {!reg.job_order_no && <span className="mt-0.5 block break-all font-mono text-[10px] normal-case text-neutral-500">Ref {reg.id}</span>}
@@ -54,7 +56,7 @@ export function CashierTable({
       cellClassName: 'font-black uppercase text-sm',
     },
     {
-      id: 'school', header: 'School / Session', sortable: true, accessor: (reg) => clientSummary(reg, true),
+      id: 'school', minWidth: 166, header: 'School / Session', sortable: true, accessor: (reg) => clientSummary(reg, true),
       cell: (reg) => (
         <>
           <div className="font-bold text-ink">
@@ -68,7 +70,7 @@ export function CashierTable({
       ),
     },
     {
-      id: 'package', header: 'Package', sortable: true, accessor: (reg) => reg.expand?.package?.code,
+      id: 'package', width: 110, header: 'Package', sortable: true, accessor: (reg) => reg.expand?.package?.code,
       cell: (reg) => (
         <span className="font-mono font-black text-xs bg-gold-wash border border-line text-ink px-2 py-0.5">
           {reg.expand?.package?.code || 'PKG'}
@@ -76,12 +78,12 @@ export function CashierTable({
       ),
     },
     {
-      id: 'total', header: 'Total', sortable: true, accessor: (reg) => reg.total_amount,
+      id: 'total', width: 102, header: 'Total', sortable: true, accessor: (reg) => reg.total_amount,
       cellClassName: 'font-mono font-black text-sm',
       cell: (reg) => formatCurrency(reg.total_amount),
     },
     {
-      id: 'balance', header: 'Paid / Balance', sortable: true, accessor: (reg) => reg.balance,
+      id: 'balance', width: 124, header: 'Paid / Balance', sortable: true, accessor: (reg) => reg.balance,
       cellClassName: 'font-mono',
       cell: (reg) => (
         <>
@@ -113,20 +115,20 @@ export function CashierTable({
       ),
     },
     {
-      id: 'status', header: 'Status', sortable: true, accessor: (reg) => reg.status,
+      id: 'status', width: 136, header: 'Status', sortable: true, accessor: (reg) => reg.status,
       cell: (reg) => (
         <RegistrationStatusBadge status={reg.status} />
       ),
     },
     {
-      id: 'pickup', header: 'Pickup Notice', sortable: true, visible: pickupMode,
+      id: 'pickup', minWidth: 164, header: 'Pickup Notice', sortable: true, visible: pickupMode,
       accessor: (reg) => reg.ready_at ?? '',
       cell: (reg) => <PickupNoticeInfo reg={reg} />,
     },
     {
-      id: 'actions', header: 'Actions', align: 'right',
+      id: 'actions', width: onOpenEdit ? 360 : 432, header: 'Actions', align: 'right',
       cell: (reg) => (
-        <div className="flex items-center justify-end gap-2">
+        <div className={tableActions + ' justify-end gap-2'}>
           {pickupMode && onOpenNotify && (
             <button
               type="button"
@@ -208,9 +210,10 @@ export function CashierTable({
       getRowId={(reg) => reg.id}
       // Pickup list: longest-waiting orders first.
       defaultSort={pickupMode ? { column: 'pickup', direction: 'ascending' } : { column: 'job', direction: 'ascending' }}
-      loading={loading}
+      {...request}
       loadingMessage="Loading cashier ledger…"
       filtered={filtered}
+      searching={searching}
       emptyMessage={pickupMode ? 'No orders are waiting for pickup.' : 'No cashier records available.'}
       filteredEmptyMessage="No records matching current filter."
       className="animate-enter-delay-1"

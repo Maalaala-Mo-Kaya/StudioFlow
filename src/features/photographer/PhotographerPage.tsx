@@ -1,9 +1,11 @@
+import { DataFeedback } from '../../components/common/DataFeedback';
 import React, { useEffect, useRef, useState } from 'react';
 import { Aperture, Camera, CheckCircle2, ChevronDown, ChevronUp, FolderInput, Maximize2, Undo2, Volume2 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 import { formatClientName, formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import { usePhotographerQueue } from './usePhotographerQueue';
-import { BoughtDetails, CopyPathButton, PhotographerQueueCard } from './components/PhotographerQueueCard';
+import { CopyPathButton } from '../../components/common/CopyPathButton';
+import { BoughtDetails, PhotographerQueueCard } from './components/PhotographerQueueCard';
 import { PhotographerHistoryList } from './components/PhotographerHistoryList';
 import { CameraImportPanel } from './components/CameraImportPanel';
 import { ShootGallery } from './components/ShootGallery';
@@ -30,11 +32,11 @@ function SessionActions({ registration, station, photographerId, busy, onStart, 
 }) {
   return <PhotographyProgress registration={registration} action={(task) => {
     if (!photographerId || task.status === 'completed' || (task.photographerId && task.photographerId !== photographerId)) return null;
-    const linkedHere = registration.id === station?.client?.id && station.taskId === task.id && station.photographerId === photographerId;
+    const linkedHere = station?.enabled && registration.id === station.client?.id && station.taskId === task.id && station.photographerId === photographerId;
     return <button type="button" disabled={busy || !!task.finishingAt || (!linkedHere && !!station?.client)}
       className="btn-tactile mt-1 min-h-10 border border-line bg-gold px-3 font-bold text-on-gold disabled:opacity-50"
       onClick={() => linkedHere ? onFinish(registration, task) : onStart(registration, task)}>
-      {task.finishingAt ? 'Syncing photos…' : linkedHere ? 'Mark Done' : `Call Client · ${task.name}`}
+      {task.finishingAt ? 'Syncing photos…' : linkedHere ? 'Mark Done' : `Select · ${task.name}`}
     </button>;
   }} />;
 }
@@ -45,11 +47,12 @@ export const PhotographerPage: React.FC = () => {
     photographyRecords,
     recentlyDone,
     loading,
+    refreshing,
     loadError,
     activeTab,
     setActiveTab,
     fetchLiveQueue,
-    handleCallStudent,
+    startPhotography,
     handleMarkDone,
   } = usePhotographerQueue();
   const user = useAuth().user;
@@ -67,7 +70,7 @@ export const PhotographerPage: React.FC = () => {
   const selectedTask = selected && activePhotographyTasks(selected).find((task) => task.id === station?.taskId && task.photographerId === userId);
   const unselected = queue.filter((reg) => reg.id !== selectedId);
   const busy = queueBusy || camera.busy;
-  // The on-set client's full card opens in a popup when they are called. Closing it only hides the card:
+  // The on-set client's full card opens in a popup when they are selected. Closing it only hides the card:
   // the client stays selected (and the camera linked) until Mark Done.
   const [onSetOpenId, setOnSetOpenId] = useState('');
   const onSetOpen = !!selected && onSetOpenId === selected.id;
@@ -100,7 +103,7 @@ export const PhotographerPage: React.FC = () => {
   };
 
   const selectClient = (reg: Registration) => runQueueAction(async () => {
-    if (reg.status !== 'shooting' && !await handleCallStudent(reg)) return;
+    if (reg.status !== 'shooting' && !await startPhotography(reg)) return;
     if (station?.enabled) {
       await camera.linkClient(reg.id);
     } else {
@@ -109,7 +112,10 @@ export const PhotographerPage: React.FC = () => {
     setOnSetOpenId(reg.id);
   });
 
+  const canFinishSelected = selected?.status === 'shooting';
+
   const markDone = (reg: Registration) => runQueueAction(async () => {
+    if (selected?.id !== reg.id || !canFinishSelected) return;
     if (linkedId === reg.id && !await camera.unlinkClient(reg.id)) return;
     if (await handleMarkDone(reg)) {
       setSelectedWithoutCamera((id) => id === reg.id ? '' : id);
@@ -144,6 +150,7 @@ export const PhotographerPage: React.FC = () => {
   });
 
   const finishTask = (reg: Registration, task: PhotographyTask) => runQueueAction(async () => {
+    if (selected?.id !== reg.id || selectedTask?.id !== task.id || !canFinishSelected) return;
     try {
       const result = await photographyAction(reg.id, 'done', { taskId: task.id });
       if (result.syncing) {
@@ -169,15 +176,14 @@ export const PhotographerPage: React.FC = () => {
         { id: 'queue', label: 'Waiting Queue', count: queue.length },
         { id: 'history', label: 'Completed Today', count: recentlyDone.length },
       ]}>
-        {loadError && <p role="alert" className="text-sm font-bold text-red-700">{loadError}</p>}
+        <DataFeedback refreshing={refreshing} error={loadError} onRetry={fetchLiveQueue} className="p-3" />
         {activeTab === 'queue' && <CameraImportPanel link={camera} disabled={busy} />}
 
         {activeTab === 'queue' && (
           <div className="animate-enter-delay-1">
             {loading ? (
-              <div className="bg-panel border-2 border-line p-16 text-center font-mono text-neutral-500 text-xs uppercase tracking-widest">
-                Syncing live studio queue...
-              </div>
+              <DataFeedback loading loadingMessage="Loading the photography queue…"
+                className="border-2 border-line bg-panel p-12 text-center" />
             ) : (!loadError || queue.length > 0) && (
               <StationClientQueue
                 placeholderIcon={<Camera className="size-7 text-gold" aria-hidden="true" />}
@@ -236,7 +242,7 @@ export const PhotographerPage: React.FC = () => {
                           <Undo2 className="size-4 text-gold" aria-hidden="true" /> Return to Queue
                         </button>
                       )}
-                      <button type="button" disabled={busy || !!selectedTask?.finishingAt || (!!activePhotographyTasks(selected).length && !selectedTask)}
+                      <button type="button" disabled={busy || !canFinishSelected || !!selectedTask?.finishingAt || (!!activePhotographyTasks(selected).length && !selectedTask)}
                         onClick={() => selectedTask ? finishTask(selected, selectedTask) : markDone(selected)}
                         className="btn-tactile flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 border border-line bg-gold text-xs font-black uppercase tracking-wider text-on-gold disabled:cursor-default disabled:opacity-50">
                         <CheckCircle2 className="size-4 stroke-[2.5]" aria-hidden="true" /> {selectedTask?.finishingAt ? 'Syncing photos…' : 'Mark Done'}
@@ -251,7 +257,6 @@ export const PhotographerPage: React.FC = () => {
                   compact
                   busy={busy}
                   onSelect={selectClient}
-                  onMarkDone={markDone}
                   sessionActions={activePhotographyTasks(reg).length > 0 ? <SessionActions registration={reg} station={station}
                     photographerId={photographerId} busy={busy} onStart={startTask} onFinish={finishTask} /> : undefined}
                 />)}
@@ -277,7 +282,7 @@ export const PhotographerPage: React.FC = () => {
               )}
               <CopyPathButton registrationId={selected.id} className="min-h-10 px-3 text-[10px]" />
               {!activePhotographyTasks(selected).length && (
-                <button type="button" disabled={busy} onClick={() => markDone(selected)}
+                <button type="button" disabled={busy || !canFinishSelected} onClick={() => markDone(selected)}
                   className="btn-tactile ml-auto inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-line bg-gold px-4 text-xs font-black uppercase tracking-wider text-on-gold disabled:cursor-default disabled:opacity-50">
                   <CheckCircle2 className="size-4 stroke-[2.5]" aria-hidden="true" /> Mark Done
                 </button>
@@ -316,7 +321,7 @@ export const PhotographerPage: React.FC = () => {
                 void selectClient(reg);
               } else if (task.photographerId === photographerId) {
                 toast.success(`${task.name} is open again for ${formatClientName(reg)}.`);
-                // Start the reopened session on this device's camera, as Call Client does.
+                // Start the reopened session on this device's camera, as selecting a client does.
                 void startTask(reg, task);
               } else {
                 toast.success(`${task.name} is back in ${task.photographerName || 'the photographer'}'s queue for ${formatClientName(reg)}.`);

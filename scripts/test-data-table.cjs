@@ -37,3 +37,46 @@ test('sorting and refresh preserve visible IDs and pagination discards departed 
   assert.deepEqual(keepVisibleTableRows(opened, new Set(sorted.slice(range.offset).map((row) => row.id))).keys, ['job-1']);
   assert.deepEqual(keepVisibleTableRows(opened, new Set()).keys, []);
 });
+
+test('shared table keeps its columns and distinguishes request outcomes', async () => {
+  const { createElement } = require('react');
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const { resolve } = require('node:path');
+  const { runnerImport } = await import('vite');
+  const { module: { DataTable } } = await runnerImport(resolve(__dirname, '../src/components/common/DataTable.tsx'), { configFile: false });
+  const render = (props) => renderToStaticMarkup(createElement(DataTable, {
+    label: 'Clients',
+    columns: [
+      { id: 'name', header: 'Client', accessor: (row) => row.name, minWidth: 140 },
+      { id: 'status', header: 'Status', accessor: (row) => row.status, width: 88 },
+    ],
+    rows: [],
+    getRowId: (row) => row.id,
+    ...props,
+  }));
+  const loading = render({ loading: true });
+  const empty = render({});
+  const noResults = render({ searching: true, filtered: true });
+  const filtered = render({ filtered: true });
+  const error = render({ error: 'Client records could not be loaded.', onRetry() {} });
+  const rows = [{ id: 'client-1', name: 'Retained record', status: 'Waiting' }];
+  const refresh = render({ rows, refreshing: true });
+  const refreshFailure = render({ rows, error: 'Refresh failed', onRetry() {} });
+
+  for (const markup of [loading, empty, noResults, filtered, error, refresh, refreshFailure]) {
+    assert.match(markup, /<colgroup><col style="width:calc\(140px .*?\)"\/><col style="width:88px"\/><\/colgroup>/);
+    assert.match(markup, /<thead/);
+  }
+  assert.match(loading, /aria-hidden="true"/);
+  assert.doesNotMatch(loading, /No records/);
+  assert.match(empty, /No records available/);
+  assert.match(noResults, /No records match your search/);
+  assert.match(filtered, /No records match the selected filters/);
+  assert.match(error, /role="alert"/);
+  assert.match(error, />Retry<\/button>/);
+  assert.doesNotMatch(error, /No records available/);
+  assert.match(refresh, /Refreshing…/);
+  assert.match(refresh, /Retained record/);
+  assert.match(refreshFailure, /Refresh failed/);
+  assert.match(refreshFailure, /Retained record/);
+});

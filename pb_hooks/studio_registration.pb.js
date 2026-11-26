@@ -104,6 +104,10 @@ onRecordUpdateRequest((e) => {
     && (e.record.getString("status") === "cancelled" || before.getString("status") === "cancelled")) {
     throw new BadRequestError("Use the Cancel or Restore button so the reason and the person are recorded.");
   }
+  if (!e.hasSuperuserAuth() && changed("status") && e.record.getString("status") === "done_shooting"
+    && before.getString("status") !== "shooting" && !before.getBool("shoot_completed")) {
+    throw new BadRequestError("Select the client before marking photography done.");
+  }
   if (role === "photographer" || (role === "cashier" && !cashierEdit)) {
     // The cashier may also add add-ons at the counter (registration_billing.pb.js: additions only).
     // registration_billing.pb.js's hook has already run by now and re-priced the order, so the fields it
@@ -118,7 +122,7 @@ onRecordUpdateRequest((e) => {
     if (changed("status") && !(addsAtCounter && !Object.hasOwn(body, "status"))) {
       const current = before.getString("status");
       const next = e.record.getString("status");
-      if (role === "photographer" && !((current === "paid" && ["shooting", "done_shooting"].includes(next))
+      if (role === "photographer" && !((current === "paid" && next === "shooting")
         || (current === "shooting" && next === "done_shooting"))) {
         throw new BadRequestError("This photography queue transition is no longer available.");
       }

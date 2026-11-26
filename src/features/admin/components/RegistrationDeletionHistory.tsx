@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import { useState } from 'react';
 import { useWorkflowData } from '../../../hooks/useWorkflowData';
 
@@ -23,12 +24,11 @@ export function RegistrationDeletionHistory() {
 
 function DeletionHistoryEntries() {
   const [page, setPage] = useState(1);
-  const { data, error } = useWorkflowData<{ items: DeletionEntry[]; hasNext: boolean }>(`/registration-deletions?page=${page}`);
+  const { data, loading, refreshing, error, refresh } = useWorkflowData<{ items: DeletionEntry[]; hasNext: boolean }>(`/registration-deletions?page=${page}`);
   return (
     <div className="mt-4 space-y-3 text-sm">
-      {error && <p role="alert" className="text-red-700">{error}</p>}
-      {!data && !error && <p role="status">Loading deletion history…</p>}
-      {data?.items.length === 0 && <p>No registrations deleted.</p>}
+      <DataFeedback loading={loading} refreshing={refreshing} error={error} onRetry={refresh}
+        loadingMessage="Loading deletion history…" emptyMessage={data?.items.length === 0 ? 'No registrations deleted.' : undefined} />
       {data?.items.map((entry) => (
         <article key={entry.id} className="space-y-1 border-t border-line pt-3">
           <p className="font-bold">{entry.name} <span className="break-all font-mono text-xs text-neutral-600">{entry.id}</span></p>
@@ -40,7 +40,7 @@ function DeletionHistoryEntries() {
           </p>
         </article>
       ))}
-      {(page > 1 || data?.hasNext) && (
+      {(loading || error || page > 1 || data?.hasNext) && (
         <nav aria-label="Deletion history pages" className="flex items-center gap-3 text-xs">
           <button type="button" disabled={page === 1} onClick={() => setPage(page - 1)} className="border border-line px-3 py-2 disabled:opacity-50">Previous</button>
           <span>Page {page}</span>

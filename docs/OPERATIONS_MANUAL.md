@@ -101,7 +101,7 @@ Navigate to `#/admin` → **"Production & Pickup"**. Every paid order is listed,
 
 ### C. Photographer Floor Operations
 1. Client enters the queue automatically as soon as payment is confirmed.
-2. Click **"Call Client"** to broadcast studio chime and display "ON SET".
+2. Click **Select** on the client’s card to move them to **On Set**.
 3. Click **"Copy Path"** to paste the deterministic folder path directly into your camera tethering utility (e.g. Capture One / Lightroom):
    `D:\Pictorial_Master_Repository\<ORG>\<COURSE>\<JO_NO>_<NAME>`
 4. Advance the photo status selector: `Raw Stored` → `Client Selected` → `Ready to Print`.

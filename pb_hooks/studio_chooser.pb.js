@@ -208,8 +208,13 @@ routerAdd("POST", "/api/studioflow/photo-folder/{id}", (e) => {
   const workflow = require(__hooks + "/studio_workflow.js");
   const storage = require(__hooks + "/studio_photo_storage.js");
   const path = workflow.withRegistration(e.app, e.request.pathValue("id"), (tx, record) => {
-    workflow.staff(tx, e.auth, ["admin", "photographer"]);
+    const account = workflow.staff(tx, e.auth, ["admin", "photographer", "chooser"]);
+    const chooser = account.getString("role") === "chooser";
+    if (chooser && !workflow.photographyComplete(record)) {
+      throw new ApiError(409, "Photography must be completed before copying the photo folder path.");
+    }
     const folder = storage.photoFolder(tx, record);
+    if (chooser) return storage.displayPath(folder);
     try { storage.provision(folder); } catch (_) {
       throw new ApiError(503, "The photo folder could not be created. Check the server's photo storage.");
     }

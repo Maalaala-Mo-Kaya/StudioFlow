@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../components/common/DataFeedback';
 import React, { lazy, Suspense, useState } from 'react';
 import { useAdminData } from './useAdminData';
 import { AdminHeader } from './components/AdminHeader';
@@ -23,6 +24,9 @@ export const AdminPage: React.FC = () => {
   const admin = useAdminData();
   const [workflow, setWorkflow] = useState<'makeup' | 'photos'>('makeup');
 
+  const catalogSection = ['orgs', 'packages', 'catalog-import'].includes(admin.activeTab);
+  const standaloneState = catalogSection || admin.activeTab === 'metrics';
+
   return (
     <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8">
       {/* Executive Header */}
@@ -42,9 +46,21 @@ export const AdminPage: React.FC = () => {
 
         {/* Tab Content Panel */}
         <main className="flex-1 min-w-0 w-full">
+          {standaloneState && (admin.request.loading || admin.request.refreshing || admin.request.error) && (
+            <section className="mb-4 space-y-4 border-2 border-line bg-panel p-4" aria-busy={admin.request.loading || admin.request.refreshing}>
+              <DataFeedback {...admin.request} loadingMessage={admin.activeTab === 'metrics' ? 'Loading studio overview…' : 'Loading catalog records…'} />
+              {admin.request.loading && <div aria-hidden="true" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {Array.from({ length: 4 }, (_, index) => <div key={index} className="space-y-3 border border-line bg-canvas p-4 motion-safe:animate-pulse">
+                  <div className="h-3 w-1/2 bg-line" />
+                  <div className="h-7 w-2/3 bg-line" />
+                </div>)}
+              </div>}
+            </section>
+          )}
           {/* TAB 1: OPERATIONS METRICS & RECONCILIATION */}
-          {(admin.activeTab === 'metrics' || admin.activeTab === 'ledger') && (
+          {((admin.activeTab === 'metrics' && admin.hasLoaded) || admin.activeTab === 'ledger') && (
             <AdminAnalyticsTab
+              request={admin.request}
               view={admin.activeTab === 'ledger' ? 'ledger' : 'overview'}
               onOpenLedger={() => admin.setActiveTab('ledger')}
               metrics={admin.metrics}
@@ -62,7 +78,7 @@ export const AdminPage: React.FC = () => {
           )}
 
           {/* TAB 2: ORGANIZATIONS & COURSES (T018, T019) */}
-          {admin.activeTab === 'orgs' && (
+          {admin.activeTab === 'orgs' && admin.hasLoaded && (
             <AdminOrgsTab
               organizations={admin.organizations}
               levels={admin.levels}
@@ -84,7 +100,7 @@ export const AdminPage: React.FC = () => {
           )}
 
           {/* TAB 3: PACKAGES & ADD-ONS (T020) */}
-          {admin.activeTab === 'packages' && (
+          {admin.activeTab === 'packages' && admin.hasLoaded && (
             <AdminPackagesTab
               staffAccounts={admin.staffAccounts}
               packages={admin.packages}
@@ -106,7 +122,7 @@ export const AdminPage: React.FC = () => {
           )}
 
           {/* Packages & Add-ons → Import from File */}
-          {admin.activeTab === 'catalog-import' && (
+          {admin.activeTab === 'catalog-import' && admin.hasLoaded && (
             <AdminCatalogImportTab
               packages={admin.packages}
               addOns={admin.addOns}
@@ -121,6 +137,7 @@ export const AdminPage: React.FC = () => {
           {/* TAB 4: ROSTER INGESTION & MASTER LIST (T021, T022) */}
           {admin.activeTab === 'roster' && (
             <AdminRosterTab
+              request={admin.request}
               organizations={admin.organizations}
               masterList={admin.masterList}
               rosterOrgId={admin.rosterOrgId}
@@ -136,6 +153,7 @@ export const AdminPage: React.FC = () => {
           {/* TAB 5: STUDENT PARTICIPANT DIRECTORY & MANAGEMENT (T028) */}
           {admin.activeTab === 'students' && (
             <AdminStudentsTab
+              request={admin.request}
               registrations={admin.registrations}
               organizations={admin.organizations}
               levels={admin.levels}
@@ -152,6 +170,7 @@ export const AdminPage: React.FC = () => {
           {/* TAB 6: PRODUCTION & PICKUP (framing, printing, ready for pickup) */}
           {admin.activeTab === 'framing' && (
             <AdminProductionTab
+              request={admin.request}
               staffAccounts={admin.staffAccounts}
               registrations={admin.registrations}
               onSetProductionStatus={admin.handleSetProductionStatus}
@@ -180,6 +199,7 @@ export const AdminPage: React.FC = () => {
 
           {admin.activeTab === 'staff' && (
             <AdminStaffTab
+              request={admin.request}
               staffAccounts={admin.staffAccounts}
               staffUsername={admin.staffUsername}
               onStaffUsernameChange={admin.setStaffUsername}

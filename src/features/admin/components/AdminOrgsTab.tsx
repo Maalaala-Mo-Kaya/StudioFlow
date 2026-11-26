@@ -258,7 +258,7 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
 
   return (
     <div className="space-y-8 animate-enter font-mono text-xs">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 items-start gap-6 sm:gap-8">
         {/* Schools Management */}
         <div className="bg-panel border-2 border-line shadow-lux p-6 flex flex-col justify-between">
           <div>
@@ -575,10 +575,10 @@ export const AdminOrgsTab: React.FC<AdminOrgsTabProps> = ({
                       {lvlCourses.map(({ assignment, course: c }) => (
                           <div
                             key={c.id}
-                            className="p-2 bg-panel border border-neutral-300 flex flex-wrap justify-between items-center gap-2"
+                            className="p-2 bg-panel border border-neutral-300 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2"
                           >
                               <>
-                                <div>
+                                <div className="min-w-0 wrap-anywhere">
                                   <span className="font-bold text-ink uppercase">{c.name}</span>
                                   {c.code && (
                                     <span className="font-mono font-black text-gold-soft ml-2 text-[10px]">

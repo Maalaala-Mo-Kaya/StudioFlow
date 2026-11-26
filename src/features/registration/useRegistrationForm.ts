@@ -92,7 +92,12 @@ export function useRegistrationForm() {
     let active = true;
     void pb.collection('master_lists').getFullList<MasterListItem>().then((items) => {
       if (active) setMasterList(items);
-    }).catch(() => { /* The staff-only roster may be unavailable on the kiosk. */ });
+    }).catch((error: unknown) => {
+      // The optional staff roster is deliberately unavailable to kiosk guests.
+      if (active && !(error instanceof ClientResponseError && [401, 403, 404].includes(error.status))) {
+        console.error('Failed to load the optional registration roster:', error);
+      }
+    });
     return () => { active = false; };
   }, []);
 
@@ -515,7 +520,7 @@ export function useRegistrationForm() {
     addOnsList: manualAddOns,
     defaultAddOn,
     catalogError,
-    catalogLoading: !registrationCatalog && !catalogError,
+    refreshCatalog,
     masterList,
     // Form State & Setters
     familyName,

@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import React, { useEffect, useState } from 'react';
 import { GraduationCap, Camera, MapPin, Plus, Save, ScrollText, Sparkles } from 'lucide-react';
 import { RecordActionButton, recordActionGroup } from '../../../components/common/RecordActionButton';
@@ -106,9 +107,9 @@ export const AdminClientTypesTab: React.FC = () => {
         <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink m-0 pb-3 border-b-2 border-line mb-4">
           Who Can Register at the Kiosk
         </h3>
-        {!settings && studio.loaded ? (
-          <p className="text-xs text-red-700">Studio settings were not found. Restart the server so the latest update is applied.</p>
-        ) : (
+        <DataFeedback loading={studio.loading} refreshing={studio.refreshing} error={studio.error}
+          onRetry={studio.refresh} loadingMessage="Loading studio settings…" className="min-h-12 p-2" />
+        {settings && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Switch
               Icon={GraduationCap}
@@ -165,11 +166,11 @@ export const AdminClientTypesTab: React.FC = () => {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 items-start gap-6">
         {/* Session types */}
         <div className="bg-panel border-2 border-line shadow-lux p-6">
           <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink m-0 pb-3 border-b-2 border-line mb-4">
-            Walk-in Session Types ({sessionTypes.length})
+            Walk-in Session Types{studio.loaded ? ` (${sessionTypes.length})` : ''}
           </h3>
           <form onSubmit={saveSession} className="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end mb-4">
             <div className="sm:col-span-3">
@@ -188,7 +189,7 @@ export const AdminClientTypesTab: React.FC = () => {
               Outside the studio (asks date &amp; venue)
             </label>
             <div className="sm:col-span-6 flex gap-2">
-              <button type="submit" disabled={saving}
+              <button type="submit" disabled={saving || !studio.loaded}
                 className="btn-tactile flex-1 min-h-[42px] inline-flex items-center justify-center gap-2 bg-gold text-on-gold text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50">
                 <Plus className="w-4 h-4" /> Add Session
               </button>
@@ -196,8 +197,9 @@ export const AdminClientTypesTab: React.FC = () => {
           </form>
           <ul className="space-y-2">
             {sessionTypes.map((type) => (
-              <li key={type.id} className={`flex flex-wrap items-center justify-between gap-3 border p-3 ${editingId === type.id ? 'border-gold bg-gold-wash' : 'border-neutral-300 bg-canvas'}`}>
-                <div className="min-w-0">
+              <li key={type.id} className={`@container border p-3 ${editingId === type.id ? 'border-gold bg-gold-wash' : 'border-neutral-300 bg-canvas'}`}>
+                <div className="flex flex-wrap items-center gap-3 @min-[360px]:flex-nowrap">
+                <div className="min-w-0 flex-1 basis-full wrap-anywhere @min-[360px]:basis-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-black text-sm uppercase text-ink">{type.name}</span>
                     {type.code && <span className="font-mono text-[10px] text-neutral-500">{type.code}</span>}
@@ -208,7 +210,7 @@ export const AdminClientTypesTab: React.FC = () => {
                     )}
                   </div>
                 </div>
-                <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
                   <button type="button" disabled={saving}
                     onClick={async () => {
                       try {
@@ -242,6 +244,7 @@ export const AdminClientTypesTab: React.FC = () => {
                     }} />
                     <RecordActionButton variant="delete" recordName={type.name} onClick={() => setDeleting(type)} />
                   </span>
+                </div>
                 </div>
               </li>
             ))}
@@ -287,7 +290,7 @@ export const AdminClientTypesTab: React.FC = () => {
             One clause per line. Shown at the kiosk for walk-in clients and printed on their claim stub. School clients keep the graduation terms.
           </p>
           <textarea value={terms} rows={12} onChange={(event) => { setTerms(event.target.value); setTermsDirty(true); }}
-            className="flex-1 w-full text-xs leading-relaxed px-3 py-2 border border-neutral-400 bg-canvas focus:bg-panel" />
+            className="w-full text-xs leading-relaxed px-3 py-2 border border-neutral-400 bg-canvas focus:bg-panel" />
           <div className="mt-3 flex gap-2">
             <button type="button" onClick={() => void saveTerms()} disabled={saving || !termsDirty || !settings}
               className="btn-tactile flex-1 min-h-[42px] inline-flex items-center justify-center gap-2 bg-gold text-on-gold text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50">

@@ -475,6 +475,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await send(records('users', artists[0].id), { token: artists[0].token, method: 'PATCH', body: { role: 'admin' }, status: 404 });
   await send(records('payments'), { token: artists[0].token, method: 'POST', body: {}, status: 400 });
   await contest(unpaid, artists[0], 'claim', 409);
+  const refusedCompletion = await shoot(plain, 'done_shooting', 400);
+  assert.match(refusedCompletion.payload.message, /Select the client before marking photography done/);
+  await registrations(plain, admin, { status: 'done_shooting' }, 400);
+  const stillWaiting = (await registrations(plain)).payload;
+  assert.equal(stillWaiting.status, 'paid');
   await shoot(plain, 'shooting');
   await shoot(plain, 'done_shooting');
 
@@ -591,6 +596,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const path = await folder(galleryStudent);
   assert.notEqual(path, plainFolder);
   assert.equal(path, clientFolder(galleryStudent));
+  const chooserPhotoFolder = (student, token, status = 200) =>
+    send(`${api}/photo-folder/${student.id}`, { method: 'POST', token, status });
+  assert.equal((await chooserPhotoFolder(galleryStudent, chooser.token)).payload.path, path);
+  await chooserPhotoFolder(unpaid, chooser.token, 409);
+  await chooserPhotoFolder(galleryStudent, cashier, 403);
   assert.equal(plainFolder, clientFolder(paidPlain));
   assert.equal((await send(api + '/chooser?q=' + plain.student_id, { token: chooser.token })).payload.items[0].availability, 'empty');
   await writeFile(join(plainFolder, 'other.png'), png);
@@ -1447,8 +1457,9 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       assert.deepEqual(tasks.map((task) => task.name), ['Graduation Portrait', 'Family Picture']);
       const familyTask = tasks[1].id;
       await act(student, primary, 'start', familyTask, 403);
-      await shoot(student, 'done_shooting', 403);
+      await shoot(student, 'done_shooting', 400);
       await act(student, primary, 'start', 'primary');
+      await shoot(student, 'done_shooting', 403);
       await act(student, second, 'start', familyTask);
       await act(student, primary, 'done', familyTask, 403);
       await scan({ ...primary, camera: familyCamera }, 'end', 403);
@@ -1531,6 +1542,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
 
     const late = await register(standard);
     await pay(late, 1000);
+    await shoot(late, 'shooting');
     await shoot(late, 'done_shooting');
     assert.equal(await inChooser(late), 1);
     const lateFolder = await folder(late);

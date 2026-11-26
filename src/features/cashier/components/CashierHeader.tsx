@@ -3,6 +3,8 @@ import { RotateCw } from 'lucide-react';
 import { formatCurrency } from '../../../utils/formatters';
 
 interface CashierHeaderProps {
+  hasLoaded: boolean;
+  loading: boolean;
   totalCollectedToday: number;
   /** Counted (not voided) payments since Manila midnight. */
   paymentsToday: number;
@@ -27,6 +29,8 @@ function lastPaymentLabel(value: string): string {
 }
 
 export const CashierHeader: React.FC<CashierHeaderProps> = ({
+  hasLoaded,
+  loading,
   totalCollectedToday,
   paymentsToday,
   refundsToday = 0,
@@ -65,13 +69,14 @@ export const CashierHeader: React.FC<CashierHeaderProps> = ({
             Collected Today
           </span>
           <span className="font-mono text-lg sm:text-xl font-black text-gold">
-            {formatCurrency(totalCollectedToday)}
+            {hasLoaded ? formatCurrency(totalCollectedToday) : '—'}
           </span>
-          <span className="block font-mono text-[10px] text-neutral-400 mt-0.5">{summary}</span>
+          <span className="block font-mono text-[10px] text-neutral-400 mt-0.5">{hasLoaded ? summary : loading ? 'Loading payments…' : 'Payments unavailable'}</span>
         </div>
         <button
           type="button"
           onClick={onRefresh}
+          aria-label="Refresh cashier records"
           className="btn-tactile min-h-[48px] flex items-center gap-2 px-4 py-2.5 bg-obsidian-2 hover:bg-neutral-800 border border-neutral-700 text-white text-xs font-black uppercase tracking-widest cursor-pointer"
         >
           <RotateCw className="w-4 h-4 text-gold" />

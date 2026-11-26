@@ -1,3 +1,5 @@
+import { CopyPathButton } from '../../components/common/CopyPathButton';
+import { DataFeedback } from '../../components/common/DataFeedback';
 import { useEffect, useRef, useState } from 'react';
 import { Check, ImageOff, Images, Maximize2, StickyNote, X } from 'lucide-react';
 import { ClientResponseError } from 'pocketbase';
@@ -7,7 +9,7 @@ import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWork
 import { useAuthedImage } from '../../hooks/useAuthedImage';
 import { studioDate } from '../../utils/studioDay';
 import { clampDay, useStudioCalendar } from '../../hooks/useStudioCalendar';
-import { DataTable, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
+import { DataTable, tableActions, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
 import { TablePagination } from '../../components/common/TablePagination';
 import { Modal } from '../../components/common/Modal';
 import { StationTabs } from './StationTabs';
@@ -90,7 +92,7 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
   const [opening, setOpening] = useState(false);
   const [gallery, setGallery] = useState<Gallery>();
   const query = new URLSearchParams({ q: search.trim(), page: String(page), selection: filter, done, school, course, day });
-  const { data, error, refresh } = useWorkflowData<ChooserList>(`/chooser?${query}`);
+  const { data, loading, refreshing, error, refresh } = useWorkflowData<ChooserList>(`/chooser?${query}`);
   const filters = useWorkflowData<{ schools: FilterSchool[] }>('/chooser-filters');
   const schools = filters.data?.schools ?? [];
   const chosenSchool = schools.find((item) => item.id === school);
@@ -112,28 +114,31 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  function selectionAction(student: ChooserStudent) {
+  function chooserActions(student: ChooserStudent) {
     return (
-      <button className={stationButton} type="button" disabled={opening || !['available', 'recovering'].includes(student.availability)}
-        onClick={() => void open(student)}>
-        {student.availability === 'recovering' ? 'Resume transfer' : 'Open photo selection'}
-      </button>
+      <div className={tableActions + ' gap-2'}>
+        <button className={stationButton + ' whitespace-nowrap'} type="button" disabled={opening || !['available', 'recovering'].includes(student.availability)}
+          onClick={() => void open(student)}>
+          {student.availability === 'recovering' ? 'Resume transfer' : 'Open photo selection'}
+        </button>
+        <CopyPathButton registrationId={student.id} className="min-h-10 px-3 text-[11px]" />
+      </div>
     );
   }
 
   const columns: DataTableColumn<ChooserStudent>[] = [
-    { id: 'job', header: 'Job Order №', accessor: (student) => student.jobOrder, cellClassName: 'whitespace-nowrap font-mono font-bold' },
+    { id: 'job', width: 120, header: 'Job Order №', accessor: (student) => student.jobOrder, cellClassName: 'whitespace-nowrap font-mono font-bold' },
     { id: 'name', header: 'Client name', accessor: (student) => student.name, cellClassName: 'font-bold', minWidth: 120 },
-    { id: 'school', header: 'School / Client type', cell: (student) => <>
+    { id: 'school', minWidth: 150, header: 'School / Client type', cell: (student) => <>
       {student.school || '—'}{student.course && <span className="block text-neutral-600">{student.course}</span>}
     </> },
-    { id: 'package', header: 'Package', accessor: (student) => student.packageName },
-    { id: 'status', header: 'Photo selection status', cell: (student) => (
+    { id: 'package', minWidth: 148, header: 'Package', accessor: (student) => student.packageName },
+    { id: 'status', width: 166, header: 'Photo selection status', cell: (student) => (
       <span className={`inline-block border px-1.5 py-0.5 font-bold ${student.selectionState === 'completed' ? 'border-emerald-600/40 text-emerald-700' : 'border-line text-ink'}`}>
         {selectionStates[student.selectionState]}
       </span>
     ) },
-    { id: 'actions', header: 'Actions', cell: selectionAction, minWidth: 145 },
+    { id: 'actions', width: 324, header: 'Actions', cell: chooserActions },
   ];
 
   return (
@@ -145,17 +150,19 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
           { id: 'selected', label: 'Already Selected', count: data?.counts?.selected },
           { id: '', label: 'All Clients', count: data?.counts?.all },
         ]}>
-          {error && <p role="alert" className="text-sm font-bold text-red-700">{error}</p>}
           <DataTable label="Photo Chooser clients" rows={data?.items ?? []} columns={columns}
-            getRowId={(student) => student.id} pagination={false} loading={!data && !error} loadingMessage="Looking up clients…"
-            filtered={!!(search.trim() || school || course || filter || dayMode)}
+            getRowId={(student) => student.id} pagination={false} loading={loading} refreshing={refreshing} error={error} onRetry={refresh} loadingMessage="Looking up clients…"
+            searching={Boolean(search.trim())}
+            filtered={!!(school || course || filter || dayMode)}
             filteredEmptyMessage="No photographed clients match the current filters."
             emptyMessage={done === 'not_selected' ? 'No photographed clients are waiting for photo selection.'
               : done === 'selected' ? 'No completed photo selections.' : 'No photographed clients found.'}
-            headerClassName="uppercase tracking-wide" tableClassName="min-w-[720px]"
+            headerClassName="uppercase tracking-wide" tableClassName="min-w-[720px]" viewportClassName="min-h-44"
             onRowClick={(student) => setOpenId(student.id)}
             toolbar={
               <div className="space-y-2 p-2">
+                {opening && <p role="status" className="text-sm text-neutral-600">Opening photo selection…</p>}
+                {filters.error && <DataFeedback error="Could not load the school and course filters." onRetry={filters.refresh} />}
                 {/* Search + school / course (advanced filter) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 items-end">
                   <label className="block sm:col-span-2 lg:col-span-4">
@@ -166,9 +173,9 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
                   </label>
                   <label className="block lg:col-span-3">
                     <span className="mb-1 block text-[11px] font-bold uppercase">School / client type</span>
-                    <select className={`${tableFilterControl} w-full`} value={school}
+                    <select className={`${tableFilterControl} w-full`} value={school} disabled={!filters.data}
                       onChange={(event) => { setSchool(event.target.value); setCourse(''); setPages({}); }}>
-                      <option value="">All schools &amp; clients</option>
+                      <option value="">{filters.loading ? 'Loading schools…' : 'All schools & clients'}</option>
                       {schools.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.clients})</option>)}
                     </select>
                   </label>
@@ -235,15 +242,15 @@ export function ChooserPage({ embedded = false }: { embedded?: boolean }) {
                     <div><dt className="font-bold">Selection progress</dt><dd>{student.selectedCount} selected · {student.unselectedCount} unselected</dd></div>
                   )}
                 </dl>
-                {selectionAction(student)}
+                {chooserActions(student)}
               </div>
               </Modal>
             );
           })()}
-          {(page > 1 || data?.hasMore) && (
+          {(loading || error || page > 1 || data?.hasMore) && (
           <TablePagination label="Photo Chooser pagination" pageLabel={`Page ${page}`}
               previous={page > 1 ? () => setPages({ ...pages, [done]: page - 1 }) : undefined}
-              next={data?.hasMore ? () => setPages({ ...pages, [done]: page + 1 }) : undefined} />
+              next={!loading && data?.hasMore ? () => setPages({ ...pages, [done]: page + 1 }) : undefined} />
           )}
         </StationTabs>
       )}
@@ -331,7 +338,10 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
     <div className="space-y-5">
       <div className={`${stationCard} flex flex-wrap items-start justify-between gap-3`}>
         <StationStudentDetails student={gallery.student} />
-        <button type="button" className={stationButton} disabled={busy} onClick={close}>Back to students</button>
+        <div className={tableActions + ' gap-2'}>
+          <CopyPathButton registrationId={gallery.student.id} className="min-h-10 px-3 text-[11px]" />
+          <button type="button" className={stationButton} disabled={busy} onClick={close}>Back to students</button>
+        </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>

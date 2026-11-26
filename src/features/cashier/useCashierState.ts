@@ -60,7 +60,7 @@ export function useCashierState() {
   const [lastPaymentAt, setLastPaymentAt] = useState('');
   // The studio day (Manila midnight) the total belongs to; when it changes, the total reloads.
   const [studioDay, setStudioDay] = useState(studioDayStartUtc);
-  const [loading, setLoading] = useState(true);
+  const [request, setRequest] = useState({ ready: false, pending: true, error: '' });
   const [activeTab, setActiveTab] = useState<CashierTab>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   // School / walk-in picker next to the search box.
@@ -103,10 +103,10 @@ export function useCashierState() {
   // Release Modal State
   const [releaseReg, setReleaseReg] = useState<Registration | null>(null);
 
-  const fetchRegistrations = useCallback(async (background = false) => {
+  const fetchRegistrations = useCallback(async () => {
     const generation = ++fetchGeneration.current;
+    setRequest((current) => ({ ...current, pending: true, error: '' }));
     try {
-      if (!background) setLoading(true);
       const [records, todaysPayments, todaysRefunds, lastPayment, eligibleIds, editIds] = await Promise.all([
         pb.collection('registrations').getFullList<Registration>({
           sort: '-created',
@@ -124,7 +124,10 @@ export function useCashierState() {
           filter: pb.filter('created >= {:start}', { start: studioDayStartUtc() }),
           fields: 'amount',
           requestKey: null,
-        }).catch(() => [] as RefundRecord[]),
+        }).catch((error: unknown) => {
+          if (error instanceof ClientResponseError && error.status === 404) return [];
+          throw error;
+        }),
         // The most recent counted payment, shown under the total (e.g. when today is still ₱0).
         pb.collection('payments').getList<PaymentRecord>(1, 1, {
           filter: "status = 'completed' || status = ''",
@@ -132,8 +135,8 @@ export function useCashierState() {
           fields: 'created',
           requestKey: null,
         }),
-        pb.send<string[]>('/api/studioflow/deletable-registrations', { requestKey: null, cache: 'no-store' }).catch(() => []),
-        pb.send<string[]>('/api/studioflow/cashier-editable-registrations', { requestKey: null, cache: 'no-store' }).catch(() => []),
+        pb.send<string[]>('/api/studioflow/deletable-registrations', { requestKey: null, cache: 'no-store' }),
+        pb.send<string[]>('/api/studioflow/cashier-editable-registrations', { requestKey: null, cache: 'no-store' }),
       ]);
       if (generation !== fetchGeneration.current) return;
       setRegistrations(records);
@@ -145,11 +148,11 @@ export function useCashierState() {
       setRefundsToday(todaysRefunds.length);
       setPaymentsToday(todaysPayments.length);
       setLastPaymentAt(lastPayment.items[0]?.created ?? '');
+      setRequest({ ready: true, pending: false, error: '' });
     } catch (err) {
-      if (err && typeof err === 'object' && 'isAbort' in err && err.isAbort) return;
+      if (generation !== fetchGeneration.current) return;
       console.error('Failed to fetch registrations:', err);
-    } finally {
-      if (generation === fetchGeneration.current) setLoading(false);
+      setRequest((current) => ({ ...current, pending: false, error: 'Could not load the latest cashier records.' }));
     }
   }, []);
 
@@ -159,8 +162,9 @@ export function useCashierState() {
     const stopRegistrations = mountSubscription(
       (listener) => live.collection('registrations').subscribe('*', listener), () => fetchRegistrations());
     const stopDeleted = mountSubscription(
-      (listener) => live.realtime.subscribe('studioflow-registration-deleted', listener), () => fetchRegistrations(true));
+      (listener) => live.realtime.subscribe('studioflow-registration-deleted', listener), () => fetchRegistrations());
     return () => {
+      fetchGeneration.current += 1;
       stopRegistrations();
       stopDeleted();
     };
@@ -185,7 +189,7 @@ export function useCashierState() {
       }
       return 'Deletion could not be confirmed. Check your connection and try again.';
     } finally {
-      void fetchRegistrations(true);
+      void fetchRegistrations();
     }
   };
 
@@ -234,7 +238,10 @@ export function useCashierState() {
         pb.collection('refunds').getFullList<RefundRecord>({
           filter: pb.filter('registration = {:registration}', { registration: reg.id }),
           ...options,
-        }).catch(() => [] as RefundRecord[]),
+        }).catch((error: unknown) => {
+          if (error instanceof ClientResponseError && error.status === 404) return [];
+          throw error;
+        }),
       ]);
       if (signal.aborted) return;
       const refundedCentavos = refunds.reduce((sum, refund) => sum + toCentavos(refund.amount), 0);
@@ -425,7 +432,7 @@ export function useCashierState() {
     editableIds,
     applyRegistrationEdit: (saved: Registration) => {
       setRegistrations((current) => current.map((reg) => reg.id === saved.id ? saved : reg));
-      void fetchRegistrations(true);
+      void fetchRegistrations();
     },
     deletableIds,
     deleteReg,
@@ -433,7 +440,11 @@ export function useCashierState() {
     closeDeleteModal: () => setDeleteReg(null),
     deleteRegistration,
     filteredRegistrations,
-    loading,
+    request: {
+      loading: request.pending && !request.ready, refreshing: request.pending && request.ready,
+      error: request.error, onRetry: fetchRegistrations,
+    },
+    hasLoaded: request.ready,
     activeTab,
     setActiveTab,
     searchQuery,

@@ -1,6 +1,7 @@
+import { DataFeedback, type DataRequestState } from '../../components/common/DataFeedback';
 import { useId, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowUpRight, CircleCheck, ListFilter, Paintbrush, Search, UserRound, Users } from 'lucide-react';
+import { ArrowUpRight, CircleCheck, ListFilter, Paintbrush, Search, UserRound } from 'lucide-react';
 import { DataTable, type DataTableColumn } from '../../components/common/DataTable';
 import { Modal } from '../../components/common/Modal';
 import type { TablePage, TableSort } from '../../components/common/dataTableModel';
@@ -69,14 +70,14 @@ const teamColumns: DataTableColumn<Artist>[] = [
   { id: 'completed', header: 'Completed', accessor: (artist) => artist.completed, align: 'right', sortable: true },
 ];
 
-export function MakeupTeamTable({ artists, loading, sort, onSort }: {
-  artists: MuaTeam['artists']; loading: boolean; sort: TableSort; onSort: (sort: TableSort) => void;
+export function MakeupTeamTable({ artists, request, sort, onSort }: {
+  artists: MuaTeam['artists']; request: DataRequestState; sort: TableSort; onSort: (sort: TableSort) => void;
 }) {
   return (
     <section className="min-w-0 space-y-2">
       <h3 className="text-sm font-black uppercase tracking-wide">Team workload</h3>
       <DataTable label="MUA team status" rows={artists} columns={teamColumns} getRowId={(artist) => artist.id}
-        pagination={false} sorting={{ value: sort, onChange: onSort }} loading={loading} emptyMessage="No active MUA staff found."
+        pagination={false} sorting={{ value: sort, onChange: onSort }} {...request} loadingMessage="Loading team workload…" emptyMessage="No active MUA staff found."
         className={makeupTable} tableClassName="min-w-[440px]"
         renderCompactRow={(artist) => (
           <article className={stationCard}>
@@ -100,15 +101,14 @@ interface MakeupClientsViewProps {
   title: string;
   kind: 'waiting' | 'assigned' | 'completed';
   rows: MakeupAssignment[];
-  loading?: boolean;
-  failed?: boolean;
+  request: DataRequestState;
   view: MakeupTableView;
   onViewChange: (change: MakeupTableView) => void;
   renderAction?: (row: MakeupAssignment) => ReactNode;
 }
 
 export function MakeupClientsView({
-  title, kind, rows, loading, failed, view, onViewChange, renderAction,
+  title, kind, rows, request, view, onViewChange, renderAction,
 }: MakeupClientsViewProps) {
   const heading = useId();
   const filterId = useId();
@@ -145,27 +145,27 @@ export function MakeupClientsView({
   const open = openKey && rows.find((row) => (row.rowKey ?? row.id) === openKey);
 
   const columns: DataTableColumn<MakeupAssignment>[] = [
-    { id: 'job', header: 'Job Order №', accessor: (row) => row.jobOrder, sortable: true, cellClassName: 'whitespace-nowrap font-mono font-bold' },
-    { id: 'client', header: 'Client name', accessor: (row) => row.name, sortable: true, minWidth: 130,
+    { id: 'job', width: 120, header: 'Job Order №', accessor: (row) => row.jobOrder, sortable: true, cellClassName: 'whitespace-nowrap font-mono font-bold' },
+    { id: 'client', header: 'Client name', accessor: (row) => row.name, sortable: true, minWidth: 184,
       cell: (row) => <><span className="font-bold">{row.name || '—'}</span>{(row.look || row.lookNote)
         && <span className="block text-[11px] text-gold-soft">{row.lookNote ? 'Client note' : 'Preferred look'}</span>}</> },
-    { id: 'package', header: 'Package', accessor: (row) => row.packageName, sortable: true, visible: kind === 'waiting' },
-    { id: 'service', header: 'MUA service', accessor: serviceNames, sortable: true, minWidth: 120,
+    { id: 'package', minWidth: 184, header: 'Package', accessor: (row) => row.packageName, sortable: true, visible: kind === 'waiting' },
+    { id: 'service', header: 'MUA service', accessor: serviceNames, sortable: true, minWidth: 156,
       cell: (row) => <>{serviceNames(row)}{row.state !== 'completed' && requiresConfirmation(row)
         && <span className="block text-[11px] font-bold text-gold-soft">Confirmation required</span>}</> },
     { id: 'artist', header: 'Completed by', accessor: (row) => row.artistName,
       sortable: true, visible: kind !== 'waiting' },
     { id: 'time', header: 'Completion time', accessor: (row) => instant(row.completedAt), sortable: true,
-      visible: kind === 'completed', cell: (row) => dateTime(row.completedAt), cellClassName: 'whitespace-nowrap' },
-    { id: 'status', header: 'Status', accessor: status, sortable: true, cell: (row) => <MakeupStatus row={row} /> },
-    { id: 'actions', header: 'Action', visible: kind === 'waiting', cell: renderAction ?? (() => null), minWidth: 140 },
+      visible: kind === 'completed', cell: (row) => dateTime(row.completedAt), cellClassName: 'whitespace-nowrap', minWidth: 132 },
+    { id: 'status', width: 130, header: 'Status', accessor: status, sortable: true, cell: (row) => <MakeupStatus row={row} /> },
+    { id: 'actions', width: 184, header: 'Action', visible: kind === 'waiting', cell: renderAction ?? (() => null) },
   ];
 
   return (
     <section aria-labelledby={heading} className="min-w-0 space-y-3">
       <div className="flex items-center gap-2 border-b-2 border-line pb-2">
         <h2 id={heading} className="text-sm font-black uppercase tracking-wider">{title}</h2>
-        {!loading && !failed && <span className="border border-line bg-panel px-2 py-0.5 font-mono text-[11px] font-bold text-gold-soft">
+        {!request.loading && (!request.error || rows.length > 0) && <span className="border border-line bg-panel px-2 py-0.5 font-mono text-[11px] font-bold text-gold-soft">
           {filtersActive ? `${filteredRows.length}/${rows.length}` : rows.length}
         </span>}
       </div>
@@ -212,18 +212,25 @@ export function MakeupClientsView({
           {filtersActive && <button type="button" onClick={clearFilters} className={makeupSecondary}>Clear filters</button>}
         </div>
       )}
-      {loading || filteredRows.length === 0 ? (
-        <div role="status" className={`${stationCard} text-sm`}>
-          {loading ? <p className="p-4 text-center">Loading clients…</p>
-            : <MakeupEmptyState kind={kind} failed={failed} filtered={filtersActive} />}
-        </div>
-      ) : orderedAssignments ? (
-        <ul className="grid items-start gap-3 md:grid-cols-2">
-          {orderedAssignments.map((row) => <li key={row.id}>{renderCard(row)}</li>)}
-        </ul>
+      {orderedAssignments ? (
+        <>
+          <DataFeedback {...request} loadingMessage="Loading clients…"
+            className="min-h-12 border border-line bg-panel p-3"
+            emptyMessage={orderedAssignments.length === 0
+              ? queryText ? 'No assignments match your search.'
+                : filtersActive ? 'No assignments match the current filters.' : 'No active assignments.'
+              : undefined} />
+          {!!orderedAssignments.length && <ul className="grid items-start gap-3 md:grid-cols-2">
+            {orderedAssignments.map((row) => <li key={row.id}>{renderCard(row)}</li>)}
+          </ul>}
+        </>
       ) : (
         <DataTable label={title} rows={filteredRows} columns={columns} getRowId={(row) => row.rowKey ?? row.id}
-          pagination={filteredRows.length > pageSizes[0] ? { pageSizes, value: page, onChange: (next) => onViewChange({ page: next }) } : false}
+          {...request} loadingMessage="Loading clients…"
+          searching={Boolean(queryText)}
+          filtered={filtersActive} filteredEmptyMessage="No clients match the current filters."
+          emptyMessage={kind === 'completed' ? 'No completed services for this date.' : 'No clients waiting.'}
+          pagination={{ pageSizes, value: page, onChange: (next) => onViewChange({ page: next }) }}
           sorting={{ value: sort, onChange: (next) => onViewChange({ sort: next }) }}
           tableClassName="min-w-[650px]" className={makeupTable}
           onRowClick={openDetails} renderCompactRow={renderCard}
@@ -249,23 +256,6 @@ function MakeupStatus({ row }: { row: MakeupAssignment }) {
       {row.state === 'in_progress' && <span className="size-1.5 bg-gold" aria-hidden="true" />}
       {status(row)}
     </span>
-  );
-}
-
-function MakeupEmptyState({ kind, failed, filtered }: { kind: MakeupClientsViewProps['kind']; failed?: boolean; filtered?: boolean }) {
-  const Icon = failed ? Paintbrush : filtered ? Search : kind === 'completed' ? CircleCheck : kind === 'waiting' ? Users : Paintbrush;
-  const title = failed ? 'Clients could not be loaded' : filtered ? 'No matching clients' : kind === 'completed'
-    ? 'No completed services' : kind === 'waiting' ? 'No clients waiting' : 'No active assignments';
-  const message = failed ? 'Use Refresh to try again.' : filtered ? 'Try a different search or clear the filters.'
-    : kind === 'completed' ? 'Choose another date to review completed services.'
-      : kind === 'waiting' ? 'Clients appear here when they are ready for makeup or grooming.'
-        : 'New assignments will appear here as they are made.';
-  return (
-    <div className="mx-auto flex max-w-sm flex-col items-center gap-2 px-2 py-5 text-center">
-      <Icon className="size-6 text-gold" aria-hidden="true" />
-      <p className="text-sm font-black uppercase tracking-wide text-ink">{title}</p>
-      <p className="text-sm text-ink/75">{message}</p>
-    </div>
   );
 }
 
@@ -321,7 +311,7 @@ function TableFilter({ name, value, onChange, options }: {
 }
 
 function MakeupClientDetails({ row }: { row: MakeupAssignment }) {
-  const { data, error } = useWorkflowData<MakeupDetails>(`/makeup/${encodeURIComponent(row.id)}/details`);
+  const { data, loading, refreshing, error, refresh } = useWorkflowData<MakeupDetails>(`/makeup/${encodeURIComponent(row.id)}/details`);
   const details = data?.details;
   const look = row.look || details?.look;
   const note = row.lookNote || details?.lookNote;
@@ -359,8 +349,8 @@ function MakeupClientDetails({ row }: { row: MakeupAssignment }) {
       </div>
       {row.state !== 'waiting' && row.state !== 'completed' && !row.eligible
         && <p className="font-bold text-red-700">Registration or payment is no longer eligible.</p>}
-      {error && <p role="alert" className="text-red-700">{error}</p>}
-      {!data && !error && <p role="status" className="text-neutral-600">Loading client details…</p>}
+      <DataFeedback loading={loading} refreshing={refreshing} error={error} onRetry={refresh}
+        loadingMessage="Loading client details…" className="min-h-12 p-2" />
       {!!data?.history.length && <div>
         <p className="font-bold">Assignment history</p>
         <ul className="list-disc pl-4 text-xs">

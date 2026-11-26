@@ -187,7 +187,7 @@ C:\StudioFlow_Photos\
                     └── Unselected\
 ```
 
-**Camera auto-import:** in **Admin → Camera Import** (or **Set Up** on the Photo Floor), add a camera and choose its output folder on the server PC with **Browse**. Set the same folder as the save folder in the camera's tethering or Wi-Fi transfer software. On the Photo Floor, pick the camera for that device. **Call Client** links the camera to the client, every finished shot moves into the client's job folder within a few seconds, and **Mark Done** sends the last shots and unlinks the camera. Photos taken with no client linked stay in the camera folder until someone sends them to a client.
+**Camera auto-import:** in **Admin → Camera Import** (or **Set Up** on the Photo Floor), add a camera and choose its output folder on the server PC with **Browse**. Set the same folder as the save folder in the camera's tethering or Wi-Fi transfer software. On the Photo Floor, pick the camera for that device. **Select** links the camera to the client, every finished shot moves into the client's job folder within a few seconds, and **Mark Done** sends the last shots and unlinks the camera. Photos taken with no client linked stay in the camera folder until someone sends them to a client.
 
 Use **Copy Path** in the photographer queue to find the server folder for a job order. From a remote station, use your studio's file share for that folder. Put finished exports in the job folder or `Unselected`. Opening the gallery moves supported exports from the job folder into `Unselected`. Confirmed selections move into the subfolder named after the job folder. RAW files and unrecognized files stay where the photographer placed them.
 

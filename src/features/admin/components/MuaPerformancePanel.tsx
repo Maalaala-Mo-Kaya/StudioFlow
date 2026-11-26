@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import { useState, type FormEvent } from 'react';
 import { MuaAnalyticsTable } from '../../workflow/MuaAnalyticsTable';
 import { pb } from '../../../db/pocketbase';
@@ -17,7 +18,7 @@ export function MuaPerformancePanel() {
   const [date, setDate] = useState('');
   const [tab, setTab] = useState<'performance' | 'earnings'>('performance');
   const { start, today } = useStudioCalendar();
-  const { data: report, error, refresh } = useWorkflowData<MuaPerformanceReport>(`/mua-performance?date=${encodeURIComponent(date)}`);
+  const { data: report, loading, refreshing, error, refresh } = useWorkflowData<MuaPerformanceReport>(`/mua-performance?date=${encodeURIComponent(date)}`);
 
   return (
     <section className={`${stationCard} space-y-4`} aria-label="MUA Performance Analytics">
@@ -33,8 +34,8 @@ export function MuaPerformancePanel() {
           {date && <button type="button" className={stationButton} onClick={() => setDate('')}>Today</button>}
         </div>
       </div>
-      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      {!report && !error && <p role="status" className="text-sm">Loading daily report…</p>}
+      <DataFeedback loading={loading} refreshing={refreshing} error={error} onRetry={refresh}
+        loadingMessage="Loading daily report…" className="min-h-16 p-3" />
       {report && (
         <>
           <div role="tablist" aria-label="MUA analytics views" className="flex flex-wrap gap-2 border-b-2 border-line pb-2">

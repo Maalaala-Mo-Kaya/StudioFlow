@@ -1,3 +1,4 @@
+import type { DataRequestState } from '../../../components/common/DataFeedback';
 import React, { useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -23,7 +24,7 @@ import { RefundModal, VoidPaymentModal } from './LedgerActionModals';
 import { PrintRefundSlipModal } from './PrintRefundSlipModal';
 import { formatCurrency, formatClientName } from '../../../utils/formatters';
 import { PrintReceiptModal } from '../../cashier/components/PrintReceiptModal';
-import { DataTable, tableFilterControl } from '../../../components/common/DataTable';
+import { DataTable, tableActions, tableFilterControl } from '../../../components/common/DataTable';
 import type { DataTableColumn } from '../../../components/common/DataTable';
 import { MuaPerformancePanel } from './MuaPerformancePanel';
 import { MuaPayoutsPanel } from './MuaPayoutsPanel';
@@ -48,6 +49,7 @@ const PERIOD_LABELS: Record<Period, string> = { today: 'Today', month: 'This Mon
 const GROUP_LIST_SCROLL = 'max-h-[26rem] overflow-y-auto overscroll-contain pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
 
 interface AdminAnalyticsTabProps {
+  request: DataRequestState;
   /** Analytics & Overview, or its Settlement & Ledger sub-tab. */
   view?: 'overview' | 'ledger';
   /** Opens the Settlement & Ledger sub-tab (from the overview). */
@@ -70,6 +72,7 @@ interface AdminAnalyticsTabProps {
 }
 
 export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
+  request,
   view = 'overview',
   onOpenLedger,
   metrics,
@@ -231,17 +234,17 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
     return { rank: 0, label: 'Unpaid', tone: 'bg-neutral-200 text-neutral-700' };
   };
   const ledgerColumns: DataTableColumn<LedgerRow>[] = [
-    { id: 'job', header: 'JO №', sortable: true, accessor: ({ registration }) => registration.job_order_no, cellClassName: 'font-black text-red-600' },
-    { id: 'name', header: 'Client Name', sortable: true, accessor: ({ registration }) => `${registration.family_name} ${registration.given_name}`,
+    { id: 'job', width: 96, header: 'JO №', sortable: true, accessor: ({ registration }) => registration.job_order_no, cellClassName: 'font-black text-red-600' },
+    { id: 'name', header: 'Client Name', minWidth: 152, sortable: true, accessor: ({ registration }) => `${registration.family_name} ${registration.given_name}`,
       cell: ({ registration }) => formatClientName(registration), cellClassName: 'font-bold uppercase' },
-    { id: 'school', header: 'School / Client', sortable: true, accessor: ({ registration }) => clientGroup(registration),
+    { id: 'school', minWidth: 128, header: 'School / Client', sortable: true, accessor: ({ registration }) => clientGroup(registration),
       cell: ({ registration }) => clientGroup(registration) || 'ORG', cellClassName: 'text-neutral-600' },
-    { id: 'package', header: 'Package', sortable: true, accessor: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code,
+    { id: 'package', width: 96, header: 'Package', sortable: true, accessor: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code,
       cell: ({ registration }) => registration.package_snapshot?.code || registration.expand?.package?.code || 'PKG' },
-    { id: 'billed', header: 'Original billed', sortable: true, accessor: ({ registration }) => registration.total_amount + discountCents(registration) / 100, align: 'right',
+    { id: 'billed', width: 94, header: 'Original billed', sortable: true, accessor: ({ registration }) => registration.total_amount + discountCents(registration) / 100, align: 'right',
       cell: ({ registration }) => formatCurrency(registration.total_amount + discountCents(registration) / 100), cellClassName: 'font-bold' },
     // The order's discount, with its rate and reason, so it is visible without opening the cashier.
-    { id: 'discount', header: 'Discount', sortable: true, accessor: ({ registration, cancelled }) => (cancelled ? 0 : discountCents(registration)), align: 'right',
+    { id: 'discount', width: 96, header: 'Discount', sortable: true, accessor: ({ registration, cancelled }) => (cancelled ? 0 : discountCents(registration)), align: 'right',
       cell: ({ registration, cancelled }) => {
         const amount = cancelled ? 0 : discountCents(registration) / 100;
         if (!amount) return <span className="text-neutral-400">—</span>;
@@ -255,7 +258,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           </>
         );
       }, cellClassName: 'font-bold' },
-    { id: 'collected', header: 'Collected (payments + credits)', sortable: true, accessor: ({ collected }) => collected, align: 'right',
+    { id: 'collected', width: 116, header: 'Collected (payments + credits)', sortable: true, accessor: ({ collected }) => collected, align: 'right',
       cell: ({ collected, refunded, credit, netPayments }) => (
         <>
           <div>{formatCurrency(collected)}</div>
@@ -263,19 +266,19 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           {refunded > 0 && <div className="text-[9px] font-normal text-neutral-500">after {formatCurrency(refunded, { exact: true })} refunded</div>}
         </>
       ), cellClassName: 'font-bold text-emerald-700' },
-    { id: 'studio', header: 'Studio revenue', sortable: true, accessor: ({ revenue }) => revenue.studio, align: 'right',
+    { id: 'studio', width: 92, header: 'Studio revenue', sortable: true, accessor: ({ revenue }) => revenue.studio, align: 'right',
       cell: ({ revenue }) => formatCurrency(revenue.studio, { exact: true }) },
-    { id: 'mua', header: 'Other Payment — MUA', sortable: true, accessor: ({ revenue }) => revenue.mua, align: 'right',
+    { id: 'mua', width: 105, header: 'Other Payment — MUA', sortable: true, accessor: ({ revenue }) => revenue.mua, align: 'right',
       cell: ({ revenue }) => formatCurrency(revenue.mua, { exact: true }) },
-    { id: 'unallocated', header: 'Unallocated cash', sortable: true, accessor: ({ revenue }) => revenue.unallocated, align: 'right',
+    { id: 'unallocated', width: 100, header: 'Unallocated cash', sortable: true, accessor: ({ revenue }) => revenue.unallocated, align: 'right',
       cell: ({ revenue }) => formatCurrency(revenue.unallocated, { exact: true }) },
-    { id: 'balance', header: 'Balance', sortable: true, accessor: ({ balance }) => balance, align: 'right', cellClassName: 'font-black',
+    { id: 'balance', width: 92, header: 'Balance', sortable: true, accessor: ({ balance }) => balance, align: 'right', cellClassName: 'font-black',
       cell: ({ balance }) => balance > 0 ? <span className="text-red-600">{formatCurrency(balance)}</span> : <span className="text-emerald-700">₱0.00</span> },
-    { id: 'status', header: 'Settlement Status', sortable: true, align: 'center',
+    { id: 'status', width: 128, header: 'Settlement Status', sortable: true, align: 'center',
       accessor: (row) => settlementOf(row).rank,
       cell: (row) => {
         const { label, tone } = settlementOf(row);
-        return <span className={`whitespace-nowrap px-2 py-0.5 text-[9px] font-black uppercase ${tone}`}>{label}</span>;
+        return <span className={`inline-block px-2 py-0.5 text-[9px] font-black uppercase ${tone}`}>{label}</span>;
       },
     },
   ];
@@ -290,23 +293,23 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       return { payment, runningTotal, remaining: Math.max(0, registration.total_amount - runningTotal) };
     });
     const columns: DataTableColumn<typeof history[number]>[] = [
-      { id: 'date', header: 'Date & Time', sortable: true, accessor: ({ payment }) => new Date(payment.created.replace(' ', 'T')),
+      { id: 'date', width: 104, header: 'Date & Time', sortable: true, accessor: ({ payment }) => new Date(payment.created.replace(' ', 'T')),
         cell: ({ payment }) => {
           const date = new Date(payment.created.replace(' ', 'T'));
           return Number.isFinite(date.getTime()) ? transactionDate.format(date) : '—';
         } },
-      { id: 'receipt', header: 'Receipt №', sortable: true, accessor: ({ payment }) => payment.receipt_no || payment.id, cellClassName: 'font-bold' },
-      { id: 'mode', header: 'Collection Mode', sortable: true, accessor: ({ payment }) => collectionModeLabels[payment.payment_type] || payment.payment_type },
-      { id: 'method', header: 'Payment Method', sortable: true, accessor: ({ payment }) => payment.payment_method, cellClassName: 'uppercase' },
-      { id: 'amount', header: 'Amount Paid', sortable: true, accessor: ({ payment }) => payment.amount, align: 'right', cellClassName: 'font-bold',
+      { id: 'receipt', width: 90, header: 'Receipt №', sortable: true, accessor: ({ payment }) => payment.receipt_no || payment.id, cellClassName: 'font-bold' },
+      { id: 'mode', width: 94, header: 'Collection Mode', sortable: true, accessor: ({ payment }) => collectionModeLabels[payment.payment_type] || payment.payment_type },
+      { id: 'method', width: 91, header: 'Payment Method', sortable: true, accessor: ({ payment }) => payment.payment_method, cellClassName: 'uppercase' },
+      { id: 'amount', width: 82, header: 'Amount Paid', sortable: true, accessor: ({ payment }) => payment.amount, align: 'right', cellClassName: 'font-bold',
         cell: ({ payment }) => formatCurrency(payment.amount, { exact: true }) },
-      { id: 'running', header: 'Running Total', sortable: true, accessor: ({ runningTotal }) => runningTotal, align: 'right',
+      { id: 'running', width: 80, header: 'Running Total', sortable: true, accessor: ({ runningTotal }) => runningTotal, align: 'right',
         cell: ({ runningTotal }) => formatCurrency(runningTotal, { exact: true }) },
-      { id: 'remaining', header: 'Remaining Balance', sortable: true, accessor: ({ remaining }) => remaining, align: 'right',
+      { id: 'remaining', width: 88, header: 'Remaining Balance', sortable: true, accessor: ({ remaining }) => remaining, align: 'right',
         cell: ({ remaining }) => formatCurrency(remaining, { exact: true }) },
-      { id: 'cashier', header: 'Cashier', sortable: true, accessor: ({ payment }) => payment.cashier_name },
-      { id: 'remarks', header: 'Reference / Remarks', sortable: true, accessor: ({ payment }) => payment.remarks, cellClassName: 'max-w-52 whitespace-normal' },
-      { id: 'status', header: 'Status', sortable: true, accessor: ({ payment }) => payment.status || 'completed', cellClassName: 'font-bold uppercase',
+      { id: 'cashier', minWidth: 94, header: 'Cashier', sortable: true, accessor: ({ payment }) => payment.cashier_name },
+      { id: 'remarks', minWidth: 96, header: 'Reference / Remarks', sortable: true, accessor: ({ payment }) => payment.remarks, cellClassName: 'max-w-52 whitespace-normal' },
+      { id: 'status', width: 86, header: 'Status', sortable: true, accessor: ({ payment }) => payment.status || 'completed', cellClassName: 'font-bold uppercase',
         cell: ({ payment }) => (
           <div className="whitespace-normal max-w-56">
             <span className={payment.status === 'voided' ? 'text-red-600' : ''}>{payment.status || 'completed'}</span>
@@ -319,10 +322,10 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             {payment.status === 'refunded' && <div className="text-[9px] normal-case font-normal text-neutral-600">old method</div>}
           </div>
         ) },
-      { id: 'actions', header: 'Actions', cell: ({ payment }) => (
-        <div className="flex gap-1">
+      { id: 'actions', width: 172, header: 'Actions', cell: ({ payment }) => (
+        <div className={tableActions + ' gap-1'}>
           <button type="button" onClick={() => setReceiptTarget({ registration, paymentId: payment.id })}
-            className="inline-flex items-center gap-1 border border-line bg-gold px-2 py-1 font-black uppercase cursor-pointer">
+            className="inline-flex items-center gap-1 whitespace-nowrap border border-line bg-gold px-2 py-1 font-black uppercase cursor-pointer">
             <Printer className="size-3" /> Reprint
           </button>
           {(payment.status || 'completed') === 'completed' && !released && (
@@ -343,10 +346,10 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         cell: (refund) => '−' + formatCurrency(refund.amount, { exact: true }) },
       { id: 'staff', header: 'Given by', accessor: (refund) => refund.refunded_by },
       { id: 'reason', header: 'Reason', accessor: (refund) => refund.reason, cellClassName: 'max-w-52 whitespace-normal' },
-      { id: 'slip', header: 'Slip', cell: (refund) => <>
+      { id: 'slip', width: 150, header: 'Slip', cell: (refund) => <>
         <button type="button" onClick={() => setSlipTarget({ registration, refund })}
           title={refund.signature ? 'Reprint the signed refund slip' : 'Have the client sign on screen, then print the refund slip'}
-          className="inline-flex items-center gap-1 border border-line bg-gold px-2 py-1 font-black uppercase cursor-pointer">
+          className="inline-flex items-center gap-1 whitespace-nowrap border border-line bg-gold px-2 py-1 font-black uppercase cursor-pointer">
           <Printer className="size-3" /> {refund.signature ? 'Print Slip' : 'Sign / Print'}
         </button>
         {refund.signature && <span className="ml-1 text-[9px] font-bold uppercase text-emerald-700">✓ Signed</span>}
@@ -378,7 +381,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
           pagination={false}
           emptyMessage="No payment transactions recorded."
           className="border! shadow-none!"
-          tableClassName="whitespace-nowrap text-[10px]!"
+          tableClassName="text-[10px]!"
           headerClassName="uppercase"
         />
         {orderRefunds.length > 0 && (
@@ -386,7 +389,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
             <div className="mb-1 text-[10px] font-black uppercase tracking-wider">Refunds</div>
             <DataTable label={`Refunds for JO № ${registration.job_order_no}`} rows={orderRefunds} columns={refundColumns}
               getRowId={(refund) => refund.id} pagination={false} className="border! shadow-none!"
-              tableClassName="whitespace-nowrap text-[10px]!" headerClassName="uppercase" />
+              tableClassName="text-[10px]!" headerClassName="uppercase" />
           </div>
         )}
       </>
@@ -669,7 +672,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
       </>)}
 
       {/* Financial Ledger & Audit Trail: click a client to open their account. */}
-      {view === 'ledger' && <DataTable
+      {view === 'ledger' && <DataTable {...request}
         label="Financial Settlement & Ledger"
         rows={filteredLedger}
         columns={ledgerColumns}
@@ -677,7 +680,8 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
         defaultSort={{ column: 'job', direction: 'ascending' }}
         tableClassName="font-mono"
         headerClassName="uppercase tracking-wider"
-        filtered={Boolean(searchQuery.trim()) || filterSchool !== 'all' || filterPaymentStatus !== 'all'}
+        searching={Boolean(searchQuery.trim())}
+        filtered={filterSchool !== 'all' || filterPaymentStatus !== 'all'}
         emptyMessage="No participant accounts yet."
         filteredEmptyMessage="No records match the selected ledger filters."
         onRowClick={(row) => setOpenAccountId(row.registration.id)}
@@ -750,7 +754,7 @@ export const AdminAnalyticsTab: React.FC<AdminAnalyticsTabProps> = ({
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
-              <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+              <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {summaryColumns.map((column) => (
                   <div key={column.id} className="p-2 border border-line bg-canvas">
                     <dt className="text-[9px] font-black uppercase tracking-wider text-neutral-600">{column.header}</dt>

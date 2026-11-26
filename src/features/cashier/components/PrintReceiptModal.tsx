@@ -1,3 +1,4 @@
+import { DataFeedback } from '../../../components/common/DataFeedback';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FileDown, Loader2, Printer, X, FileText, Receipt } from 'lucide-react';
@@ -32,6 +33,7 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({ registrati
   const { toast } = useToast();
   const [data, setData] = useState<ReceiptData | null>(null);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [mode, setMode] = useState<PrintMode>('joborder');
   const [selectedId, setSelectedId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -52,7 +54,7 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({ registrati
       if (live) setFailed(true);
     });
     return () => { live = false; };
-  }, [registration.id, paymentId]);
+  }, [registration.id, paymentId, attempt]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -178,8 +180,9 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({ registrati
           </div>
 
           <div ref={previewRef} className="flex-1 min-h-[200px] overflow-auto p-3 sm:p-4 bg-canvas">
-            {failed && <p role="alert" className="text-center text-sm text-red-600 py-10">Could not load the job order. Close and try again.</p>}
-            {!data && !failed && <p className="text-center text-sm text-neutral-500 py-10">Loading…</p>}
+            <DataFeedback loading={!data && !failed} error={failed ? 'Could not load the job order.' : undefined}
+              loadingMessage="Loading preview…" className="min-h-36 p-6 text-center"
+              onRetry={() => { setFailed(false); setAttempt((value) => value + 1); }} />
             {sheet && (
               <div className="mx-auto shadow-lux border border-neutral-300" style={{ zoom: scale, width: 'fit-content' }}>
                 {sheet}
