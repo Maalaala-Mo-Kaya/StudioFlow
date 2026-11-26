@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Ban, Users, FileDown, RotateCcw } from 'lucide-react';
+import { Ban, Camera, Users, FileDown, RotateCcw } from 'lucide-react';
+import { ReshootModal } from '../../photographer/components/ReshootModal';
 import { RecordActionButton } from '../../../components/common/RecordActionButton';
 import type { AddOn, Registration, Organization, Level, Course, Package } from '../../../types';
 import { formatCurrency, formatClientName } from '../../../utils/formatters';
@@ -79,6 +80,8 @@ interface AdminStudentsTabProps {
   onUpdateRegistration: (id: string, data: RegistrationEdits) => Promise<Registration>;
   onCancelRegistration: (id: string, reason: string) => Promise<void>;
   onRestoreRegistration: (id: string) => Promise<void>;
+  /** A paid retake was started (the popup calls the server itself): refresh. */
+  onRetakeStarted: (id: string) => void;
 }
 
 const ALL_CLIENTS = 'All clients (list)';
@@ -140,8 +143,10 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
   onUpdateRegistration,
   onCancelRegistration,
   onRestoreRegistration,
+  onRetakeStarted,
 }) => {
   const { toast } = useToast();
+  const [retaking, setRetaking] = useState<Registration | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   // Quick filter next to the search box: everyone, school clients, walk-ins, or one school.
   const [clientGroupFilter, setClientGroupFilter] = useState('all');
@@ -351,6 +356,17 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
           <span>PDF</span>
         </button>}
         <RecordActionButton variant="edit" recordName={formatClientName(reg)} onClick={() => setEditingStudent(reg)} />
+        {['done_shooting', 'completed', 'ready_for_pickup'].includes(reg.status) && (
+          <button
+            type="button"
+            onClick={() => setRetaking(reg)}
+            title="Paid retake: send the client back to the photographers and let them choose again"
+            className="btn-tactile inline-flex items-center gap-1 px-2 py-1 bg-canvas text-ink hover:bg-gold hover:text-on-gold border border-neutral-300 text-[10px] font-bold uppercase cursor-pointer"
+          >
+            <Camera className="w-3 h-3 text-gold" />
+            <span>Retake</span>
+          </button>
+        )}
         {reg.status === 'cancelled' ? (
           <button
             type="button"
@@ -501,6 +517,14 @@ const StudentList: React.FC<AdminStudentsTabProps> = ({
         onConfirm={handleConfirmDelete}
         onClose={() => { setCancelReason(''); setDeleteModalState({ isOpen: false, id: '', name: '', jobOrderNo: '', paidAmount: 0 }); }}
       />
+
+      {retaking && (
+        <ReshootModal registration={retaking} paid onClose={() => setRetaking(null)} onDone={(reg) => {
+          setRetaking(null);
+          onRetakeStarted(reg.id);
+          toast.success(`Paid retake started for ${formatClientName(reg)}. Add the retake fee with Edit (other fees); the cashier collects it.`);
+        }} />
+      )}
     </div>
   );
 };

@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Aperture, Camera, CheckCircle2, Maximize2, Volume2 } from 'lucide-react';
+import { Aperture, Camera, CheckCircle2, ChevronDown, ChevronUp, FolderInput, Maximize2, Undo2, Volume2 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 import { formatClientName, formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import { usePhotographerQueue } from './usePhotographerQueue';
-import { PhotographerQueueCard } from './components/PhotographerQueueCard';
+import { BoughtDetails, CopyPathButton, PhotographerQueueCard } from './components/PhotographerQueueCard';
 import { PhotographerHistoryList } from './components/PhotographerHistoryList';
 import { CameraImportPanel } from './components/CameraImportPanel';
+import { ShootGallery } from './components/ShootGallery';
+import { ReshootModal } from './components/ReshootModal';
 import { useCameraLink } from './useCameraLink';
 import type { PhotographyTask, Registration } from '../../types';
 import { playStudioChime } from '../../utils/audio';
@@ -69,6 +71,9 @@ export const PhotographerPage: React.FC = () => {
   // the client stays selected (and the camera linked) until Mark Done.
   const [onSetOpenId, setOnSetOpenId] = useState('');
   const onSetOpen = !!selected && onSetOpenId === selected.id;
+  const sendingHere = !!station?.enabled && !!selected && station.client?.id === selected.id;
+  const [boughtOpen, setBoughtOpen] = useState(false);
+  const [reshooting, setReshooting] = useState<{ registration: Registration; task?: PhotographyTask; paid?: boolean }>();
   const finishing = useRef(new Map<string, string>());
   useEffect(() => {
     for (const [registration, taskId] of finishing.current) {
@@ -110,6 +115,15 @@ export const PhotographerPage: React.FC = () => {
       setSelectedWithoutCamera((id) => id === reg.id ? '' : id);
       setOnSetOpenId((id) => id === reg.id ? '' : id);
     }
+  });
+
+  // Back to the queue at their place (the queue is ordered by queue number). Their shots stay in
+  // their folder; Select on their card links the camera to them again.
+  const returnToQueue = (reg: Registration) => runQueueAction(async () => {
+    if (linkedId === reg.id && !await camera.unlinkClient(reg.id)) return;
+    setSelectedWithoutCamera((id) => id === reg.id ? '' : id);
+    setOnSetOpenId((id) => id === reg.id ? '' : id);
+    toast.success(`${formatClientName(reg)} is back in the queue.`);
   });
 
   const startTask = (reg: Registration, task: PhotographyTask) => runQueueAction(async () => {
@@ -168,6 +182,7 @@ export const PhotographerPage: React.FC = () => {
               <StationClientQueue
                 placeholderIcon={<Camera className="size-7 text-gold" aria-hidden="true" />}
                 empty={selected ? 'No other clients in the queue.' : 'The studio floor queue is clear.'}
+                narrow
                 selected={selected && (
                   <div className="border-2 border-gold bg-obsidian p-4 space-y-3 shadow-lux-gold">
                     <div className="flex items-start justify-between gap-3">
@@ -183,11 +198,44 @@ export const PhotographerPage: React.FC = () => {
                         </span>
                       )}
                     </div>
-                    <div className="grid grid-cols-2 gap-2.5">
+                    {station?.enabled && station.client?.id === selected.id && (
+                      <div role="status" className="border border-emerald-700 bg-obsidian-2 px-3 py-2 font-mono text-[11px] text-emerald-400 min-w-0">
+                        <p className="m-0 flex items-center gap-2 font-black uppercase tracking-wider">
+                          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-emerald-400 motion-safe:animate-status-pulse" />
+                          Sending shots to this client
+                          {station.client.photoCount !== null && <span className="ml-auto text-white">{station.client.photoCount} in folder</span>}
+                        </p>
+                        {station.client.folder && (
+                          <p className="m-0 mt-1 flex items-center gap-1.5 text-neutral-400 min-w-0">
+                            <FolderInput className="size-3 shrink-0 text-emerald-400" aria-hidden="true" />
+                            <span className="truncate" title={station.client.folder}>{station.client.folder}</span>
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <div className="border border-neutral-800 bg-obsidian-2 px-3 py-2">
+                      <button type="button" aria-expanded={boughtOpen} onClick={() => setBoughtOpen((open) => !open)}
+                        className="flex w-full items-center justify-between gap-2 font-mono text-[11px] font-black uppercase tracking-wider text-gold cursor-pointer">
+                        <span className="min-w-0 truncate">
+                          {boughtOpen ? 'Hide' : 'Show'} what was bought
+                          <span className="ml-2 text-neutral-400">{selected.expand?.package?.name || 'Pictorial package'}</span>
+                        </span>
+                        {boughtOpen ? <ChevronUp className="size-4 shrink-0" aria-hidden="true" /> : <ChevronDown className="size-4 shrink-0" aria-hidden="true" />}
+                      </button>
+                      {boughtOpen && <BoughtDetails registration={selected} dark />}
+                    </div>
+                    <div className={`grid gap-2.5 ${selectedTask ? 'grid-cols-2' : 'grid-cols-3'}`}>
                       <button type="button" onClick={() => setOnSetOpenId(selected.id)}
                         className="btn-tactile flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 border border-line bg-obsidian-2 text-xs font-black uppercase tracking-wider text-white hover:border-gold">
                         <Maximize2 className="size-4 text-gold" aria-hidden="true" /> Open
                       </button>
+                      {!selectedTask && (
+                        <button type="button" disabled={busy} onClick={() => returnToQueue(selected)}
+                          title="Stop sending shots to this client and put them back in the queue at their place"
+                          className="btn-tactile flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 border border-line bg-obsidian-2 text-xs font-black uppercase tracking-wider text-white hover:border-gold disabled:cursor-default disabled:opacity-50">
+                          <Undo2 className="size-4 text-gold" aria-hidden="true" /> Return to Queue
+                        </button>
+                      )}
                       <button type="button" disabled={busy || !!selectedTask?.finishingAt || (!!activePhotographyTasks(selected).length && !selectedTask)}
                         onClick={() => selectedTask ? finishTask(selected, selectedTask) : markDone(selected)}
                         className="btn-tactile flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 border border-line bg-gold text-xs font-black uppercase tracking-wider text-on-gold disabled:cursor-default disabled:opacity-50">
@@ -200,6 +248,7 @@ export const PhotographerPage: React.FC = () => {
                   key={reg.id}
                   registration={reg}
                   nextUp={index === 0}
+                  compact
                   busy={busy}
                   onSelect={selectClient}
                   onMarkDone={markDone}
@@ -212,25 +261,68 @@ export const PhotographerPage: React.FC = () => {
         )}
 
         {onSetOpen && selected && (
-          <Modal title={formatClientName(selected)} icon={Camera} size="md" onClose={() => setOnSetOpenId('')}
+          // The on-set popup is for the shots: a slim toolbar, then the gallery across the full width.
+          // What the client bought is on the Selected card (Show what was bought).
+          <Modal title={formatClientName(selected)} icon={Camera} size={sendingHere ? 'full' : 'md'}
+            onClose={() => setOnSetOpenId('')}
             subtitle={<>On set · {formatJobOrderNo(selected.job_order_no)} · {formatQueueNumber(selected.queue_number)}</>}>
-            <PhotographerQueueCard
-              key={selected.id}
-              registration={selected}
-              selected
-              busy={busy}
-              onMarkDone={markDone}
-              sessionActions={activePhotographyTasks(selected).length > 0 ? <SessionActions registration={selected} station={station}
-                photographerId={photographerId} busy={busy} onStart={startTask} onFinish={finishTask} /> : undefined}
-              cameraName={station?.enabled ? station.name : ''}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              {sendingHere ? (
+                <span role="status" className="inline-flex min-h-10 items-center gap-2 border border-emerald-700 bg-obsidian-2 px-3 font-mono text-[11px] font-black uppercase tracking-wider text-emerald-400">
+                  <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-emerald-400 motion-safe:animate-status-pulse" />
+                  {station?.name} → sending shots here
+                </span>
+              ) : (
+                <span className="text-[11px] text-neutral-600">No camera is sending to this client. Pick this device's camera on the Photo Floor.</span>
+              )}
+              <CopyPathButton registrationId={selected.id} className="min-h-10 px-3 text-[10px]" />
+              {!activePhotographyTasks(selected).length && (
+                <button type="button" disabled={busy} onClick={() => markDone(selected)}
+                  className="btn-tactile ml-auto inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-line bg-gold px-4 text-xs font-black uppercase tracking-wider text-on-gold disabled:cursor-default disabled:opacity-50">
+                  <CheckCircle2 className="size-4 stroke-[2.5]" aria-hidden="true" /> Mark Done
+                </button>
+              )}
+            </div>
+            {activePhotographyTasks(selected).length > 0 && (
+              <div className="mt-3">
+                <SessionActions registration={selected} station={station} photographerId={photographerId} busy={busy}
+                  onStart={startTask} onFinish={finishTask} />
+              </div>
+            )}
+            {sendingHere && <ShootGallery registrationId={selected.id} />}
           </Modal>
         )}
 
         {/* COMPLETED SHOOTS HISTORY */}
         {activeTab === 'history' && (loading && !recentlyDone.length
           ? <p role="status" className="text-sm text-neutral-600">Loading completed sessions…</p>
-          : (recentlyDone.length > 0 || !loadError) && <PhotographerHistoryList recentlyDone={recentlyDone} />)}
+          : (recentlyDone.length > 0 || !loadError) && <PhotographerHistoryList recentlyDone={recentlyDone} busy={busy}
+            photographerId={photographerId} admin={user?.role === 'admin'}
+            onReshoot={(registration, task) => setReshooting({ registration, task })}
+            onPaidRetake={(registration) => setReshooting({ registration, paid: true })} />)}
+
+        {reshooting && (
+          <ReshootModal registration={reshooting.registration} task={reshooting.task} paid={reshooting.paid}
+            onClose={() => setReshooting(undefined)} onDone={(reg, task) => {
+              const paid = reshooting.paid;
+              setReshooting(undefined);
+              setActiveTab('queue');
+              void fetchLiveQueue();
+              if (paid) {
+                toast.success(`Paid retake started: ${formatClientName(reg)} is back with the photographers. Add the retake fee in Admin → Students → Edit.`);
+              } else if (!task) {
+                toast.success(`${formatClientName(reg)} is back on set.`);
+                // Link this device's camera and open the shots, as Select does.
+                void selectClient(reg);
+              } else if (task.photographerId === photographerId) {
+                toast.success(`${task.name} is open again for ${formatClientName(reg)}.`);
+                // Start the reopened session on this device's camera, as Call Client does.
+                void startTask(reg, task);
+              } else {
+                toast.success(`${task.name} is back in ${task.photographerName || 'the photographer'}'s queue for ${formatClientName(reg)}.`);
+              }
+            }} />
+        )}
       </StationTabs>
     </StationLayout>
   );

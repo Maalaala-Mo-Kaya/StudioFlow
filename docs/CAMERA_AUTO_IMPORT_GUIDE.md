@@ -62,7 +62,7 @@ Then call the next client. The camera follows the new client automatically.
 ### 2.3 Other buttons in the panel
 
 - **Link Camera (Booth 1)** on a card: links the camera to a client who is already *On Set*, e.g. if they were called before the camera was chosen, or from another device.
-- **Stop Sending:** unlinks the camera without finishing the shoot, e.g. during a break or before a test shot. Photos taken while unlinked stay in the camera folder.
+- **Return to Queue** (on the camera panel and on the Selected card): unlinks the camera without finishing the shoot and puts the client back in the queue at their place, e.g. to shoot someone else first, during a break or before a test shot. Their shots so far stay in their folder; **Select** on their card links them again. Photos taken while no client is linked stay in the camera folder.
 - **Send them to <name>:** appears when photos are *waiting* (see 2.4). It sends those photos to the client currently linked.
 - **Set Up:** opens the camera settings (Section 3).
 

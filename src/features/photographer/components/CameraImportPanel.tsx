@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Aperture, FolderInput, AlertTriangle, Unlink, Send, Settings2 } from 'lucide-react';
+import { Aperture, FolderInput, AlertTriangle, Laptop, Undo2, Send, Settings2 } from 'lucide-react';
 import { CameraSettings } from '../../camera/CameraSettings';
 import { formatJobOrderNo } from '../../../utils/formatters';
-import { sinceLabel } from '../../camera/cameraApi';
+import { agoLabel, SENDER_OFFLINE_AFTER_S, sinceLabel, type CameraStatus } from '../../camera/cameraApi';
 import type { useCameraLink } from '../useCameraLink';
 
 type CameraLink = ReturnType<typeof useCameraLink>;
@@ -79,6 +79,7 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
           {camera.enabled && !camera.folderOk && (
             <Notice tone="red">The camera folder can't be found on the server PC. Check that the drive or share is connected.</Notice>
           )}
+          {camera.enabled && camera.sender && <SenderStatus sender={camera.sender} />}
 
           {client ? (
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-obsidian text-white border border-gold p-3.5">
@@ -90,6 +91,12 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
                 <div className="text-base font-black uppercase tracking-tight truncate">
                   {client.name} <span className="font-mono text-gold-soft text-sm">{formatJobOrderNo(client.jobOrder)}</span>
                 </div>
+                {client.folder && (
+                  <div className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-emerald-400 min-w-0">
+                    <FolderInput className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate" title={client.folder}>Into folder: {client.folder}</span>
+                  </div>
+                )}
                 <div className="font-mono text-[11px] text-neutral-400">
                   {camera.sessionImported} this session
                   {client.photoCount !== null && ` · ${client.photoCount} in client folder`}
@@ -104,7 +111,7 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
                 onClick={() => void link.unlinkClient(client.id)}
                 className="btn-tactile shrink-0 min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-obsidian-2 text-gold border border-gold text-[11px] font-black uppercase tracking-wider cursor-pointer disabled:opacity-50"
               >
-                <Unlink className="w-3.5 h-3.5" /> Stop Sending
+                <Undo2 className="w-3.5 h-3.5" /> Return to Queue
               </button>}
             </div>
           ) : camera.enabled && (
@@ -140,6 +147,37 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
         </div>
       )}
     </section>
+  );
+};
+
+/** The Photo Sender on the tethering laptop: online / offline, last shot sent, shots waiting. */
+const SenderStatus: React.FC<{ sender: NonNullable<CameraStatus['sender']> }> = ({ sender }) => {
+  const online = sender.seenAgo <= SENDER_OFFLINE_AFTER_S;
+  const from = sender.host ? ` · ${sender.host}` : '';
+  if (!online) {
+    return (
+      <Notice tone="red">
+        <span>
+          <strong>Photo Sender not heard from{from}</strong> for {agoLabel(sender.seenAgo).replace(' ago', '')}.
+          {' '}Shots stay on that laptop until it's back. Check the laptop is on, signed in and on the studio Wi-Fi.
+        </span>
+      </Notice>
+    );
+  }
+  return (
+    <div role="status" className="space-y-1 border border-emerald-400 bg-emerald-50 p-3 text-xs text-emerald-900">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="inline-flex items-center gap-1.5 font-black uppercase tracking-wider">
+          <Laptop className="h-3.5 w-3.5" /> Photo Sender online{from}
+        </span>
+        <span className="font-mono text-[11px]">
+          {sender.lastSentAgo === null ? 'no shot sent yet' : `last shot ${agoLabel(sender.lastSentAgo)}`}
+          {sender.lastSentName && sender.lastSentAgo !== null && ` (${sender.lastSentName})`}
+          {sender.waiting ? ` · ${sender.waiting} waiting on the laptop` : ' · 0 waiting'}
+        </span>
+      </div>
+      {sender.error && <p className="m-0 font-mono text-[11px] text-amber-800">{sender.error}</p>}
+    </div>
   );
 };
 

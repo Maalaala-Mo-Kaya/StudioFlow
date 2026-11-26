@@ -663,6 +663,11 @@ export function useAdminData() {
     refreshDocuments(id);
     await loadAllData();
   };
+  // After a paid retake (the popup calls the server route itself): refresh the order and its documents.
+  const handleRetakeStarted = (id: string) => {
+    refreshDocuments(id);
+    void loadAllData();
+  };
   const handleRestoreRegistration = async (id: string) => {
     await pb.send(`/api/studioflow/registrations/${id}/restore`, { method: 'POST' });
     refreshDocuments(id);
@@ -786,6 +791,7 @@ export function useAdminData() {
     handleUpdateRegistration,
     handleCancelRegistration,
     handleRestoreRegistration,
+    handleRetakeStarted,
     handleVoidPayment,
     handleRefund,
     refunds,

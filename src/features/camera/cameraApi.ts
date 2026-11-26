@@ -19,6 +19,8 @@ export interface CameraStatus {
     queueNumber: number | null;
     /** Photos currently in the client's folder (null if it can't be read). */
     photoCount: number | null;
+    /** Full path of the client's folder on the server, where the shots are going. */
+    folder: string;
   };
   taskId: string;
   photographerId: string;
@@ -30,6 +32,33 @@ export interface CameraStatus {
   lastScan: string;
   lastImport: string;
   lastError: string;
+  /**
+   * The Photo Sender on a tethering laptop, from the status file it rewrites in the
+   * watch folder every few seconds. null: no sender writes into this folder (for
+   * example a camera tethered to the server PC itself).
+   */
+  sender: null | {
+    host: string;
+    source: string;
+    /** Seconds since the sender last reported (measured on the server). */
+    seenAgo: number;
+    lastSentName: string;
+    /** Seconds since it last sent a shot, or null if it hasn't sent one since starting. */
+    lastSentAgo: number | null;
+    /** Shots still on the laptop (not finished writing yet, or waiting for the server). */
+    waiting: number | null;
+    error: string;
+  };
+}
+
+/** A sender that hasn't reported for this long is shown as offline. */
+export const SENDER_OFFLINE_AFTER_S = 30;
+
+/** "45s" / "3m" / "2h" for a number of seconds. */
+export function agoLabel(seconds: number) {
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
 }
 
 /** Editable configuration (collection `camera_stations`). */

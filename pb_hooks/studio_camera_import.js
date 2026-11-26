@@ -387,6 +387,32 @@ function photoCount(app, registration) {
   }
 }
 
+// The Photo Sender (scripts/photo-sender) on a tethering laptop writes this file into
+// the watch folder every few seconds. Its age comes from the file's modification time
+// on this PC, so the laptop's clock doesn't matter. Dot names are never imported.
+const senderFile = ".studioflow-sender.json";
+const senderText = (value, max = 200) => typeof value === "string" ? value.slice(0, max) : "";
+const senderCount = (value) => Number.isInteger(value) && value >= 0 ? value : null;
+
+function sender(watch) {
+  let info;
+  try { info = $os.stat($filepath.join(watch, senderFile)); } catch (_) { return null; }
+  if (!info.mode().isRegular() || info.size() > 16384) return null;
+  const seenAgo = Math.max(0, Math.round((Date.now() - info.modTime().unixMilli()) / 1000));
+  let data = {};
+  try { data = JSON.parse(toString($os.readFile($filepath.join(watch, senderFile)))) || {}; } catch (_) { /* being rewritten */ }
+  const sentAgo = senderCount(data.lastSentSecondsAgo);
+  return {
+    host: senderText(data.host, 80),
+    source: senderText(data.source, 300),
+    seenAgo,
+    lastSentName: senderText(data.lastSentName, 200),
+    lastSentAgo: sentAgo === null ? null : sentAgo + seenAgo,
+    waiting: senderCount(data.waiting),
+    error: senderText(data.error, 300),
+  };
+}
+
 function status(app, station) {
   const watch = station.getString("watch_folder");
   let folderOk = false;
@@ -396,7 +422,9 @@ function status(app, station) {
   if (registrationId) {
     try {
       const registration = app.findRecordById("registrations", registrationId);
-      client = { ...workflow.summary(app, registration), photoCount: photoCount(app, registration) };
+      let folder = "";
+      try { folder = storage.displayPath(storage.photoFolder(app, registration)); } catch (_) { /* shown without a path */ }
+      client = { ...workflow.summary(app, registration), photoCount: photoCount(app, registration), folder };
     } catch (_) { /* removed */ }
   }
   return {
@@ -417,6 +445,7 @@ function status(app, station) {
     lastScan: station.getString("last_scan"),
     lastImport: station.getString("last_import"),
     lastError: station.getString("last_error"),
+    sender: folderOk ? sender(watch) : null,
   };
 }
 

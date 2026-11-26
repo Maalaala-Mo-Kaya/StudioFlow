@@ -1,12 +1,14 @@
 import { useId, type ReactNode } from 'react';
 
-export function StationClientQueue({ selected, placeholderIcon, unselected, tools, totalUnselected = unselected.length, empty }: {
+export function StationClientQueue({ selected, placeholderIcon, unselected, tools, totalUnselected = unselected.length, empty, narrow = false }: {
   selected: ReactNode;
   placeholderIcon: ReactNode;
   unselected: ReactNode[];
   tools?: ReactNode;
   totalUnselected?: number;
   empty: string;
+  /** Small cards: fixed-width columns, so more clients fit on a row. */
+  narrow?: boolean;
 }) {
   const selectedHeading = useId();
   const unselectedHeading = useId();
@@ -40,11 +42,12 @@ export function StationClientQueue({ selected, placeholderIcon, unselected, tool
         {count > 0 ? (
           <div role="group" aria-label="Unselected clients, scroll horizontally to browse" tabIndex={0}
             className={`grid grid-flow-col gap-4 overflow-x-auto overscroll-x-contain snap-x snap-mandatory pb-4 focus-visible:outline-2 focus-visible:outline-gold [&>article]:snap-start ${
-              count === 1 ? 'auto-cols-[min(100%,30rem)]' : 'auto-cols-[calc(100%-3rem)]'
-            } ${count === 2 ? 'md:auto-cols-[calc((100%-1rem)/2)]' : ''} ${
-              count > 2 ? 'md:auto-cols-[calc((100%-5rem)/2)]' : ''
-            } ${count === 3 ? 'xl:auto-cols-[calc((100%-2rem)/3)]' : ''} ${
-              count > 3 ? 'xl:auto-cols-[calc((100%-6rem)/3)]' : ''
+              narrow ? 'auto-cols-[min(85%,17rem)]' : `${count === 1 ? 'auto-cols-[min(100%,30rem)]' : 'auto-cols-[calc(100%-3rem)]'
+              } ${count === 2 ? 'md:auto-cols-[calc((100%-1rem)/2)]' : ''} ${
+                count > 2 ? 'md:auto-cols-[calc((100%-5rem)/2)]' : ''
+              } ${count === 3 ? 'xl:auto-cols-[calc((100%-2rem)/3)]' : ''} ${
+                count > 3 ? 'xl:auto-cols-[calc((100%-6rem)/3)]' : ''
+              }`
             }`}>
             {unselected}
           </div>

@@ -4,6 +4,7 @@ import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
 import { useWorkflowData, workflowApi, workflowError } from '../../hooks/useWorkflowData';
+import { useAuthedImage } from '../../hooks/useAuthedImage';
 import { studioDate } from '../../utils/studioDay';
 import { clampDay, useStudioCalendar } from '../../hooks/useStudioCalendar';
 import { DataTable, tableFilterControl, type DataTableColumn } from '../../components/common/DataTable';
@@ -380,35 +381,12 @@ function PhotoTile({ photo, path, checked, disabled, onToggle, onPreview, note, 
   note: string; onNote: (text: string) => void;
 }) {
   const tile = useRef<HTMLElement>(null);
-  const [url, setUrl] = useState('');
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let objectUrl = '';
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry?.isIntersecting) return;
-      observer.disconnect();
-      const query = new URLSearchParams({ group: photo.group, name: photo.name });
-      void fetch(pb.buildURL(`${workflowApi}${path}/image/${photo.id}?${query}`), {
-        headers: { Authorization: pb.authStore.token },
-        signal: controller.signal,
-      }).then((response) => {
-        if (!response.ok) throw new Error('Photo unavailable.');
-        return response.blob();
-      }).then((blob) => {
-        if (controller.signal.aborted) return;
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
-      }).catch(() => { if (!controller.signal.aborted) setFailed(true); });
-    }, { rootMargin: '250px' });
-    if (tile.current) observer.observe(tile.current);
-    return () => {
-      observer.disconnect();
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [path, photo.id, photo.group, photo.name]);
+  const image = useAuthedImage(
+    `${workflowApi}${path}/image/${photo.id}?${new URLSearchParams({ group: photo.group, name: photo.name })}`, tile,
+  );
+  const url = image.src;
+  const [broken, setFailed] = useState(false);
+  const failed = image.failed || broken;
 
   return (
     <article ref={tile} className={`relative border-2 bg-panel min-w-0 ${checked ? 'border-gold ring-2 ring-gold' : 'border-line'}`}>

@@ -145,6 +145,7 @@ export const AdminPage: React.FC = () => {
               onUpdateRegistration={admin.handleUpdateRegistration}
               onCancelRegistration={admin.handleCancelRegistration}
               onRestoreRegistration={admin.handleRestoreRegistration}
+              onRetakeStarted={admin.handleRetakeStarted}
             />
           )}
 
