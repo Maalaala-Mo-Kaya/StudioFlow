@@ -17,6 +17,7 @@
     "test:gateway": "node --test scripts/test-client-gateway.cjs",
     "test:workflow": "node --test scripts/test-studio-workflow.cjs",
     "test:catalog": "node --test scripts/test-catalog-import.cjs",
+    "test:autosend": "node --test scripts/test-auto-send.cjs",
     "check:excel": "node scripts/check-excel-math.mjs",
     "preview": "vite preview"
   },

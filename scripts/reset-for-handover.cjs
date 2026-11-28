@@ -36,7 +36,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
 // Client records: removed in "keep" mode. Order matters only for readability (no SQL foreign keys).
-const CLIENT_TABLES = ['refunds', 'payments', 'mua_completions', 'mua_assignment_events', 'registrations'];
+const CLIENT_TABLES = ['refunds', 'payments', 'mua_completions', 'mua_assignment_events', 'shot_origins', 'registrations'];
 
 function fail(message) {
   console.error('\n[STOPPED] ' + message);

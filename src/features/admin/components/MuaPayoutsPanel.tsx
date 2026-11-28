@@ -96,7 +96,7 @@ export const MuaPayoutsPanel: React.FC = () => {
           <div className="grid gap-3 sm:grid-cols-4">
             {([
               ['Earned by artists', sum('earned')], ['Paid out', sum('paid')], ['Still owed', sum('unpaid')],
-              ['Wardrobe / shared MUA', pool?.total ?? 0],
+              ['Shared MUA money', pool?.total ?? 0],
             ] as const).map(([label, amount]) => (
               <div key={label} className="border-2 border-line bg-canvas p-3">
                 <p className="text-[10px] font-black uppercase text-gold-soft">{label}</p>
@@ -116,11 +116,12 @@ export const MuaPayoutsPanel: React.FC = () => {
         <>
           {pool && (
             <div className="border-2 border-line bg-canvas p-3 text-xs space-y-1">
-              <p className="font-black uppercase text-ink">Wardrobe / shared MUA money · {peso(pool.total)} · {new Set(report.shared.map((line) => line.jobId)).size} job orders
+              <p className="font-black uppercase text-ink">Shared MUA money (Wardrobe, MUA station off) · {peso(pool.total)} · {new Set(report.shared.map((line) => line.jobId)).size} job orders
                 <span className="ml-2 font-mono font-bold normal-case text-neutral-500">({peso(pool.clientPaid)} on fully paid orders)</span></p>
               <p className="text-neutral-600 font-sans">
-                MUA charges that are not one artist&apos;s service (e.g. Wardrobe), on job orders made in this period. The money is for the
-                MUA team; they split it outside the system, so it is not credited to any artist.
+                MUA charges that are not one artist&apos;s service (e.g. Wardrobe), and makeup or grooming on orders served while the MUA
+                station was off, on job orders made in this period. The money is for the MUA team; they split it outside the system, so it
+                is not credited to any artist.
               </p>
               {pool.byItem.length > 0 && <p className="font-mono">{pool.byItem.map(([item, amount]) => `${item} ${peso(amount)}`).join(' · ')}</p>}
             </div>

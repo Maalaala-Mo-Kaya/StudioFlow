@@ -48,6 +48,31 @@ function selectionLimit(app, record) {
   return limitOverridden(app) ? 0 : packageLimit(app, record);
 }
 
+// Shot types (studio_shot_types.js): when the photos carry a type, the client picks by type.
+// - With a photo limit, at most one photo of each type (the limit counts the rest).
+// - Every type the package includes that has photos needs its pick, until the limit is used up.
+// Photos without a type (older shoots) follow the limit only.
+function checkTypes(app, record, photos, chosen, limit) {
+  const types = require(__hooks + "/studio_shot_types.js");
+  const typeOf = new Map(photos.map((photo) => [photo.id, types.tagOf(photo.name)]));
+  if (![...typeOf.values()].some(Boolean)) return;
+  const { types: list, packageTypes } = types.forClient(app, record);
+  const label = (code) => list.find((type) => type.code === code)?.name || code;
+  const counts = new Map();
+  for (const id of chosen) {
+    const code = typeOf.get(id);
+    if (code) counts.set(code, (counts.get(code) || 0) + 1);
+  }
+  if (limit) {
+    const doubled = [...counts].filter(([, count]) => count > 1).map(([code]) => label(code));
+    if (doubled.length) throw new BadRequestError("Choose only one photo of each type: " + doubled.join(", ") + ".");
+  }
+  if (limit && chosen.size >= limit) return;
+  const shot = new Set(typeOf.values());
+  const missing = packageTypes.filter((code) => shot.has(code) && !counts.get(code)).map(label);
+  if (missing.length) throw new BadRequestError("Choose one photo for each type in the package. Still to choose: " + missing.join(", ") + ".");
+}
+
 const noteMax = 500;
 const notesFile = "EDITOR_NOTES.txt";
 
@@ -248,6 +273,7 @@ function queueMoves(app, id, auth, input) {
         }
         const limit = selectionLimit(tx, record);
         if (limit && chosen.size > limit) throw new BadRequestError("This package allows up to " + limit + " selected photographs.");
+        checkTypes(tx, record, photos, chosen, limit);
       }
       let moves;
       try { moves = planMoves(root, folder, photos, chosen); } catch (_) {
@@ -297,7 +323,9 @@ function details(app, id) {
     const saved = workflow.json(record, "photo_notes");
     const notes = new Map((Array.isArray(saved) ? saved : []).map((item) => [item.path, item.note]));
     const override = limitOverridden(tx);
+    const types = require(__hooks + "/studio_shot_types.js");
     return {
+      ...types.forClient(tx, record),
       student: workflow.summary(tx, record),
       version: version(record, inventory),
       limit: override ? 0 : packageLimit(tx, record),
@@ -305,6 +333,7 @@ function details(app, id) {
       limitOverride: override,
       photos: inventory.map(({ id, path, name, group }) => ({
         id, name, group, selected: group === "selected", note: group === "selected" ? notes.get(path) || "" : "",
+        type: types.tagOf(name),
       })),
     };
   }));

@@ -31,7 +31,7 @@ const maxFilesPerScan = 300;
 const sessionFields = [
   "active_registration", "session_started", "session_imported", "session_skip",
   "waiting_count", "last_scan", "last_import", "last_error", "scan_lock",
-  "session_task", "session_photographer", "session_finishing",
+  "session_task", "session_photographer", "session_finishing", "shot_type",
 ];
 const taskPrefix = (task, photographer) => "sf-" + task + "-" + photographer + "-";
 // Lets the integration test exercise the cross-drive copy path on one drive.
@@ -160,8 +160,17 @@ function copyInto(source, student, rel) {
   student.rename(partial, rel);
 }
 
-// Moves one claimed (staged) file into the client's folder.
-function deliver(app, staged, registration) {
+// Moves one claimed (staged) file into the client's folder. `source` ({ station, photographer })
+// is recorded for photos (shot_origins), so each photographer reviews only their own shots.
+function deliver(app, staged, registration, source) {
+  const rel = place(app, staged, registration);
+  if (!/^RAW\//.test(rel) && source) {
+    require(__hooks + "/studio_shot_types.js").recordOrigin(app, registration.id, rel, source.station, source.photographer);
+  }
+  return rel;
+}
+
+function place(app, staged, registration) {
   const name = $filepath.base(staged);
   const sub = storage.formats[$filepath.ext(name).toLowerCase()] ? "" : "RAW";
   const folder = storage.photoFolder(app, registration);
@@ -198,7 +207,10 @@ function deliver(app, staged, registration) {
 
 // Claims a file from the watch folder and delivers it. Returns "imported",
 // "busy" (still being written, retry later) or "skipped" (not a valid photo).
-function importFile(app, watch, file, registration, prefix) {
+// A photo gets a shot type in its name (studio_shot_types.js): the one it already carries (the
+// Photo Floor's auto-send tags each shot with the type that was on when it was taken), or else
+// `shotType`, the camera's current type. RAW files are never tagged.
+function importFile(app, watch, file, registration, prefix, shotType, source) {
   if (!storage.usableName(file.name)) return "skipped";
   if (file.kind === "photo") {
     let valid;
@@ -212,21 +224,26 @@ function importFile(app, watch, file, registration, prefix) {
   }
   const stageDir = $filepath.join(watch, stagingName, registration.id);
   $os.mkdirAll(stageDir, 0o750);
-  const ext = $filepath.ext(file.name);
-  const stem = file.name.slice(0, file.name.length - ext.length);
+  const types = require(__hooks + "/studio_shot_types.js");
+  const tag = file.kind === "photo" ? types.tagOf(file.name) || shotType || "" : "";
+  const plain = types.untagged(file.name);
+  const ext = $filepath.ext(plain);
+  const stem = plain.slice(0, plain.length - ext.length);
   const safeStem = stem.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 75) || "photo";
-  const name = prefix ? prefix + $security.randomStringWithAlphabet(20, "abcdefghijklmnopqrstuvwxyz0123456789") + "-" + safeStem + ext : file.name;
+  const name = types.tagged(prefix ? prefix + $security.randomStringWithAlphabet(20, "abcdefghijklmnopqrstuvwxyz0123456789") + "-" + safeStem + ext : plain, tag);
   let staged = $filepath.join(stageDir, name);
-  for (let n = 2; exists(staged); n++) staged = $filepath.join(stageDir, stem + "_" + n + ext);
+  const nameExt = $filepath.ext(name);
+  const nameStem = name.slice(0, name.length - nameExt.length);
+  for (let n = 2; exists(staged); n++) staged = $filepath.join(stageDir, nameStem + "_" + n + nameExt);
   try { $os.rename(file.abs, staged); } catch (_) {
     return "busy";
   }
-  deliver(app, staged, registration);
+  deliver(app, staged, registration, source);
   return "imported";
 }
 
 // Finishes imports that were claimed but not delivered. Returns counts per job id.
-function resumeStaged(app, watch, activeId, errors) {
+function resumeStaged(app, watch, activeId, errors, source) {
   const counts = {};
   const root = $filepath.join(watch, stagingName);
   let jobs;
@@ -251,7 +268,7 @@ function resumeStaged(app, watch, activeId, errors) {
     for (const entry of entries) {
       if (!entry.type().isRegular() || entry.name().endsWith(".studioflow-partial")) continue;
       try {
-        deliver(app, $filepath.join(dir, entry.name()), registration);
+        deliver(app, $filepath.join(dir, entry.name()), registration, source);
         counts[registration.id] = (counts[registration.id] || 0) + 1;
       } catch (error) {
         fail(entry.name() + ": " + text(error));
@@ -285,7 +302,8 @@ function scan(app, id, flush = false) {
       const taskId = station.getString("session_task");
       const photographerId = station.getString("session_photographer");
       const prefix = taskId ? taskPrefix(taskId, photographerId) : "";
-      const resumed = resumeStaged(app, watch, registrationId, errors);
+      const source = { station: id, photographer: photographerId };
+      const resumed = resumeStaged(app, watch, registrationId, errors, source);
       imported += resumed[registrationId] || 0;
 
       let files = [];
@@ -316,7 +334,7 @@ function scan(app, id, flush = false) {
           }
           processed++;
           try {
-            const result = importFile(app, watch, file, registration, prefix);
+            const result = importFile(app, watch, file, registration, prefix, station.getString("shot_type"), source);
             if (result === "imported") imported++;
             else if (result === "busy") backlog = true;
             else if (taskId) errors.push(file.name + ": The camera file is not a readable photo.");
@@ -411,7 +429,8 @@ function sender(watch) {
     waiting: senderCount(data.waiting),
     error: senderText(data.error, 300),
     // "upload": the sender sends over HTTP (studio_camera_sender.js); "share": into a shared folder.
-    via: data.via === "upload" ? "upload" : "share",
+    // "browser": the Photo Floor page's auto-send (studio_camera_sender.js, staff login).
+    via: data.via === "upload" || data.via === "browser" ? data.via : "share",
   };
 }
 
@@ -452,6 +471,7 @@ function status(app, station) {
     finishing: !!station.getInt("session_finishing"),
     sessionStarted: station.getString("session_started"),
     sessionImported: station.getInt("session_imported"),
+    shotType: station.getString("shot_type"),
     waiting: station.getInt("waiting_count"),
     lastScan: station.getString("last_scan"),
     lastImport: station.getString("last_import"),
@@ -646,7 +666,14 @@ function createFolder(parent, name) {
   return browse(path);
 }
 
+// The shot type the camera's next shots get ("" = none). Any photographer or admin on the floor.
+function setShotType(app, id, code) {
+  findStation(app, id);
+  const value = require(__hooks + "/studio_shot_types.js").checkCode(app, code);
+  app.db().newQuery("UPDATE camera_stations SET shot_type = {:code} WHERE id = {:id}").bind({ id, code: value }).execute();
+}
+
 module.exports = {
-  browse, claimWaiting, createFolder, endSession, findStation, rawFormats, recordVisit, scan, scanAll, sessionFields,
+  setShotType, browse, claimWaiting, createFolder, endSession, findStation, rawFormats, recordVisit, scan, scanAll, sessionFields,
   startSession, status, validateWatchFolder, linkTask,
 };

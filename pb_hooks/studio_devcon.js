@@ -16,7 +16,7 @@ const storage = require(__hooks + "/studio_photo_storage.js");
 // Order is for readability only (no SQL foreign keys between these tables).
 const clientTables = [
   "refunds", "payments", "cashier_confirmations", "cashier_registration_edits", "mua_completions",
-  "mua_assignment_events", "mua_payouts", "registrations",
+  "mua_assignment_events", "mua_payouts", "shot_origins", "registrations",
 ];
 const keptTables = [
   "packages", "add_ons", "catalog_items", "item_packages", "organizations", "courses",
@@ -47,6 +47,7 @@ function summary(app) {
   return {
     clients, kept, photoRoot: storage.basePath(), photoFolders: photoEntries().length, confirmPhrase,
     chooserUnlimited: !!settings?.getBool("chooser_unlimited"),
+    muaStationOff: !!settings?.getBool("mua_station_off"),
   };
 }
 

@@ -5,10 +5,12 @@ import { CameraSettings } from '../../camera/CameraSettings';
 import { formatJobOrderNo } from '../../../utils/formatters';
 import { agoLabel, SENDER_OFFLINE_AFTER_S, sinceLabel, type CameraStatus } from '../../camera/cameraApi';
 import type { useCameraLink } from '../useCameraLink';
+import { AutoSendPanel } from '../../camera/autoSend/AutoSendPanel';
+import type { AutoSend } from '../../camera/autoSend/useAutoSend';
 
 type CameraLink = ReturnType<typeof useCameraLink>;
 
-export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }> = ({ link, disabled }) => {
+export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean; autoSend: AutoSend }> = ({ link, disabled, autoSend }) => {
   const { stations, stationList, selectedId, select, camera, error } = link;
   const client = camera?.client;
   const [showSettings, setShowSettings] = useState(false);
@@ -66,6 +68,10 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
           <CameraSettings />
         </div>
       )}
+
+      <div className="mt-4">
+        <AutoSendPanel autoSend={autoSend} camera={camera} />
+      </div>
 
       {camera && (
         <div className="mt-4 pt-4 border-t border-neutral-500/20 space-y-3">
@@ -155,12 +161,16 @@ export const CameraImportPanel: React.FC<{ link: CameraLink; disabled: boolean }
 const SenderStatus: React.FC<{ sender: NonNullable<CameraStatus['sender']> }> = ({ sender }) => {
   const online = sender.seenAgo <= SENDER_OFFLINE_AFTER_S;
   const from = sender.host ? ` · ${sender.host}` : '';
+  const browser = sender.via === 'browser';
+  const what = browser ? 'Auto-send' : 'Photo Sender';
   if (!online) {
     return (
       <Notice tone="red">
         <span>
-          <strong>Photo Sender not heard from{from}</strong> for {agoLabel(sender.seenAgo).replace(' ago', '')}.
-          {' '}Shots stay on that laptop until it's back. Check the laptop is on, signed in and on the studio Wi-Fi.
+          <strong>{what} not heard from{from}</strong> for {agoLabel(sender.seenAgo).replace(' ago', '')}.
+          {' '}Shots stay on that laptop until it's back. {browser
+            ? 'Check the Photo Floor page is open on the laptop with Auto-send on.'
+            : 'Check the laptop is on, signed in and on the studio Wi-Fi.'}
         </span>
       </Notice>
     );
@@ -169,13 +179,13 @@ const SenderStatus: React.FC<{ sender: NonNullable<CameraStatus['sender']> }> = 
     <div role="status" className="space-y-1 border border-emerald-400 bg-emerald-50 p-3 text-xs text-emerald-900">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="inline-flex items-center gap-1.5 font-black uppercase tracking-wider">
-          <Laptop className="h-3.5 w-3.5" /> Photo Sender online{from}
+          <Laptop className="h-3.5 w-3.5" /> {what} online{from}
         </span>
         <span className="font-mono text-[11px]">
           {sender.lastSentAgo === null ? 'no shot sent yet' : `last shot ${agoLabel(sender.lastSentAgo)}`}
           {sender.lastSentName && sender.lastSentAgo !== null && ` (${sender.lastSentName})`}
           {sender.waiting ? ` · ${sender.waiting} waiting on the laptop` : ' · 0 waiting'}
-          {sender.via === 'upload' ? ' · network upload' : ' · shared folder'}
+          {browser ? ' · from the Photo Floor page' : sender.via === 'upload' ? ' · network upload' : ' · shared folder'}
         </span>
       </div>
       {sender.error && <p className="m-0 font-mono text-[11px] text-amber-800">{sender.error}</p>}

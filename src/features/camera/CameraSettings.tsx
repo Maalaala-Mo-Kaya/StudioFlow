@@ -11,6 +11,7 @@ import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { formatJobOrderNo } from '../../utils/formatters';
 import { FolderPickerModal } from './FolderPickerModal';
 import { PhotoSenderModal } from './PhotoSenderModal';
+import { ShotTypesSettings } from './ShotTypesSettings';
 import { sinceLabel, type CameraConfig, type CameraStatus } from './cameraApi';
 
 /** Step-by-step Photo Sender manual, shipped with the app (public/manuals) so it works offline. */
@@ -217,6 +218,8 @@ export const CameraSettings: React.FC = () => {
           </ul>
         )}
       </div>
+
+      {isAdmin && <div className="xl:col-span-2"><ShotTypesSettings /></div>}
 
       {editingId && (
         <Modal title="Edit camera" subtitle={editing?.name ?? editForm.name} icon={Pencil} size="md" busy={saving} onClose={closeEdit}>

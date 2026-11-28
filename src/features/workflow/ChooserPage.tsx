@@ -1,7 +1,9 @@
 import { CopyPathButton } from '../../components/common/CopyPathButton';
 import { DataFeedback } from '../../components/common/DataFeedback';
-import { useEffect, useRef, useState } from 'react';
-import { Check, ImageOff, Images, Maximize2, StickyNote, X } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Check, Columns2, ImageOff, Images, Maximize2, StickyNote, Tags } from 'lucide-react';
+import { ChooserGroupViewer } from './ChooserGroupViewer';
+import { untagged, type ShotType } from '../camera/shotTypes';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
 import { useToast } from '../../context/ToastContext';
@@ -43,6 +45,8 @@ interface Photo {
   selected: boolean;
   /** The chooser's note for the editor (selected photos only). */
   note?: string;
+  /** Shot type code from the file name ('' = none). */
+  type?: string;
 }
 interface Gallery {
   student: StationStudent;
@@ -52,6 +56,40 @@ interface Gallery {
   limit: number;
   packageLimit?: number;
   limitOverride?: boolean;
+  /** The shot type list, and the codes of the types the client's package includes. */
+  types?: ShotType[];
+  packageTypes?: string[];
+}
+
+interface PhotoGroup { code: string; name: string; inPackage: boolean; photos: Photo[] }
+
+/** Photos by shot type: the package's types first (in list order), then the others, then untyped. */
+function groupPhotos(gallery: Gallery): PhotoGroup[] {
+  const list = gallery.types ?? [];
+  const inPackage = new Set(gallery.packageTypes ?? []);
+  const order = (code: string) => {
+    const at = list.findIndex((type) => type.code === code);
+    return (inPackage.has(code) ? 0 : 1_000_000) + (at < 0 ? 500_000 : at);
+  };
+  const byCode = new Map<string, Photo[]>();
+  for (const photo of gallery.photos) {
+    const code = photo.type ?? '';
+    if (!byCode.has(code)) byCode.set(code, []);
+    byCode.get(code)!.push(photo);
+  }
+  return [...byCode].map(([code, photos]) => ({
+    code, photos, inPackage: inPackage.has(code), name: code ? list.find((type) => type.code === code)?.name ?? code : 'Other photos',
+  })).sort((a, b) => (a.code ? 0 : 1) - (b.code ? 0 : 1) || order(a.code) - order(b.code));
+}
+
+/**
+ * The same rules as checkTypes in pb_hooks/studio_photo_selection.js: with a limit, one photo per
+ * type; each package type that has photos needs its pick until the limit is used up.
+ */
+function missingTypes(groups: PhotoGroup[], selected: Set<string>, limit: number) {
+  if (!groups.some((group) => group.code)) return [];
+  if (limit && selected.size >= limit) return [];
+  return groups.filter((group) => group.inPackage && !group.photos.some((photo) => selected.has(photo.id)));
 }
 
 const NOTE_MAX = 500;
@@ -262,13 +300,13 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
   const [gallery, setGallery] = useState(initial);
   const [selected, setSelected] = useState(() => new Set(initial.photos.filter((item) => item.selected).map((item) => item.id)));
   const [notes, setNotes] = useState<Record<string, string>>(() => notesOf(initial));
-  const [preview, setPreview] = useState<{ url: string; name: string }>();
+  // A group full screen: all side by side (index null) or one photo at a time.
+  const [viewer, setViewer] = useState<{ code: string; index: number | null }>();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [conflict, setConflict] = useState(false);
   const request = useRef<string | undefined>(undefined);
-  const dialog = useRef<HTMLDialogElement>(null);
   const path = `/chooser/${gallery.student.id}`;
   const live = useWorkflowData<Gallery>(path);
   const stale = conflict || (!!live.data && live.data.version !== gallery.version);
@@ -276,13 +314,12 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
   const packageLimit = live.data?.packageLimit ?? gallery.packageLimit ?? 0;
   const override = live.data?.limitOverride ?? gallery.limitOverride ?? false;
   const overLimit = !!limit && selected.size > limit;
+  const groups = groupPhotos(live.data && live.data.version === gallery.version ? { ...gallery, types: live.data.types, packageTypes: live.data.packageTypes } : gallery);
+  const typed = groups.some((group) => group.code);
+  const missing = missingTypes(groups, selected, limit);
   const savedNotes = notesOf(gallery);
   const noteCount = [...selected].filter((id) => notes[id]?.trim()).length;
   const notesChanged = [...selected].some((id) => (notes[id]?.trim() || '') !== (savedNotes[id] || ''));
-
-  useEffect(() => {
-    if (preview && !dialog.current?.open) dialog.current?.showModal();
-  }, [preview]);
 
   function setCurrent(next: Gallery) {
     setGallery(next);
@@ -322,8 +359,12 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
     request.current = undefined;
     setSelected((current) => {
       const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else if (!limit || next.size < limit) next.add(id);
+      if (next.has(id)) { next.delete(id); return next; }
+      // One photo per type: picking another of the same type swaps the pick.
+      const code = gallery.photos.find((photo) => photo.id === id)?.type;
+      const sameType = limit && code ? gallery.photos.find((photo) => photo.type === code && next.has(photo.id)) : undefined;
+      if (sameType) next.delete(sameType.id);
+      if (!limit || next.size < limit) next.add(id);
       return next;
     });
   }
@@ -357,10 +398,17 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
         </div>
         <div className="flex gap-2 flex-wrap">
           <button type="button" className={stationButton} disabled={busy} onClick={() => void update(false)}>Reload gallery</button>
-          <button type="button" className={stationButton} disabled={busy || stale || !selected.size || overLimit}
+          <button type="button" className={stationButton} disabled={busy || stale || !selected.size || overLimit || missing.length > 0}
             onClick={() => void update(true)}>{busy ? 'Working…' : 'Confirm selection'}</button>
         </div>
       </div>
+      {typed && (
+        <p role="status" className={`m-0 font-bold ${missing.length ? 'text-amber-700' : 'text-emerald-800'}`}>
+          {missing.length
+            ? `Choose one photo of each type in the package. Still to choose: ${missing.map((group) => group.name).join(', ')}.`
+            : limit ? 'One photo of each type: picking another photo of a type swaps it.' : 'Every type in the package has a pick.'}
+        </p>
+      )}
       {notesChanged && !busy && (
         <p role="status" className="font-bold text-amber-700">Notes changed. Press Confirm selection to save them.</p>
       )}
@@ -368,27 +416,56 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
       {error && <p role="alert" className="font-bold text-red-700">{error}</p>}
       <DataFeedback refreshing={live.loading || live.refreshing} error={live.error} onRetry={live.refresh} />
       {status && <p role="status" className="font-bold text-emerald-800">{status}</p>}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-        {gallery.photos.map((photo) => (
-          <PhotoTile key={gallery.version + photo.id} photo={photo} path={path} checked={selected.has(photo.id)}
-            onToggle={() => toggle(photo.id)} disabled={busy || stale} onPreview={(url) => setPreview({ url, name: photo.name })}
-            note={notes[photo.id] ?? ''} onNote={(text) => editNote(photo.id, text)} />
-        ))}
-      </div>
-      <dialog ref={dialog} onClose={() => setPreview(undefined)} className="fixed inset-0 m-auto max-h-screen max-w-screen theme-night bg-black text-white p-3 backdrop:bg-black/90">
-        {preview && (
-          <div className="flex flex-col items-center gap-2">
-            <button type="button" className={`${stationButton} self-end`} onClick={() => dialog.current?.close()}><X size={16} /> Close preview</button>
-            <img className="max-h-[85dvh] max-w-[92vw] object-contain" src={preview.url} alt={preview.name} />
-          </div>
-        )}
-      </dialog>
+      {groups.map((group) => {
+        const picked = group.photos.filter((photo) => selected.has(photo.id)).length;
+        return (
+          <section key={group.code || 'none'} aria-label={group.name} className="space-y-2">
+            <h3 className="m-0 flex flex-wrap items-center gap-2 border-b border-line pb-1 text-xs font-black uppercase tracking-wider text-ink">
+              {typed && <><Tags className="size-4 text-gold" aria-hidden="true" /> {group.name}</>}
+              <span className="font-mono text-[10px] font-bold normal-case text-neutral-600">
+                {group.photos.length} photo{group.photos.length === 1 ? '' : 's'}
+                {group.code ? (group.inPackage ? ' · in the package' : ' · not in the package') : ''}
+              </span>
+              <span className="ml-auto flex items-center gap-2">
+                <button type="button" onClick={() => setViewer({ code: group.code, index: null })}
+                  title="All the photos of this group full screen, side by side"
+                  className="inline-flex min-h-8 items-center gap-1 border border-gold px-2 text-[10px] text-gold cursor-pointer">
+                  <Columns2 size={13} /> View all
+                </button>
+                {group.code && (
+                  <span className={`inline-flex items-center gap-1 border px-1.5 py-0.5 text-[10px] ${picked
+                    ? 'border-emerald-600/40 text-emerald-700' : group.inPackage ? 'border-amber-500 text-amber-700' : 'border-line text-neutral-600'}`}>
+                    {picked ? <><Check size={12} /> Chosen</> : group.inPackage ? 'Choose 1' : 'Optional'}
+                  </span>
+                )}
+              </span>
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+              {group.photos.map((photo, position) => (
+                <PhotoTile key={gallery.version + photo.id} photo={photo} path={path} checked={selected.has(photo.id)}
+                  onToggle={() => toggle(photo.id)} disabled={busy || stale} onPreview={() => setViewer({ code: group.code, index: position })}
+                  note={notes[photo.id] ?? ''} onNote={(text) => editNote(photo.id, text)} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+      {(() => {
+        const group = viewer && groups.find((entry) => entry.code === viewer.code);
+        if (!viewer || !group?.photos.length) return null;
+        const picked = group.photos.filter((photo) => selected.has(photo.id)).length;
+        return (
+          <ChooserGroupViewer key={viewer.code} title={typed ? group.name : 'All photos'} photos={group.photos} path={path}
+            selected={selected} disabled={busy || stale} startIndex={viewer.index} onToggle={toggle} onClose={() => setViewer(undefined)}
+            summary={`${picked ? `${picked} chosen here` : group.code && group.inPackage ? 'choose 1' : 'none chosen here'} · ${selected.size}${limit ? ` of ${limit}` : ''} selected in all`} />
+        );
+      })()}
     </div>
   );
 }
 
 function PhotoTile({ photo, path, checked, disabled, onToggle, onPreview, note, onNote }: {
-  photo: Photo; path: string; checked: boolean; disabled: boolean; onToggle: () => void; onPreview: (url: string) => void;
+  photo: Photo; path: string; checked: boolean; disabled: boolean; onToggle: () => void; onPreview: () => void;
   note: string; onNote: (text: string) => void;
 }) {
   const tile = useRef<HTMLElement>(null);
@@ -410,9 +487,9 @@ function PhotoTile({ photo, path, checked, disabled, onToggle, onPreview, note, 
         {checked && <span className="absolute top-1 left-1 bg-gold text-black border border-line p-1"><Check size={16} /></span>}
       </button>
       <div className="flex items-center justify-between gap-1 p-1.5">
-        <span className="truncate text-xs font-mono" title={photo.name}>{photo.name}</span>
-        <button type="button" title="Full-screen preview" aria-label={`Preview ${photo.name}`} disabled={!url || failed}
-          onClick={() => onPreview(url)} className="shrink-0 p-2 disabled:opacity-30"><Maximize2 size={15} /></button>
+        <span className="truncate text-xs font-mono" title={photo.name}>{untagged(photo.name)}</span>
+        <button type="button" title="Full screen, one by one" aria-label={`Preview ${photo.name}`} disabled={!url || failed}
+          onClick={onPreview} className="shrink-0 p-2 disabled:opacity-30"><Maximize2 size={15} /></button>
       </div>
       {checked && (
         <label className="block px-1.5 pb-1.5">

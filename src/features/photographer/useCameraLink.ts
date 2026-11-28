@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWorkflowData, workflowError } from '../../hooks/useWorkflowData';
 import { useToast } from '../../context/ToastContext';
-import { cameraAction, type CameraStatus } from '../camera/cameraApi';
+import { cameraAction, setCameraShotType, type CameraStatus } from '../camera/cameraApi';
+import { flushAutoSend, noteLinkStart } from '../camera/autoSend/registry';
+import { currentShotType, noteShotType } from '../camera/shotTypes';
 
 const storageKey = 'studioflow-camera-station';
 const scanInterval = 4_000;
@@ -69,6 +71,11 @@ export function useCameraLink() {
     actionVersion.current++;
     setBusy(true);
     try {
+      if (action === 'start' || action === 'end') {
+        // The last shots still on this laptop go to the client they were taken of, first.
+        await flushAutoSend(selectedId);
+        if (action === 'start') noteLinkStart(selectedId);
+      }
       setLive(await cameraAction(selectedId, action, registration));
       setError('');
       refresh();
@@ -82,7 +89,29 @@ export function useCameraLink() {
     }
   }, [selectedId, refresh, toast]);
 
+  // The shot type: the camera's (saved on the server, so the Photo Sender's shots get it too).
+  // A change made here is shown at once; the server's value is taken again once it has it.
+  const localChange = useRef(0);
+  const serverType = camera?.enabled ? camera.shotType ?? '' : null;
+  useEffect(() => {
+    if (serverType === null || Date.now() - localChange.current < 8_000) return;
+    if (serverType !== currentShotType()) noteShotType(serverType);
+  }, [serverType]);
+  const setShotType = useCallback(async (code: string) => {
+    localChange.current = Date.now();
+    noteShotType(code);
+    if (!selectedId || !enabled) return true;
+    try {
+      setLive(await setCameraShotType(selectedId, code));
+      return true;
+    } catch (err) {
+      toast.error('Shot type: ' + workflowError(err));
+      return false;
+    }
+  }, [selectedId, enabled, toast]);
+
   return {
+    setShotType,
     stations: stations ?? [],
     stationList,
     selectedId: listed ? selectedId : '',

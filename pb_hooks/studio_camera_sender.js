@@ -36,9 +36,15 @@ function findStation(app, id) {
   }
 }
 
-// The station whose key the request carries. Wrong camera and wrong key get the same answer.
+// The station the request is for. The Photo Sender proves it with the camera's key; the Photo
+// Floor page's auto-send (no key) with the signed-in photographer's or admin's login.
+// Wrong camera and wrong key get the same answer.
 function authStation(e) {
   const given = String(e.request.header.get("X-Camera-Key") || "");
+  if (!given && e.auth) {
+    require(__hooks + "/studio_workflow.js").staff(e.app, e.auth, ["admin", "photographer"]);
+    return findStation(e.app, e.request.pathValue("id"));
+  }
   let station = null;
   try { station = e.app.findRecordById("camera_stations", e.request.pathValue("id")); } catch (_) { /* below */ }
   const key = station ? station.getString("sender_key") : "";
@@ -109,10 +115,10 @@ function upload(e) {
   if (size > maxUploadBytes) throw new ApiError(413, "This file is too large to send.");
 
   const marker = $filepath.join(watch, receivedDir, $security.sha256(station.id + ":" + uploadId).slice(0, 40));
-  try {
-    return e.json(200, { status: "already", name: toString($os.readFile(marker), 300) });
-  } catch (_) { /* not received yet */ }
 
+  // The body is always read in full, even for a retry that already arrived: answering before
+  // the sender has finished writing makes the server drop the connection, and the sender then
+  // sees "connection aborted" instead of "already" and retries the same shot forever.
   const root = $os.openRoot(watch);
   let partial = "";
   try {
@@ -125,6 +131,10 @@ function upload(e) {
       file.sync();
     } finally { file.close(); }
     if (written !== size) throw new BadRequestError("The upload was incomplete (" + written + " of " + size + " bytes). It will be sent again.");
+    let already = null;
+    try { already = toString($os.readFile(marker), 300); } catch (_) { /* not received yet */ }
+    // The partial copy is removed in `finally`.
+    if (already !== null) return e.json(200, { status: "already", name: already });
     const saved = publish(root, partial, name);
     partial = "";
     try {
@@ -157,7 +167,7 @@ function heartbeat(e) {
     lastSentName: statusText(body.lastSentName, 200),
     lastSentSecondsAgo: statusCount(body.lastSentSecondsAgo),
     error: statusText(body.error, 300),
-    via: "upload",
+    via: body.via === "browser" ? "browser" : "upload",
   };
   let folderOk = false;
   try { folderOk = $os.stat(watch).isDir(); } catch (_) { /* reported below */ }

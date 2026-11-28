@@ -29,6 +29,8 @@ export interface CameraStatus {
   finishing: boolean;
   sessionStarted: string;
   sessionImported: number;
+  /** The shot type code the camera's next shots get ('' = none). */
+  shotType: string;
   /** Files in the folder that are not being sent to the linked client. */
   waiting: number;
   lastScan: string;
@@ -50,8 +52,11 @@ export interface CameraStatus {
     /** Shots still on the laptop (not finished writing yet, or waiting for the server). */
     waiting: number | null;
     error: string;
-    /** How it sends: over the network to StudioFlow ("upload") or into a shared folder ("share"). */
-    via: 'upload' | 'share';
+    /**
+     * How it sends: the Photo Sender over the network ("upload") or into a shared folder ("share"),
+     * or the Photo Floor page's Auto-send ("browser").
+     */
+    via: 'upload' | 'share' | 'browser';
   };
 }
 
@@ -88,6 +93,11 @@ export function cameraAction(id: string, action: CameraAction, registration?: st
     body: registration ? { registration } : {},
     requestKey: null,
   });
+}
+
+/** Sets the shot type the camera's next shots get. */
+export function setCameraShotType(id: string, code: string) {
+  return pb.send<CameraStatus>(`${workflowApi}/camera/${id}/shot-type`, { method: 'POST', body: { code }, requestKey: null });
 }
 
 export function browseFolders(path: string) {

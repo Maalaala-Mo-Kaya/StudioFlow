@@ -47,6 +47,7 @@ routerAdd("POST", "/api/studioflow/camera/{id}/{action}", (e) => {
       break;
     case "end": camera.endSession(e.app, id, String(body.registration || "")); break;
     case "claim-waiting": camera.claimWaiting(e.app, id, owner || e.auth.id); break;
+    case "shot-type": camera.setShotType(e.app, id, body.code); break;
     default: throw new NotFoundError("Unknown camera action.");
   }
   return e.json(200, camera.status(e.app, camera.findStation(e.app, id)));
