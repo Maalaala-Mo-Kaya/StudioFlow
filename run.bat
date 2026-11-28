@@ -9,7 +9,8 @@ goto :server
 
 :dev
 call "%~dp0scripts\dev.bat"
-goto :server
+popd
+exit /b %ERRORLEVEL%
 
 :build
 call "%~dp0scripts\build.bat"
@@ -46,22 +47,43 @@ echo ========================================================
 echo   Hi-Light StudioFlow Server
 echo ========================================================
 echo.
-echo  On this server PC:
-echo    - App:             http://localhost:8090
-echo    - Admin Dashboard: http://localhost:8090/_/
+echo  CLIENT port 8090 - students / guest Wi-Fi (kiosk only):
+echo    - Registration:    http://%IP%:8090
 echo.
-echo  On client devices (iPads, Phones, Cashier PC):
-echo    - App:             http://%IP%:8090
-echo    - Admin Dashboard: http://%IP%:8090/_/
+echo  STAFF port 8091 - staff network only (never the guest Wi-Fi):
+echo    - Stations:        http://%IP%:8091
+echo    - Admin Dashboard: http://%IP%:8091/_/
+echo    - On this PC:      http://localhost:8091
 echo.
+echo  Router: let the guest network reach %IP%:8090 only.
 echo ========================================================
 echo.
-echo Launching PocketBase (Listening on 0.0.0.0:8090)...
+
+where node >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Node.js is missing, so the client port 8090 can't start.
+    echo         Install Node.js, or students will not be able to register.
+    echo.
+) else if not exist "%~dp0pb_public_kiosk\index.html" (
+    echo [WARN] No kiosk build in pb_public_kiosk. Run "run.bat --build" so port 8090 has a page to show.
+    echo.
+)
+
+:: Client port: the kiosk build plus only the calls the kiosk makes (scripts\client-gateway.cjs).
+where node >nul 2>&1
+if not errorlevel 1 (
+    echo Launching the client gateway on 0.0.0.0:8090 ^(separate window^)...
+    start "StudioFlow Client Port 8090" /min node "%~dp0scripts\client-gateway.cjs" --http=0.0.0.0:8090 --upstream=http://127.0.0.1:8091 --publicDir="%~dp0pb_public_kiosk"
+)
+
+echo Launching PocketBase on 0.0.0.0:8091 ^(staff port^)...
 
 :: Bind to 0.0.0.0 so all physical network adapters accept connections
-"%~dp0pocketbase.exe" serve --http="0.0.0.0:8090" --publicDir="%~dp0pb_public"
+"%~dp0pocketbase.exe" serve --http="0.0.0.0:8091" --publicDir="%~dp0pb_public"
 
 set "SERVER_RESULT=%ERRORLEVEL%"
+:: The staff server stopped: stop the client gateway with it.
+taskkill /fi "WINDOWTITLE eq StudioFlow Client Port 8090*" /t /f >nul 2>&1
 pause
 popd
 exit /b %SERVER_RESULT%

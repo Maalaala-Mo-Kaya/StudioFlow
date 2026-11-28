@@ -77,26 +77,27 @@ run.bat
 The script automatically:
 
 1. Detects your physical studio Wi-Fi / LAN IP address.
-2. Starts the backend server on `0.0.0.0:8090`.
-3. Displays the exact URLs for tablets, cashier laptops, and phone kiosks on your screen.
+2. Starts PocketBase on the **staff port** `0.0.0.0:8091` and the client gateway on the **client port** `0.0.0.0:8090` (see [Ports](#ports-client-8090-and-staff-8091)).
+3. Displays the exact URLs for the kiosk and the staff stations on your screen.
 
-> **Tip (Single-Port Mode)**: Run `run.bat --build` to compile and bundle the web app directly into PocketBase. This serves both the database and the web application from a single port (`8090`), so other devices don't need a separate Node.js terminal running.
+> **Tip**: Run `run.bat --build` to compile the web app (staff build into `pb_public`, kiosk build into `pb_public_kiosk`) and start both ports. Node.js must be installed on the server PC: the client gateway runs on it.
 
 ### Developer Mode (Live Reloading)
 
 If developing or modifying frontend components:
 
 ```bash
-
-# Terminal 1: Start Backend
-.\pocketbase.exe serve --http="127.0.0.1:8090"
-
-# Terminal 2: Start Frontend with HMR
-npm i
-npm run dev
+scripts\dev.bat        # opens the four windows below
 ```
 
-Open **`http://localhost:5173`** in your browser.
+| Window | Port | Talks to |
+| :--- | :--- | :--- |
+| PocketBase (`pocketbase.exe serve --http=0.0.0.0:8091`) | 8091 staff | — |
+| Client gateway (`npm run gateway`) | 8090 client | 8091, kiosk calls only |
+| Staff UI (`npm run dev`) | 5173 | 8091 |
+| Kiosk UI (`npm run dev:kiosk`) | 5174 | 8090, like a guest device |
+
+Open **`http://localhost:5173`** (staff) or **`http://localhost:5174`** (kiosk).
 
 ---
 
@@ -107,7 +108,8 @@ StudioFlow includes pre-built batch scripts to simplify studio operations:
 | Script | How to Run | What It Does |
 | :--- | :--- | :--- |
 | **`run.bat`** | Double-click or `.\run.bat` | **1-Click Server Launch**. Detects studio LAN IP, binds server, and shows connect URLs. |
-| **`run.bat --build`** | `.\run.bat --build` | Builds the frontend and deploys it to `pb_public` for single-port serving (`:8090`). |
+| **`run.bat --build`** | `.\run.bat --build` | Builds the staff app (`pb_public`, `:8091`) and the kiosk (`pb_public_kiosk`, `:8090`), then starts both ports. |
+| **`scripts\setup_port_firewall.ps1`** | Elevated PowerShell, `-GuestSubnet <subnet>` | Optional second layer: Windows Firewall blocks the staff port `8091` from the guest Wi-Fi subnet. |
 | **`scripts\backup.bat`** | Double-click | Creates a timestamped snapshot of the database (`pb_data\`) into `backups\`. |
 | **`scripts\restore.bat`** | Double-click | Restores the database from a previous backup snapshot. |
 | **`scripts\clean_orphans.bat`** | Double-click | Previews or removes empty client folders that have no matching Job Order or saved binding. |
@@ -156,21 +158,33 @@ Run StudioFlow across all studio tablets, laptops, and PCs using a single Wi-Fi 
                                   │
          ┌────────────────────────┼────────────────────────┐
          │                        │                        │
-[ Server PC ]              [ Cashier Laptop ]        [ Registration Tablet ]
-Host IP: 192.168.1.50      http://192.168.1.50:8090  http://192.168.1.50:8090
-Runs run.bat               (Cashier Counter)         (Public Student Kiosk)
+[ Server PC ]              [ Cashier Laptop ]        [ Student phone / kiosk ]
+Host IP: 192.168.1.50      http://192.168.1.50:8091  http://192.168.1.50:8090
+Runs run.bat               (staff network)           (guest Wi-Fi)
 ```
 
 1. **Launch `run.bat`** on the main studio computer.
 2. Note the IP displayed in the console (e.g. `192.168.1.50`).
 3. Open any browser on devices connected to the studio Wi-Fi:
-   - **Student Kiosks / Tablets**: `http://192.168.1.50:8090/#/register`
-   - **Cashier Terminal**: `http://192.168.1.50:8090/#/cashier`
-   - **Photographer PC**: `http://192.168.1.50:8090/#/photographer`
-   - **Makeup station**: `http://192.168.1.50:8090/#/mua`
-   - **Chooser station**: `http://192.168.1.50:8090/#/chooser`
+   - **Student Kiosks / phones** (guest Wi-Fi): `http://192.168.1.50:8090`
+   - **Cashier Terminal**: `http://192.168.1.50:8091/#/cashier`
+   - **Photographer PC**: `http://192.168.1.50:8091/#/photographer`
+   - **Makeup station**: `http://192.168.1.50:8091/#/mua`
+   - **Chooser station**: `http://192.168.1.50:8091/#/chooser`
+   - **PocketBase dashboard**: `http://192.168.1.50:8091/_/`
 
-Leave `VITE_PB_URL` unset when PocketBase serves the production build. The app sends API requests to the same address as the page, including through an HTTPS tunnel. If you serve the frontend separately from PocketBase, set `VITE_PB_URL` to a backend URL reachable by all stations before building.
+Leave `VITE_PB_URL` / `VITE_CLIENT_URL` unset when the server serves the production builds. Each page sends API requests to its own address, including through an HTTPS tunnel. If you serve the frontend elsewhere, set them before building (see `.env.sample`).
+
+### Ports: client 8090 and staff 8091
+
+| Port | Process | Reachable from | Serves |
+| :--- | :--- | :--- | :--- |
+| **8090 client** | `scripts\client-gateway.cjs` (Node, no dependencies) | everyone, guest Wi-Fi included | the kiosk-only build (`pb_public_kiosk`) and only the kiosk's calls: registration catalog, submitting the form, package photos, the catalog's realtime topic, `/q/<slug>` QR links |
+| **8091 staff** | PocketBase | staff network only | every station, the `/_/` dashboard, all APIs |
+
+The gateway answers everything else with 404 (sign-in, `/_/`, staff endpoints, other collections, other realtime topics) and drops any `Authorization` / `Cookie` header, so nothing on 8090 acts as a staff member. It passes the guest's address to PocketBase in `X-Real-IP` (trusted through migration `1793805600`). QR links made in Admin point at 8090. `npm run test:gateway` checks the allowlist.
+
+**Router:** put students on the guest network and allow it to reach only `<server IP>:8090` (TCP). Staff devices stay on the main network, which reaches both ports. Many home routers isolate the guest Wi-Fi from the LAN completely, with no per-port exception; you then need a router with VLAN / firewall rules (allow guest → server:8090, deny guest → LAN). Optionally run `scripts\setup_port_firewall.ps1 -GuestSubnet <guest subnet>` on the server, which blocks 8091 from that subnet even if the router allows it.
 
 ---
 
@@ -239,7 +253,7 @@ npm.cmd ci
 
 Run `npm.cmd ci` on a fresh checkout or after the dependency lockfile changes. The build script runs type checking, writes the production build to `dist\`, and publishes it to PocketBase’s `pb_public\` folder. It returns a nonzero exit code if building or publishing fails.
 
-To build, deploy to PocketBase, and start the server on port 8090, run:
+To build, deploy, and start both ports (client 8090, staff 8091), run:
 
 ```text
 .\run.bat --build
@@ -248,10 +262,13 @@ To build, deploy to PocketBase, and start the server on port 8090, run:
 | Command | Description |
 | :--- | :--- |
 | `run.bat` | 1-Click launcher with auto-detected studio LAN IP |
-| `run.bat --build` | Builds frontend and serves unified app on port 8090 |
-| `npm run dev` | Starts local development server with hot-reload |
+| `run.bat --build` | Builds both apps and serves the kiosk on 8090 and staff on 8091 |
+| `scripts\dev.bat` | Development: PocketBase 8091, gateway 8090, Vite staff 5173 and kiosk 5174 |
+| `npm run dev` / `npm run dev:kiosk` | Vite dev server for the staff UI / kiosk UI |
+| `npm run gateway` | Client gateway on 8090 (forwards to 8091) |
+| `npm run test:gateway` | Checks what the client port forwards and refuses |
 | `scripts\build.bat` | Type-checks, builds, and publishes the frontend |
-| `npm run build` | Builds `dist\` and publishes it to `pb_public\` |
+| `npm run build` | Builds `dist\` + `dist-kiosk\` and publishes them to `pb_public\` + `pb_public_kiosk\` |
 | `npm run lint` | Runs ESLint type and code quality checks |
 | `npm run test:workflow` | Runs the isolated PocketBase integration suite with Node.js 22.13+ |
 

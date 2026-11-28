@@ -9,20 +9,24 @@ StudioFlow V2: an offline, LAN-only workflow system for graduation pictorial stu
 ## Commands
 
 ```bash
+# Two ports: 8090 = CLIENT (guest Wi-Fi; scripts/client-gateway.cjs), 8091 = STAFF (PocketBase)
+scripts\dev.bat        # all four below, each in its own window
 # Backend (dev): uses ./pb_data, ./pb_hooks, ./pb_migrations
-./pocketbase.exe serve --http="127.0.0.1:8090"
-# Frontend dev server with HMR on :5173 (talks to PocketBase on <hostname>:8090)
-npm run dev
+./pocketbase.exe serve --http="0.0.0.0:8091"
+npm run gateway        # client port 8090 -> forwards only the kiosk's calls to 8091
+npm run dev            # staff UI with HMR on :5173 (talks to <hostname>:8091)
+npm run dev:kiosk      # kiosk UI on :5174 (talks to <hostname>:8090, like a guest)
 
 npm run typecheck      # tsc on tsconfig.app.json (src) and tsconfig.node.json (vite config)
-npm run build          # typecheck + vite build -> dist/
+npm run build          # typecheck + vite build -> dist/ (staff) + vite build --mode kiosk -> dist-kiosk/; publishes to pb_public/ + pb_public_kiosk/
 npm run lint           # eslint (ts/tsx only; pb_hooks/migrations are not linted)
 npm run test:workflow  # PocketBase integration test (needs Node 22.13+ for node:sqlite)
 npm run test:catalog   # catalog import: parser + saving drafts into a throwaway PocketBase (app TS loaded via Vite runnerImport)
 npm run check:excel    # Excel math check: builds every export from a temp server on :8099 and recalculates it (-- --verbose)
-npm run deploy         # build + copy dist/ into pb_public/ (single-port serving on :8090)
+npm run test:gateway   # what the client port forwards / refuses (fake upstream)
+npm run deploy         # same as build
 
-run.bat                # production launcher: detects LAN IP, serves on 0.0.0.0:8090
+run.bat                # production launcher: detects LAN IP; gateway on 0.0.0.0:8090 (own window), PocketBase on 0.0.0.0:8091
 run.bat --build        # scripts/build.bat + scripts/deploy.bat, then serve
 scripts\reset-for-handover.bat  # wipe test data before handover (server must be stopped; backs up first)
 ```
@@ -31,13 +35,18 @@ scripts\reset-for-handover.bat  # wipe test data before handover (server must be
 
 There is no unit-test framework. `scripts/test-studio-workflow.cjs` is a single `node:test` that starts a throwaway PocketBase instance in a temp dir (its own `--dir`, plus the repo's `pb_hooks` and `pb_migrations`, with `STUDIOFLOW_PHOTOS_ROOT` pointed at a temp photo root) and runs the whole staff workflow against real folders. It first migrates up to the schema before `1793801600` and seeds legacy data, then applies the remaining migrations to test an in-place upgrade. Set `POCKETBASE_TEST_BINARY` to use a different PocketBase binary. When you add a migration that changes existing data, extend this test.
 
-`pb_data/` (the live SQLite DB) and `pb_public/` (deployed build) are gitignored and generated. `pb_data/types.d.ts` provides PocketBase JSVM typings for hooks and migrations.
+`pb_data/` (the live SQLite DB), `pb_public/` and `pb_public_kiosk/` (deployed builds) are gitignored and generated. `pb_data/types.d.ts` provides PocketBase JSVM typings for hooks and migrations.
+
+### Ports (client 8090 / staff 8091)
+- The router lets the guest Wi-Fi reach only `:8090`. **8091** is PocketBase: every station, `/_/`, all APIs. **8090** is `scripts/client-gateway.cjs` (Node, no deps): it serves the kiosk build and forwards only `ROUTES` (registration catalog, `POST registrations`, `/api/files/packages/…`, realtime limited to `REALTIME_TOPICS`, `/q/<slug>`, health), drops `Authorization` / `Cookie` / `Set-Cookie`, and sets `X-Real-IP` (trusted via migration `1793805600`). Everything else is 404. **When the kiosk starts calling a new endpoint, collection, file collection or realtime topic, add it to the gateway's allowlist and `scripts/test-client-gateway.cjs`.**
+- Two builds from one source: `VITE_SURFACE` (`kiosk` | `staff`, a constant set in `vite.config.ts` from the mode). `main.tsx` loads `KioskApp.tsx` (register page only, no staff code in the bundle) or `App.tsx`. Package photo URLs use the collection **name** (`packagePhotos.ts`) so the gateway can match them.
+- Links handed to clients (QR codes, `managedQrUrl`) are built with `clientPortUrl()` from `src/db/pocketbase.ts`, never `pb.buildURL`. `scripts/setup_port_firewall.ps1` optionally blocks 8091 from the guest subnet in Windows Firewall.
 
 ## Architecture
 
 ### Frontend (`src/`)
 - **Routing is hash-based with no router library.** `useHashNavigation` sets `currentTab` (`register`, `login`, `cashier`, `photographer`, `mua`, `chooser`, `admin`). `App.tsx` renders one station page per tab, wrapped in `RoleLoginGate allowedRoles=[...]`. `register` is the public kiosk.
-- **`src/db/pocketbase.ts`** holds the single `pb` client. With no `VITE_PB_URL` set, it uses `window.location.origin` on port 8090 and otherwise `<hostname>:8090`, so the same build works on any LAN device. Auto-cancellation is disabled globally because many components query at the same time.
+- **`src/db/pocketbase.ts`** holds the single `pb` client. In production it uses `window.location.origin` (each port serves its own build); in dev `<hostname>:8091` for staff and `<hostname>:8090` for the kiosk build (`VITE_STAFF_PORT` / `VITE_CLIENT_PORT`, overrides `VITE_PB_URL` / `VITE_CLIENT_URL`), so the same build works on any LAN device. Auto-cancellation is disabled globally because many components query at the same time.
 - `src/features/<station>/` holds each page, its `components/`, and a state hook (`useCashierState`, `usePhotographerQueue`, `useRegistrationForm`, `useAdminData`).
 - There are two data-access styles:
   - Cashier, registration, and most admin views use `pb.collection(...)` directly, relying on collection API rules.

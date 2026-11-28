@@ -18,7 +18,7 @@ StudioFlow V2 operates exclusively over an isolated Local Area Network (LAN). No
             ┌─────────────┴─────┐  ┌──────┴──────┐  ┌─────┴───────────────┐
             │ SERVER HOST PC    │  │ CASHIER PC  │  │ PHOTOGRAPHER IPAD   │
             │ IP: 192.168.1.100 │  │ Web Browser │  │ Safari / Chrome     │
-            │ PocketBase :8090  │  │ Station 02  │  │ Station 01 Floor    │
+            │ :8091 staff/:8090 │  │ Station 02  │  │ Station 01 Floor    │
             └───────┬───────────┘  └─────────────┘  └─────────────────────┘
                     │
             ┌───────┴───────────┐
@@ -39,9 +39,11 @@ StudioFlow V2 operates exclusively over an isolated Local Area Network (LAN). No
    .\run.bat
    ```
 4. The launcher automatically detects your active physical LAN IPv4 address (ignoring VMware/WSL virtual adapters) and outputs:
-   * **Local Server URL**: `http://localhost:8090`
-   * **Client Devices URL**: `http://<SERVER_IP>:8090`
-   * **PocketBase Admin Backend**: `http://<SERVER_IP>:8090/_/`
+   * **Kiosk (students, guest Wi-Fi)**: `http://<SERVER_IP>:8090` (client port: registration only)
+   * **Staff stations (staff network)**: `http://<SERVER_IP>:8091` (staff port), `http://localhost:8091` on the server
+   * **PocketBase Admin Backend**: `http://<SERVER_IP>:8091/_/`
+5. The client port runs in a second, minimized window ("StudioFlow Client Port 8090"). Keep it open; it closes when the server stops. It needs Node.js on the server PC.
+6. Router: students join the guest Wi-Fi, which may reach only `<SERVER_IP>:8090`. Staff devices join the main network.
 
 ---
 

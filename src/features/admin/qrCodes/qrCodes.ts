@@ -1,4 +1,4 @@
-import { pb } from '../../../db/pocketbase';
+import { clientPortUrl, pb } from '../../../db/pocketbase';
 
 export type QrKind = 'direct' | 'protected' | 'wifi';
 export type WifiSecurity = 'WPA' | 'WEP' | 'nopass';
@@ -53,7 +53,8 @@ export const loadWifiPassword = (id: string) => pb.send<{ password: string }>(
   `${api}/${id}/wifi-password`, { method: 'POST' },
 ).then(({ password }) => password);
 
-export const managedQrUrl = (slug: string) => pb.buildURL(`/q/${slug}`);
+// Clients scan these on the guest Wi-Fi, which reaches only the client port.
+export const managedQrUrl = (slug: string) => clientPortUrl(`/q/${slug}`);
 
 export function destinationUrl(input: string) {
   const raw = input.trim();

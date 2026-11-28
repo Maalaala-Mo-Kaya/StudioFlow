@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-kiosk
 dist-ssr
 *.local
 
@@ -28,6 +29,7 @@ dist-ssr
 # pb data generated files
 pb_data
 pb_public
+pb_public_kiosk
 /pb_data.wifi-key
 /pb_data.wifi-key.*.tmp
 

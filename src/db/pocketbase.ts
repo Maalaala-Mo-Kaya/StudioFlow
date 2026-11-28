@@ -1,16 +1,39 @@
 import PocketBase, { BaseAuthStore } from 'pocketbase';
 
+/**
+ * Two ports, kept apart by the router: the client port (8090) is the only one the guest Wi-Fi
+ * can reach, served by scripts/client-gateway.cjs (kiosk build + the few calls the kiosk makes);
+ * the staff port (8091) is PocketBase itself (every station, the /_/ dashboard).
+ */
+export const CLIENT_PORT = import.meta.env.VITE_CLIENT_PORT || '8090';
+export const STAFF_PORT = import.meta.env.VITE_STAFF_PORT || '8091';
+
+/** This build's surface: `kiosk` (served on the client port) or `staff`. Set by vite.config.ts. */
+export const IS_KIOSK_BUILD = import.meta.env.VITE_SURFACE === 'kiosk';
+
 const getBaseUrl = () => {
-  const envUrl = import.meta.env?.VITE_PB_URL || import.meta.env?.PB_URL;
+  const envUrl = IS_KIOSK_BUILD ? import.meta.env.VITE_CLIENT_URL : import.meta.env.VITE_PB_URL;
   if (envUrl) return envUrl;
 
-  if (typeof window === 'undefined') return 'http://127.0.0.1:8090';
-  // PocketBase serves the production build, including behind HTTPS tunnels.
+  const port = IS_KIOSK_BUILD ? CLIENT_PORT : STAFF_PORT;
+  if (typeof window === 'undefined') return `http://127.0.0.1:${port}`;
+  // Each port serves its own build, so production talks to its own origin
+  // (the gateway for the kiosk, PocketBase for staff), including behind HTTPS tunnels.
   if (!import.meta.env.DEV) {
     return window.location.origin;
   }
-  return `${window.location.protocol}//${window.location.hostname}:8090`;
+  return `${window.location.protocol}//${window.location.hostname}:${port}`;
 };
+
+/**
+ * An address on the client port, for links handed to clients (QR codes): guest devices can't
+ * reach the staff port.
+ */
+export function clientPortUrl(path: string) {
+  const base = import.meta.env.VITE_CLIENT_URL
+    || (typeof window === 'undefined' ? `http://127.0.0.1:${CLIENT_PORT}` : `${window.location.protocol}//${window.location.hostname}:${CLIENT_PORT}`);
+  return base.replace(/\/+$/, '') + (path.startsWith('/') ? path : `/${path}`);
+}
 
 export const pb = new PocketBase(getBaseUrl());
 // Globally disable PocketBase JS SDK auto-cancellation so concurrent queries

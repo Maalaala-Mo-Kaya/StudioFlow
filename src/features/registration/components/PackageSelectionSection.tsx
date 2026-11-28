@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Info, ArrowRight, ArrowLeft, Check, Gift, ListChecks, Printer, Camera, Frame, Images, Columns3, Hand } from 'lucide-react';
 import { type OptionPicks } from '../../../utils/packageOptions';
 import { parseInclusionTree, topLevelLabels } from '../../../utils/inclusions';
@@ -13,11 +13,9 @@ import { isMakeupArtistService } from '../registrationAddOns';
 
 const preferredPackageWidth = 320;
 const packagePeekWidth = 32;
-
-function packageAtScrollOffset(scrollLeft: number, { width, gap, padding }: { width: number; gap: number; padding: number }, count: number) {
-  // All cards share a width. Advance when less than half of the leading card remains visible.
-  return Math.max(0, Math.min(count - 1, Math.ceil((scrollLeft - padding - width / 2) / (width + gap))));
-}
+const scrollTolerance = 1;
+const navigationButton = 'grid size-11 shrink-0 place-items-center cursor-pointer outline-gold focus-visible:outline-2 aria-disabled:cursor-default aria-disabled:opacity-40 aria-[disabled=false]:hover:[&>span]:bg-gold-bright aria-[disabled=false]:active:[&>span]:bg-gold-soft sm:size-12';
+const navigationIcon = 'grid size-8 place-items-center border-2 border-gold bg-gold text-on-gold transition-colors motion-reduce:transition-none sm:size-10';
 
 interface PackageSelectionSectionProps {
   packages: Package[];
@@ -64,12 +62,13 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
   onOptionPicksChange,
 }) => {
   const makeupServiceGroup = useId();
+  const trackId = useId();
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
-  const [viewedIndex, setViewedIndex] = useState(0);
-  const [hasOverflow, setHasOverflow] = useState(false);
+  const [navigation, setNavigation] = useState({ back: false, forward: false });
   const trackRef = useRef<HTMLDivElement>(null);
-  const cardGeometry = useRef({ width: preferredPackageWidth, gap: 0, padding: 0 });
+  const geometry = useRef<{ end: number; stops: number[] }>({ end: 0, stops: [] });
+  const target = useRef<number | null>(null);
   const viewingPackage = packages.find((pkg) => pkg.id === detailsId) ?? null;
 
   const cards = useMemo(() => part === 'extras' ? [] : packages.map((pkg) => {
@@ -231,46 +230,66 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
     );
   }), [cards, onSelectPackage, selectedPackageId]);
 
-  /** Brings package `index` to the leading edge of the track. */
-  const scrollToIndex = (index: number) => {
-    const track = trackRef.current;
-    const first = track?.children[0] as HTMLElement | undefined;
-    const card = track?.children[Math.max(0, Math.min(index, packages.length - 1))] as HTMLElement | undefined;
-    if (!track || !first || !card) return;
+  const syncNavigation = useCallback((track: HTMLDivElement) => {
+    const position = track.scrollLeft;
+    const { end } = geometry.current;
+    if (target.current !== null && Math.abs(position - target.current) <= scrollTolerance) target.current = null;
+    const back = end > scrollTolerance && position > scrollTolerance;
+    const forward = end - position > scrollTolerance && end > scrollTolerance;
+    setNavigation((current) => current.back === back && current.forward === forward ? current : { back, forward });
+  }, []);
+
+  function move(track: HTMLDivElement, direction: 'back' | 'forward' | 'start' | 'end') {
+    const { end, stops } = geometry.current;
+    const position = target.current ?? track.scrollLeft;
+    const next = direction === 'back' ? stops.findLast((stop) => stop < position - scrollTolerance)
+      : direction === 'forward' ? stops.find((stop) => stop > position + scrollTolerance)
+        : direction === 'start' ? 0 : end;
+    if (next === undefined || Math.abs(next - position) <= scrollTolerance) return;
     const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    track.scrollTo({ left: card.offsetLeft - first.offsetLeft, behavior: smooth ? 'smooth' : 'auto' });
-  };
-  const browsing = hasOverflow && packages.length > 1;
-  const atStart = viewedIndex <= 0;
-  const atEnd = viewedIndex >= packages.length - 1;
+    target.current = smooth ? next : null;
+    track.scrollTo({ left: next, behavior: smooth ? 'smooth' : 'instant' });
+  }
+
+  const browsing = packages.length > 0 && (navigation.back || navigation.forward);
 
   useEffect(() => {
     const track = trackRef.current;
-    if (!track || !packages.length) return;
-    const resizeObserver = new ResizeObserver(([entry]) => {
-      const availableWidth = entry.contentRect.width;
-      if (availableWidth === 0) return;
-
+    if (!track) return;
+    const elements = Array.from(track.querySelectorAll<HTMLElement>(':scope > div'));
+    const resizeObserver = new ResizeObserver(() => {
       const style = getComputedStyle(track);
       const gap = parseFloat(style.columnGap);
-      const padding = parseFloat(style.paddingLeft);
-      const visibleCount = Math.max(1, Math.round((availableWidth - packagePeekWidth) / (preferredPackageWidth + gap)));
-      const overflowing = packages.length > visibleCount;
-      // Leave room for a gap and a sliver of the next card at each leading snap position.
-      const reservedWidth = overflowing ? gap + packagePeekWidth : 0;
-      const cardCount = overflowing ? visibleCount : packages.length;
-      const fittedWidth = (availableWidth - reservedWidth - (cardCount - 1) * gap) / cardCount;
-      const cardWidth = Math.max(1, overflowing ? fittedWidth : Math.min(preferredPackageWidth, fittedWidth));
+      const availableWidth = track.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      if (elements.length && availableWidth > 0) {
+        const preferredWidth = Math.min(preferredPackageWidth, availableWidth);
+        const fittedCount = Math.max(1, Math.round((availableWidth - packagePeekWidth) / (preferredWidth + gap)));
+        const count = Math.min(fittedCount, elements.length);
+        const needsPeek = elements.length > count;
+        const reserved = needsPeek ? Math.min(gap + packagePeekWidth, availableWidth / 2) : 0;
+        const fittedWidth = (availableWidth - reserved - (count - 1) * gap) / count;
+        const cardWidth = needsPeek ? fittedWidth : Math.min(preferredWidth, fittedWidth);
+        const width = `${cardWidth}px`;
+        if (track.style.getPropertyValue('--package-width') !== width) track.style.setProperty('--package-width', width);
+      }
 
-      track.style.setProperty('--package-width', `${cardWidth}px`);
-      const geometry = { width: cardWidth, gap, padding };
-      cardGeometry.current = geometry;
-      setHasOverflow(overflowing);
-      setViewedIndex(packageAtScrollOffset(track.scrollLeft, geometry, packages.length));
+      const end = Math.max(0, track.scrollWidth - track.clientWidth);
+      const start = elements[0]?.offsetLeft ?? 0;
+      // A wide track can reach its end before the last card can align to the left.
+      const stops = elements.map((card) => card.offsetLeft - start).filter((stop) => stop < end - scrollTolerance);
+      geometry.current = { end, stops: [...stops, end] };
+      target.current = null;
+      syncNavigation(track);
     });
     resizeObserver.observe(track);
-    return () => resizeObserver.disconnect();
-  }, [packages.length, part]);
+    elements.forEach((card) => resizeObserver.observe(card));
+    const clearTarget = () => { target.current = null; };
+    track.addEventListener('scrollend', clearTarget);
+    return () => {
+      resizeObserver.disconnect();
+      track.removeEventListener('scrollend', clearTarget);
+    };
+  }, [cards, syncNavigation]);
 
   return (
     <section
@@ -280,7 +299,7 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
       className="scroll-mt-(--registration-scroll-offset) aria-invalid:outline-2 aria-invalid:outline-offset-8 aria-invalid:outline-red-600"
     >
       {part !== 'extras' && (<>
-      <div className="flex items-center justify-between gap-2 pb-2.5 border-b-2 border-line mb-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b-2 border-line pb-2.5">
         <h2
           id="sec-packages"
           className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-ink m-0"
@@ -288,16 +307,26 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
           {part === 'cards' ? 'Choose your package' : <>Job Order Package &amp; Add-Ons</>}
         </h2>
         {packages.length > 0 && (
-          <div className="shrink-0 flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2 font-mono">
+          <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 font-mono sm:w-auto">
             {packages.length > 1 && (
               <button type="button" onClick={() => setComparing(true)}
                 className="btn-tactile flex items-center gap-1.5 px-2.5 py-1.5 border border-gold text-gold-soft text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-gold-wash">
                 <Columns3 className="w-3.5 h-3.5" /> Compare
               </button>
             )}
-            <output className="text-xs font-black tabular-nums text-gold-soft" aria-label="Package browsing position">
-              {Math.min(viewedIndex + 1, packages.length)} of {packages.length}
-            </output>
+            <span className="text-xs font-black tabular-nums text-gold-soft">{packages.length} {packages.length === 1 ? 'package' : 'packages'}</span>
+            {browsing && (
+              <div role="group" aria-label="Package navigation" className="ml-auto flex items-center">
+                {(['back', 'forward'] as const).map((direction) => {
+                  const Icon = direction === 'back' ? ArrowLeft : ArrowRight;
+                  return <button key={direction} type="button" aria-label={direction === 'back' ? 'Previous package' : 'Next package'}
+                    aria-controls={trackId} aria-disabled={!navigation[direction]} className={navigationButton}
+                    onClick={() => { if (navigation[direction] && trackRef.current) move(trackRef.current, direction); }}>
+                    <span className={navigationIcon}><Icon className="size-4 sm:size-5" strokeWidth={3} aria-hidden="true" /></span>
+                  </button>;
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -307,55 +336,27 @@ export const PackageSelectionSection: React.FC<PackageSelectionSectionProps> = (
         </div>
       )}
 
-      {/* Horizontal Scroll Track for Packages */}
-      <div className="relative">
       <div
+        id={trackId}
         ref={trackRef}
-        onScroll={(event) => {
-          const next = packageAtScrollOffset(event.currentTarget.scrollLeft, cardGeometry.current, packages.length);
-          if (next !== viewedIndex) setViewedIndex(next);
+        onScroll={(event) => syncNavigation(event.currentTarget)}
+        onPointerDown={() => { target.current = null; }}
+        onWheel={() => { target.current = null; }}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || !browsing) return;
+          const direction = { ArrowLeft: 'back', ArrowRight: 'forward', Home: 'start', End: 'end' } as const;
+          const action = direction[event.key as keyof typeof direction];
+          if (!action) return;
+          event.preventDefault();
+          move(event.currentTarget, action);
         }}
         role="group"
         aria-label="Available packages"
         tabIndex={0}
-        className={`${packages.length ? 'flex' : 'hidden'} overflow-x-auto gap-4 pt-3 pb-4 snap-x snap-mandatory scrollbar-thin -mx-2 px-2 scroll-px-2 [--package-width:min(320px,100%)] ${
-          // Leave room for the last card to reach the leading snap position on wide screens.
-          hasOverflow && packages.length > 1 ? 'after:shrink-0 after:-ml-4 after:w-[calc(100%-var(--package-width))]' : ''
-        }`}
+        className={`${packages.length ? 'flex' : 'hidden'} relative -mx-2 snap-x snap-mandatory gap-4 overflow-x-auto overscroll-x-contain scroll-px-2 px-2 pt-3 pb-4 scrollbar-thin [--package-width:min(320px,100%)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold`}
       >
         {packageCards}
       </div>
-      {browsing && !atEnd && (
-        <button type="button" onClick={() => scrollToIndex(viewedIndex + 1)} aria-label="See the next package"
-          className="absolute right-0 top-1/2 z-20 -translate-y-1/2 grid size-12 place-items-center rounded-full border-2 border-gold bg-gold text-on-gold shadow-lux-gold cursor-pointer hover:bg-gold-bright">
-          <ArrowRight className={`w-6 h-6 ${atStart ? 'animate-nudge-right' : ''}`} strokeWidth={3} aria-hidden="true" />
-        </button>
-      )}
-      </div>
-      {browsing && (
-        <div className="mt-1 flex items-center justify-between gap-3 border border-gold/40 bg-gold-wash px-2 py-2">
-          <button type="button" onClick={() => scrollToIndex(viewedIndex - 1)} disabled={atStart} aria-label="Previous package"
-            className="btn-tactile grid size-11 shrink-0 place-items-center border-2 border-gold text-gold cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">
-            <ArrowLeft className="w-5 h-5" strokeWidth={3} aria-hidden="true" />
-          </button>
-          <div className="flex min-w-0 flex-col items-center gap-1.5">
-            <p className="text-center text-[11px] font-black uppercase tracking-wider text-ink">
-              {atEnd ? 'That’s every package' : <>Swipe to see all {packages.length} packages</>}
-            </p>
-            <div className="flex flex-wrap justify-center gap-1.5">
-              {packages.map((pkg, index) => (
-                <button key={pkg.id} type="button" onClick={() => scrollToIndex(index)}
-                  aria-label={`Show package ${index + 1}: ${pkg.name}`} aria-current={index === viewedIndex ? 'true' : undefined}
-                  className={`h-2.5 cursor-pointer transition-all ${index === viewedIndex ? 'w-6 bg-gold' : `w-2.5 ${pkg.id === selectedPackageId ? 'bg-gold-soft' : 'bg-neutral-400'}`}`} />
-              ))}
-            </div>
-          </div>
-          <button type="button" onClick={() => scrollToIndex(viewedIndex + 1)} disabled={atEnd} aria-label="Next package"
-            className="btn-tactile grid size-11 shrink-0 place-items-center border-2 border-gold bg-gold text-on-gold cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">
-            <ArrowRight className="w-5 h-5" strokeWidth={3} aria-hidden="true" />
-          </button>
-        </div>
-      )}
       {packages.length === 0 && (
         <p className="border border-dashed border-neutral-300 p-4 text-sm text-neutral-600">
           {emptyMessage ?? 'No Job Order Packages are currently available.'}

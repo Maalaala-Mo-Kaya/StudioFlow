@@ -17,7 +17,10 @@ const THUMBS: Record<PhotoSize, string | undefined> = { card: '480x360', large: 
 export function packagePhotoUrls(pkg: Pick<Package, 'id' | 'photos' | 'collectionId' | 'collectionName'>, size: PhotoSize): string[] {
   const names = Array.isArray(pkg.photos) ? pkg.photos.filter(Boolean) : [];
   if (!names.length || !pkg.collectionId) return [];
-  const record = { id: pkg.id, collectionId: pkg.collectionId, collectionName: pkg.collectionName || 'packages' };
+  // By collection name (PocketBase accepts the name or the id): the client-port gateway
+  // (scripts/client-gateway.cjs) forwards file requests for `packages` only.
+  const collection = pkg.collectionName || 'packages';
+  const record = { id: pkg.id, collectionId: collection, collectionName: collection };
   return names.map((name) => pb.files.getURL(record, name, THUMBS[size] ? { thumb: THUMBS[size] } : undefined));
 }
 

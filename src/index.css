@@ -429,20 +429,6 @@ button.bg-obsidian:not(:disabled):hover {
   .modal-overlay > :first-child { animation: none; }
 }
 
-/* Kiosk package browser: the "next package" arrow nudges until the client first scrolls. */
-@keyframes nudgeRight {
-  0%, 60%, 100% { transform: translateX(0); }
-  30% { transform: translateX(4px); }
-}
-
-.animate-nudge-right {
-  animation: nudgeRight 1.6s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-nudge-right { animation: none; }
-}
-
 .animate-status-pulse {
   animation: subtlePulse 2s ease-in-out infinite;
 }
