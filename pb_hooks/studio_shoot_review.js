@@ -27,8 +27,10 @@ function load(app, id) {
   }
 }
 
-// Which shot a file is: the same key for a JPEG and the RAW the camera wrote with it.
-function shotKey(name) {
+// Which shot a file is: the same key for a JPEG and the RAW the camera wrote with it (the
+// JPEG's shot type label is left out: RAW files are never tagged).
+function shotKey(raw) {
+  const name = require(__hooks + "/studio_shot_types.js").untagged(raw);
   const ext = $filepath.ext(name);
   const stem = name.slice(0, name.length - ext.length);
   const match = stem.match(importPrefix);
@@ -75,16 +77,23 @@ function readDirSafe(root, dir) {
   try { return handle.readDir(-1); } finally { handle.close(); }
 }
 
-function describe(path, name, info) {
+function describe(path, name, info, origins) {
+  const types = require(__hooks + "/studio_shot_types.js");
+  const origin = origins?.get(types.originKey(name));
   return {
     id: $security.sha256(path),
     name,
+    type: types.tagOf(name),
+    // Where the shot came from: a camera id or "card" (with who uploaded it); "" when not recorded.
+    camera: origin?.camera || "",
+    by: origin?.photographer || "",
+    byName: origin?.photographerName || "",
     size: info.size(),
     modified: Math.floor(info.modTime().unixMilli()),
   };
 }
 
-function shots(root, folder) {
+function shots(root, folder, origins) {
   if (!root) return { photos: [], deleted: [] };
   let photos;
   try {
@@ -92,7 +101,7 @@ function shots(root, folder) {
   } catch (_) {
     throw new ApiError(503, "The photo folder could not be read. Try again after storage is available.");
   }
-  const kept = photos.map((item) => describe(item.path, item.name, storage.statEntry(root, item.path)));
+  const kept = photos.map((item) => describe(item.path, item.name, storage.statEntry(root, item.path), origins));
   const deleted = [];
   for (const entry of readDirSafe(root, trash)) {
     const name = entry.name();
@@ -100,7 +109,7 @@ function shots(root, folder) {
     const path = trash + "/" + name;
     const info = storage.statEntry(root, path);
     if (!storage.photoMime(root, path, info)) continue;
-    deleted.push(describe(path, name, info));
+    deleted.push(describe(path, name, info, origins));
   }
   const newest = (a, b) => b.modified - a.modified || (a.name < b.name ? -1 : Number(a.name > b.name));
   return { photos: kept.sort(newest), deleted: deleted.sort(newest) };
@@ -110,8 +119,10 @@ function list(app, id, auth) {
   const account = workflow.staff(app, auth, ["admin", "photographer"]);
   const record = load(app, id);
   const block = editBlock(app, record, account);
-  const result = withFolder(app, record, false, (root, folder) => shots(root, folder));
-  return { ...result, canEdit: !block, reason: block };
+  const origins = require(__hooks + "/studio_shot_types.js").origins(app, record.id);
+  const result = withFolder(app, record, false, (root, folder) => shots(root, folder, origins));
+  const packageTypes = require(__hooks + "/studio_shot_types.js").packageCodes(app, record);
+  return { ...result, packageTypes, canEdit: !block, reason: block };
 }
 
 // Checks a photo the client sent: the name must be a plain file name and the id its path's hash.
@@ -181,6 +192,9 @@ function change(app, id, auth, photos, restore) {
       const to = restore ? "" : trash;
       const unique = [...new Map(photos.map((photo) => [String(photo?.id || ""), photo])).values()];
       const checked = unique.map((photo) => resolve(root, from, photo));
+      const types = require(__hooks + "/studio_shot_types.js");
+      const known = types.origins(tx, record.id);
+      for (const photo of checked) types.checkOwner(known, account, photo.name);
       root.mkdirAll(restore ? "RAW" : trashRaw, 0o750);
       const moved = [];
       try {
@@ -195,7 +209,50 @@ function change(app, id, auth, photos, restore) {
         app.logger().warn("Shoot review move failed", "registration", record.id, "error", String(error));
         throw new ApiError(503, "Some photos could not be moved (" + moved.length + " of " + checked.length + " done). Try again.");
       }
-      return { moved, ...shots(root, folder), canEdit: true, reason: "" };
+      return { moved, ...shots(root, folder, require(__hooks + "/studio_shot_types.js").origins(tx, record.id)), canEdit: true, reason: "" };
+    });
+  });
+  require(__hooks + "/studio_station_events.js").notify(app);
+  return result;
+}
+
+// A name free in the job folder and both selection folders (as the camera import does), so a
+// later Chooser move never meets the same name.
+function freeAcross(root, folder, name) {
+  const groups = ["", ...Object.values(storage.photoDirectories(root, folder))];
+  const ext = $filepath.ext(name);
+  const stem = name.slice(0, name.length - ext.length);
+  for (let n = 1; n < 10000; n++) {
+    const candidate = n === 1 ? name : stem + "_" + n + ext;
+    if (groups.every((group) => !storage.statEntry(root, group ? group + "/" + candidate : candidate))) return candidate;
+  }
+  throw new Error("No free file name for " + name);
+}
+
+// Sets the shot type of one kept shot (renames it; the RAW twin keeps its name). Same rules as delete.
+function retag(app, id, auth, photo, rawCode) {
+  const types = require(__hooks + "/studio_shot_types.js");
+  const code = types.checkCode(app, rawCode);
+  const result = workflow.withRegistration(app, id, (tx, record) => {
+    const account = workflow.staff(tx, auth, ["admin", "photographer"]);
+    const block = editBlock(tx, record, account);
+    if (block) throw new ApiError(409, block);
+    return withFolder(tx, record, false, (root, folder) => {
+      if (!root) throw new ApiError(503, "The client's photo folder is not available.");
+      const shot = resolve(root, "", photo);
+      types.checkOwner(types.origins(tx, record.id), account, shot.name);
+      let name = shot.name;
+      if (types.tagOf(name) !== code) {
+        name = freeAcross(root, folder, types.tagged(shot.name, code));
+        try {
+          root.link(shot.path, name);
+          root.remove(shot.path);
+        } catch (error) {
+          app.logger().warn("Shot type change failed", "registration", record.id, "error", String(error));
+          throw new ApiError(503, "The shot type could not be changed. Try again.");
+        }
+      }
+      return { renamed: name, ...shots(root, folder, types.origins(tx, record.id)), canEdit: true, reason: "" };
     });
   });
   require(__hooks + "/studio_station_events.js").notify(app);
@@ -396,7 +453,9 @@ function upload(e) {
   const block = uploadBlock(record);
   if (block) throw new ApiError(409, block);
   const raws = require(__hooks + "/studio_camera_import.js").rawFormats;
-  const name = String(e.request.url.query().get("name") || "").trim();
+  const types = require(__hooks + "/studio_shot_types.js");
+  const name = types.untagged(String(e.request.url.query().get("name") || "").trim());
+  const code = types.checkCode(e.app, e.request.url.query().get("type"));
   const ext = $filepath.ext(name).toLowerCase();
   const photo = !!storage.formats[ext];
   if (!storage.usableName(name) || /[\\/]/.test(name) || /^[.~$]/.test(name) || !(photo || raws.has(ext))) {
@@ -417,12 +476,6 @@ function upload(e) {
   return withFolder(e.app, record, true, (root) => {
     if (!root) throw new ApiError(503, "The client's photo folder is not available.");
     const dir = photo ? "" : "RAW";
-    // The same shot already here (top, RAW, selection folders or _DELETED): skip it.
-    const places = [...new Set(["", "RAW", trash, trashRaw, ...Object.values(storage.photoDirectories(root, folder))])];
-    for (const place of places) {
-      const info = storage.statEntry(root, place ? place + "/" + name : name);
-      if (info && info.mode().isRegular() && info.size() === size) return { status: "already", name };
-    }
     if (dir) root.mkdirAll(dir, 0o750);
     const partial = (dir ? dir + "/" : "") + ".sf-card-" + $security.randomStringWithAlphabet(16, "abcdefghijklmnopqrstuvwxyz0123456789") + ".part";
     let written = 0;
@@ -434,17 +487,30 @@ function upload(e) {
         file.sync();
       } finally { file.close(); }
       if (written !== size) throw new BadRequestError("The upload of " + name + " was incomplete. Try again.");
-      // A name free in the job folder and both selection folders (as the camera import does), so a
-      // later Chooser move never meets the same name.
-      const groups = photo ? ["", ...Object.values(storage.photoDirectories(root, folder))] : ["RAW"];
-      const ext0 = $filepath.ext(name);
-      const stem = name.slice(0, name.length - ext0.length);
-      let saved = "";
-      for (let n = 1; n < 10000 && !saved; n++) {
-        const candidate = n === 1 ? name : stem + "_" + n + ext0;
-        if (groups.every((group) => !storage.statEntry(root, group ? group + "/" + candidate : candidate))) saved = candidate;
+      // The same shot already here (top, RAW, selection folders or _DELETED), whatever its shot type
+      // label: skip it, so a card picked again adds only the new shots. Checked only after the whole
+      // file was read: answering before that makes the server drop the connection mid-upload.
+      const places = [...new Set(["", "RAW", trash, trashRaw, ...Object.values(storage.photoDirectories(root, folder))])];
+      for (const place of places) {
+        for (const entry of readDirSafe(root, place || ".")) {
+          if (!entry.type().isRegular() || types.untagged(entry.name()).toLowerCase() !== name.toLowerCase()) continue;
+          const info = storage.statEntry(root, place ? place + "/" + entry.name() : entry.name());
+          if (info && info.size() === size) return { status: "already", name: entry.name() };
+        }
       }
-      if (!saved) throw new Error("No free file name for " + name);
+      // A name free in the job folder and both selection folders (as the camera import does), so a
+      // later Chooser move never meets the same name. RAW files keep their name (never tagged).
+      let saved = "";
+      if (photo) saved = freeAcross(root, folder, types.tagged(name, code));
+      else {
+        const ext0 = $filepath.ext(name);
+        const stem = name.slice(0, name.length - ext0.length);
+        for (let n = 1; n < 10000 && !saved; n++) {
+          const candidate = n === 1 ? name : stem + "_" + n + ext0;
+          if (!storage.statEntry(root, "RAW/" + candidate)) saved = candidate;
+        }
+        if (!saved) throw new Error("No free file name for " + name);
+      }
       const target = dir ? dir + "/" + saved : saved;
       if (photo) {
         // Check the picture itself under its real extension before it becomes visible.
@@ -456,6 +522,7 @@ function upload(e) {
       } else {
         root.link(partial, target);
       }
+      if (photo) types.recordOrigin(e.app, record.id, saved, "card", account.id);
       e.app.logger().info("Card upload", "registration", record.id, "file", target, "by", account.getString("username"));
       return { status: "saved", name: saved };
     } finally {
@@ -474,4 +541,4 @@ function uploadDone(app, id, auth, count) {
   return { recorded: shots };
 }
 
-module.exports = { change, image, list, reshoot, retake, shotKey, trash, upload, uploadDone };
+module.exports = { change, image, list, reshoot, retag, retake, shotKey, trash, upload, uploadDone };

@@ -35,6 +35,7 @@ routerAdd("POST", "/api/studioflow/shoot/{id}/{action}", (e) => {
   const body = e.requestInfo().body || {};
   if (action === "reshoot") return e.json(200, review.reshoot(e.app, e.request.pathValue("id"), e.auth, body.reason, body.taskId));
   if (action === "retake") return e.json(200, review.retake(e.app, e.request.pathValue("id"), e.auth, body.reason));
+  if (action === "retag") return e.json(200, review.retag(e.app, e.request.pathValue("id"), e.auth, body.photo, body.code));
   if (action !== "delete" && action !== "restore") throw new NotFoundError();
   return e.json(200, review.change(e.app, e.request.pathValue("id"), e.auth, body.photos, action === "restore"));
 }, $apis.requireAuth("users"), $apis.bodyLimit(256 << 10));

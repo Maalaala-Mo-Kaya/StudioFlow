@@ -146,8 +146,7 @@ function Send-ShotUpload([IO.FileInfo]$file) {
   } finally { $shot.Close() }
   $reply = Read-SenderResponse $request
   if (-not $reply -or ($reply.status -ne 'saved' -and $reply.status -ne 'already')) { throw 'StudioFlow did not confirm the upload.' }
-  Remove-Item -LiteralPath $file.FullName -Force
-  Write-SenderLog ('Sent ' + $file.Name + ' -> StudioFlow (' + $reply.name + ', ' + $reply.status + ')')
+  return ('StudioFlow (' + $reply.name + ', ' + $reply.status + ')')
 }
 
 # --- Shared folder --------------------------------------------------------------
@@ -184,8 +183,24 @@ function Send-ShotShare([IO.FileInfo]$file) {
     if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue }
     throw
   }
-  Remove-Item -LiteralPath $file.FullName -Force
-  Write-SenderLog ('Sent ' + $file.Name + ' -> ' + $final)
+  return $final
+}
+
+# --- After a send ---------------------------------------------------------------
+
+# Shots the server already has whose laptop copy could not be deleted yet (EOS Utility or a
+# preview still has it open). They are never sent again, only deleted later, and they don't
+# hold up the shots behind them. Keyed by path, holding the shot's id (path, size, time).
+$delivered = @{}
+
+# Returns $true once the laptop copy is gone.
+function Remove-SentShot([IO.FileInfo]$file) {
+  try {
+    Remove-Item -LiteralPath $file.FullName -Force
+    return $true
+  } catch {
+    return (-not (Test-Path -LiteralPath $file.FullName))
+  }
 }
 
 # --- Status ---------------------------------------------------------------------
@@ -271,12 +286,33 @@ while ($true) {
       $key2 = $file.FullName.ToLower()
       $present[$key2] = $true
       if ($offline) { $waiting++; continue }
+      $shotId = $null
+      if ($delivered.ContainsKey($key2)) {
+        $shotId = Get-UploadId $file
+        if ($delivered[$key2] -eq $shotId) {
+          if (Remove-SentShot $file) {
+            $delivered.Remove($key2)
+            Write-SenderLog ('Deleted the laptop copy of ' + $file.Name + ' (already sent).')
+          }
+          continue
+        }
+        # A new shot under the same name: send it like any other.
+        $delivered.Remove($key2)
+        $shotId = $null
+      }
       $stable = $seen.ContainsKey($key2) -and $seen[$key2] -eq $file.Length -and $file.Length -gt 0 `
         -and ($now - $file.LastWriteTime).TotalSeconds -ge $settleSeconds
       $seen[$key2] = $file.Length
       if (-not $stable) { $waiting++; continue }
       try {
-        if ($uploadMode) { Send-ShotUpload $file } else { Send-ShotShare $file }
+        $shotId = Get-UploadId $file
+        if ($uploadMode) { $sentTo = Send-ShotUpload $file } else { $sentTo = Send-ShotShare $file }
+        if (Remove-SentShot $file) {
+          Write-SenderLog ('Sent ' + $file.Name + ' -> ' + $sentTo)
+        } else {
+          $delivered[$key2] = $shotId
+          Write-SenderLog ('Sent ' + $file.Name + ' -> ' + $sentTo + '. The laptop copy is still open in another program; it is deleted later.')
+        }
         $seen.Remove($key2)
         $lastSentAt = Get-Date
         $lastSentName = $file.Name
@@ -289,7 +325,10 @@ while ($true) {
           $problem = Get-WebErrorMessage $_
           # No answer, wrong key, camera off or server folder missing: stop this round.
           if ($problem.code -eq 0 -or $problem.code -eq 401 -or $problem.code -eq 409 -or $problem.code -eq 503) { $offline = $true }
-          if ($problem.code -eq 0) { $targetWasDown = $true }
+          # No HTTP answer: the server may be down, or it refused the shot and closed the
+          # connection before the whole file was written. The small status call next round
+          # tells the two apart (and reports a wrong key or a camera turned off).
+          if ($problem.code -eq 0) { $lastStatus = [DateTime]::MinValue }
           $lastError = 'Waiting to send ' + $file.Name + ': ' + $problem.message
         } else {
           $lastError = 'Waiting to send ' + $file.Name + ': ' + $_.Exception.Message
@@ -299,6 +338,7 @@ while ($true) {
       }
     }
     foreach ($k in @($seen.Keys)) { if (-not $present.ContainsKey($k)) { $seen.Remove($k) } }
+    foreach ($k in @($delivered.Keys)) { if (-not $present.ContainsKey($k)) { $delivered.Remove($k) } }
     $lastWaiting = $waiting
     if ($targetWasDown) {
       Write-SenderLog "$where can't be reached. Shots wait on this laptop."

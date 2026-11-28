@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Aperture, Camera, CheckCircle2, ChevronDown, ChevronUp, FolderInput, Maximize2, Undo2, Users, Volume2 } from 'lucide-react';
+import { Aperture, Camera, CheckCircle2, ChevronDown, ChevronUp, FolderInput, Images, ListChecks, Maximize2, Undo2, Users, Volume2 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 import { formatClientName, formatJobOrderNo, formatQueueNumber } from '../../utils/formatters';
 import { usePhotographerQueue } from './usePhotographerQueue';
@@ -20,6 +20,10 @@ import { useToast } from '../../context/ToastContext';
 import { workflowError } from '../../hooks/useWorkflowData';
 import { activePhotographyTasks, photographyAction, photographyStatus } from './photographyTasks';
 import { PhotographyProgress } from './components/PhotographyProgress';
+import { ShotMenuModal } from './components/ShotTypeBar';
+import { useCurrentShotType, useShotTypes } from '../camera/shotTypes';
+import { useAutoSend } from '../camera/autoSend/useAutoSend';
+import { flushAutoSend, noteLinkStart } from '../camera/autoSend/registry';
 
 function SessionActions({ registration, station, photographerId, busy, onStart, onFinish }: {
   registration: Registration;
@@ -58,6 +62,13 @@ export const PhotographerPage: React.FC = () => {
   const photographerId = user?.role === 'photographer' ? user.id : undefined;
   const { toast } = useToast();
   const camera = useCameraLink();
+  const autoSend = useAutoSend(camera.camera);
+  const shotTypes = useShotTypes();
+  const currentShotType = useCurrentShotType();
+  const [shotMenuOpen, setShotMenuOpen] = useState(false);
+  // New shots of the on-set client this device hasn't reviewed yet (from the shoot gallery).
+  const [pendingReview, setPendingReview] = useState({ id: '', count: 0 });
+  const [reviewCheck, setReviewCheck] = useState<{ registration: Registration; count: number; proceed: () => void }>();
   const [selectedWithoutCamera, setSelectedWithoutCamera] = useState('');
   const [queueBusy, setQueueBusy] = useState(false);
   const queueActionPending = useRef(false);
@@ -128,7 +139,20 @@ export const PhotographerPage: React.FC = () => {
   });
   // With more than one camera turned on, Mark Done also asks when no other camera is linked yet: a
   // client often goes from one camera (solo) to the next (group), so finishing must be a choice.
-  const markDone = (reg: Registration) => {
+  // Mark Done while new shots still wait for their type asks first: review them, or finish anyway
+  // (they keep the type they arrived with).
+  const onSetId = selected?.id ?? '';
+  const onPendingReview = (count: number) => {
+    setPendingReview((current) => current.id === onSetId && current.count === count ? current : { id: onSetId, count });
+  };
+  const askReviewed = (reg: Registration, proceed: () => void) => {
+    const count = pendingReview.id === reg.id ? pendingReview.count : 0;
+    if (count) setReviewCheck({ registration: reg, count, proceed });
+    else proceed();
+  };
+  const markDone = (reg: Registration) => askReviewed(reg, () => markDoneNow(reg));
+  const finishTaskChecked = (reg: Registration, task: PhotographyTask) => askReviewed(reg, () => void finishTask(reg, task));
+  const markDoneNow = (reg: Registration) => {
     const others = camera.stations.filter((entry) => entry.client?.id === reg.id && !entry.taskId && entry.id !== station?.id);
     const otherCameras = camera.stations.filter((entry) => entry.enabled && entry.id !== station?.id);
     // Every other camera already shot this client: this is most likely the last stop.
@@ -160,6 +184,9 @@ export const PhotographerPage: React.FC = () => {
       return;
     }
     try {
+      // This laptop's last shots go to the client they were taken of before the camera switches.
+      await flushAutoSend(station.id);
+      noteLinkStart(station.id);
       await photographyAction(reg.id, 'start', { taskId: task.id, cameraId: station.id });
       setOnSetOpenId(reg.id);
       playStudioChime();
@@ -173,6 +200,7 @@ export const PhotographerPage: React.FC = () => {
 
   const finishTask = (reg: Registration, task: PhotographyTask) => runQueueAction(async () => {
     try {
+      await flushAutoSend(station?.id);
       const result = await photographyAction(reg.id, 'done', { taskId: task.id });
       if (result.syncing) {
         finishing.current.set(reg.id, task.id);
@@ -189,16 +217,20 @@ export const PhotographerPage: React.FC = () => {
   return (
     <StationLayout title={<>Photographer <span className="text-gold">Session Queue</span></>}
       badge="Photo Floor" liveLabel="Live Queue" description="Manage clients waiting for photography." refresh={fetchLiveQueue}
-      actions={<button type="button" onClick={playStudioChime}
+      actions={<><button type="button" onClick={() => setShotMenuOpen(true)} disabled={!shotTypes.data}
+        title="Choose the shot types on your menu (Delete is always there)"
+        className="btn-tactile flex min-h-11 items-center gap-2 border border-line bg-obsidian-2 px-4 text-xs font-black uppercase tracking-wide text-gold hover:border-gold focus-visible:outline-2 disabled:opacity-50">
+        <ListChecks className="size-4" aria-hidden="true" /> My shot menu
+      </button><button type="button" onClick={playStudioChime}
         className="btn-tactile flex min-h-11 items-center gap-2 border border-line bg-obsidian-2 px-4 text-xs font-black uppercase tracking-wide text-gold hover:border-gold focus-visible:outline-2">
         <Volume2 className="size-4" aria-hidden="true" /> Chime
-      </button>}>
+      </button></>}>
       <StationTabs label="Photography queue views" active={activeTab} onChange={setActiveTab} tabs={[
         { id: 'queue', label: 'Waiting Queue', count: queue.length },
         { id: 'history', label: 'Completed Today', count: recentlyDone.length },
       ]}>
         {loadError && <p role="alert" className="text-sm font-bold text-red-700">{loadError}</p>}
-        {activeTab === 'queue' && <CameraImportPanel link={camera} disabled={busy} />}
+        {activeTab === 'queue' && <CameraImportPanel link={camera} disabled={busy} autoSend={autoSend} />}
 
         {activeTab === 'queue' && (
           <div className="animate-enter-delay-1">
@@ -266,7 +298,7 @@ export const PhotographerPage: React.FC = () => {
                         </button>
                       )}
                       <button type="button" disabled={busy || !!selectedTask?.finishingAt || (!!activePhotographyTasks(selected).length && !selectedTask)}
-                        onClick={() => selectedTask ? finishTask(selected, selectedTask) : markDone(selected)}
+                        onClick={() => selectedTask ? finishTaskChecked(selected, selectedTask) : markDone(selected)}
                         className="btn-tactile flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 border border-line bg-gold text-xs font-black uppercase tracking-wider text-on-gold disabled:cursor-default disabled:opacity-50">
                         <CheckCircle2 className="size-4 stroke-[2.5]" aria-hidden="true" /> {selectedTask?.finishingAt ? 'Syncing photos…' : 'Mark Done'}
                       </button>
@@ -283,7 +315,7 @@ export const PhotographerPage: React.FC = () => {
                   onSelect={selectClient}
                   onMarkDone={markDone}
                   sessionActions={activePhotographyTasks(reg).length > 0 ? <SessionActions registration={reg} station={station}
-                    photographerId={photographerId} busy={busy} onStart={startTask} onFinish={finishTask} /> : undefined}
+                    photographerId={photographerId} busy={busy} onStart={startTask} onFinish={finishTaskChecked} /> : undefined}
                 />)}
               />
             )}
@@ -316,10 +348,13 @@ export const PhotographerPage: React.FC = () => {
             {activePhotographyTasks(selected).length > 0 && (
               <div className="mt-3">
                 <SessionActions registration={selected} station={station} photographerId={photographerId} busy={busy}
-                  onStart={startTask} onFinish={finishTask} />
+                  onStart={startTask} onFinish={finishTaskChecked} />
               </div>
             )}
-            <ShootGallery registrationId={selected.id} />
+            <ShootGallery key={selected.id} registrationId={selected.id} listing={shotTypes.data} shotType={currentShotType}
+              onShotType={(code) => void camera.setShotType(code)} onEditMenu={() => setShotMenuOpen(true)}
+              onPendingChange={onPendingReview} stationId={station?.enabled ? station.id : ''} userId={userId ?? ''}
+              isAdmin={user?.role === 'admin'} />
           </Modal>
         )}
 
@@ -375,6 +410,30 @@ export const PhotographerPage: React.FC = () => {
               </div>
             )}
           </Modal>
+        )}
+
+        {reviewCheck && (
+          <Modal title="New shots not reviewed yet" subtitle={formatClientName(reviewCheck.registration)} icon={Images} size="md"
+            onClose={() => setReviewCheck(undefined)}
+            footer={<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => { const { proceed } = reviewCheck; setReviewCheck(undefined); proceed(); }}
+                className="btn-tactile min-h-[46px] border border-line px-4 text-xs font-black uppercase tracking-wider text-ink">
+                Mark Done anyway
+              </button>
+              <button type="button" onClick={() => { setOnSetOpenId(reviewCheck.registration.id); setReviewCheck(undefined); }}
+                className="btn-tactile min-h-[46px] bg-gold px-5 text-xs font-black uppercase tracking-wider text-on-gold">
+                Review them now
+              </button>
+            </div>}>
+            <p className="m-0 text-sm text-ink">
+              {reviewCheck.count} new shot{reviewCheck.count === 1 ? ' has' : 's have'} not been reviewed on this device.
+              {' '}<strong>Mark Done anyway</strong> keeps {reviewCheck.count === 1 ? 'it' : 'them'} with the type {reviewCheck.count === 1 ? 'it' : 'they'} arrived with.
+            </p>
+          </Modal>
+        )}
+
+        {shotMenuOpen && shotTypes.data && (
+          <ShotMenuModal listing={shotTypes.data} onSaved={shotTypes.refresh} onClose={() => setShotMenuOpen(false)} />
         )}
 
         {reshooting && (

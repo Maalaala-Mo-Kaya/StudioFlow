@@ -1314,6 +1314,140 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   pairRecord = (await send(records('registrations', pair.id), { token: admin })).payload;
   assert.deepEqual(pairRecord.floor_visits.at(-1).cameraName, 'Card upload');
 
+  // Shot types: each photo carries its type in its file name ("IMG_1 [SOLO CAP].jpg"), from the
+  // camera's current type, the type an auto-sent shot already carries, a card upload's type, or a
+  // change on the Photo Floor. The Chooser then picks one photo per type the package includes.
+  {
+    const typesApi = (token, status = 200) => send(`${api}/shot-types`, { token, status }).then((r) => r.payload);
+    assert.ok((await typesApi(photographer)).types.some((type) => type.code === 'TOGA CAP'), 'The studio list comes with the upgrade.');
+    await typesApi(chooser.token);
+    await typesApi(cashier, 403);
+    const typedPkg = await create('packages', {
+      code: 'TYPED', name: 'Typed Package', inclusions: JSON.stringify(['Solo cap pose', 'Family pose']),
+      amount: 1000, is_active: true, revenue_category: 'studio', requires_mua: false, photo_selection_limit: 2,
+    });
+    const itemNamed = async (name) => {
+      const found = (await send(records('catalog_items') + '?' + new URLSearchParams({ filter: `name = "${name}"` }), { token: admin })).payload.items;
+      assert.equal(found.length, 1, name);
+      return found[0].id;
+    };
+    const soloType = await create('shot_types', { name: 'Solo cap', code: ' solo  cap ', items: [await itemNamed('Solo cap pose')], sort: 1, is_active: true });
+    assert.equal(soloType.code, 'SOLO CAP', 'The file label is cleaned up.');
+    const famType = await create('shot_types', { name: 'Fam', code: 'FAM', items: [await itemNamed('Family pose')], sort: 2, is_active: true });
+    await send(records('shot_types'), { token: photographer, method: 'POST', status: 400, body: { name: 'Nope', code: 'NOPE', is_active: true } });
+    await send(records('shot_types'), { token: admin, method: 'POST', status: 400, body: { name: 'Bad', code: 'A[B]', is_active: true } });
+    await send(records('shot_types', famType.id), { token: admin, method: 'PATCH', status: 400, body: { code: 'FAMILY2' } });
+    assert.equal((await send(records('shot_types', famType.id), { token: admin, method: 'PATCH', body: { name: 'Our family' } })).payload.name, 'Our family');
+    // A photographer's menu (their designation): unknown ids are dropped.
+    const menu = await send(`${api}/shot-menu`, { method: 'POST', token: photographer, body: { types: [soloType.id, 'bogus', famType.id] } });
+    assert.deepEqual(menu.payload.menu, [soloType.id, famType.id]);
+    assert.deepEqual((await typesApi(photographer)).menu, [soloType.id, famType.id]);
+    await send(`${api}/shot-menu`, { method: 'POST', token: cashier, body: { types: [] }, status: 403 });
+
+    const typedDir = join(home, 'camera-typed');
+    await mkdir(typedDir);
+    const typedCam = await create('camera_stations', { ...booth, name: 'Typed booth', watch_folder: typedDir }, photographer);
+    const typedApi = (action, body, token = photographer, status = 200) =>
+      send(`${api}/camera/${typedCam.id}/${action}`, { method: 'POST', token, body, status }).then((r) => r.payload);
+    const typedDrop = async (name, body = jpeg) => {
+      await writeFile(join(typedDir, name), body);
+      await utimes(join(typedDir, name), settled, settled);
+    };
+    const typed = await register(typedPkg);
+    await pay(typed, 1000);
+    await shoot(typed, 'shooting');
+    await typedApi('start', { registration: typed.id });
+    await typedApi('shot-type', { code: 'NOPE' }, photographer, 400);
+    await typedApi('shot-type', { code: 'SOLO CAP' }, cashier, 403);
+    assert.equal((await typedApi('shot-type', { code: 'solo cap' })).shotType, 'SOLO CAP');
+    await typedDrop('IMG_1.jpg');
+    await typedDrop('IMG_1.CR3', Buffer.from('raw twin'));
+    // The Photo Floor's auto-send uploads with the photographer's login; its shot keeps the type it was taken with.
+    const browserUpload = (name, body, headers = {}) => fetch(`${host}${api}/camera-sender/${typedCam.id}/upload?name=${encodeURIComponent(name)}`, {
+      method: 'POST', body, headers: { 'Content-Type': 'application/octet-stream', 'X-Upload-Id': 'browser-' + name.replace(/[^a-z0-9]/gi, '') + '-0001', ...headers },
+    }).then(async (response) => ({ status: response.status, payload: await response.json() }));
+    assert.equal((await browserUpload('IMG_2 [FAM].jpg', jpeg)).status, 401, 'No login and no camera key.');
+    assert.equal((await browserUpload('IMG_2 [FAM].jpg', jpeg, { Authorization: cashier })).status, 403);
+    assert.equal((await browserUpload('IMG_2 [FAM].jpg', jpeg, { Authorization: photographer })).payload.status, 'saved');
+    assert.equal((await browserUpload('IMG_2 [FAM].jpg', jpeg, { Authorization: photographer })).payload.status, 'already');
+    await utimes(join(typedDir, 'IMG_2 [FAM].jpg'), settled, settled);
+    await typedApi('scan');
+    await typedApi('shot-type', { code: '' });
+    await typedDrop('IMG_3.jpg');
+    await typedApi('scan');
+    const typedFolder = (await send(`${api}/photo-folder/${typed.id}`, { method: 'POST', token: photographer })).payload.path;
+    const topNames = async () => (await readdir(typedFolder, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
+    assert.deepEqual(await topNames(), ['IMG_1 [SOLO CAP].jpg', 'IMG_2 [FAM].jpg', 'IMG_3.jpg']);
+    assert.deepEqual(await readdir(join(typedFolder, 'RAW')), ['IMG_1.CR3'], 'RAW files are never tagged.');
+
+    const typedShoot = `${api}/shoot/${typed.id}`;
+    const typedShots = () => send(typedShoot + '/photos', { token: photographer }).then((r) => r.payload);
+    let typedGallery = await typedShots();
+    assert.deepEqual(typedGallery.packageTypes, ['SOLO CAP', 'FAM'], 'The package includes both types.');
+    assert.deepEqual(Object.fromEntries(typedGallery.photos.map((photo) => [photo.name, photo.type])),
+      { 'IMG_1 [SOLO CAP].jpg': 'SOLO CAP', 'IMG_2 [FAM].jpg': 'FAM', 'IMG_3.jpg': '' });
+    // Each shot knows the camera it came from, so each photographer reviews only their own.
+    assert.ok(typedGallery.photos.every((photo) => photo.camera === typedCam.id), JSON.stringify(typedGallery.photos));
+    const typedShot = (name) => {
+      const found = typedGallery.photos.find((photo) => photo.name === name);
+      assert.ok(found, name);
+      return { id: found.id, name: found.name };
+    };
+    const retag = (photo, code, token = photographer, status = 200) =>
+      send(typedShoot + '/retag', { method: 'POST', token, status, body: { photo, code } }).then((r) => r.payload);
+    await retag(typedShot('IMG_3.jpg'), 'FAM', cashier, 403);
+    await retag(typedShot('IMG_3.jpg'), 'NOPE', photographer, 400);
+    typedGallery = await retag(typedShot('IMG_3.jpg'), 'fam');
+    assert.equal(typedGallery.renamed, 'IMG_3 [FAM].jpg');
+    // Deleting a tagged shot takes its untagged RAW twin with it, and restoring brings both back.
+    typedGallery = await send(typedShoot + '/delete', { method: 'POST', token: photographer, body: { photos: [typedShot('IMG_1 [SOLO CAP].jpg')] } }).then((r) => r.payload);
+    assert.deepEqual(await readdir(join(typedFolder, '_DELETED', 'RAW')), ['IMG_1.CR3']);
+    const binnedTyped = typedGallery.deleted.find((photo) => photo.name === 'IMG_1 [SOLO CAP].jpg');
+    await send(typedShoot + '/restore', { method: 'POST', token: photographer, body: { photos: [{ id: binnedTyped.id, name: binnedTyped.name }] } });
+    assert.deepEqual(await readdir(join(typedFolder, 'RAW')), ['IMG_1.CR3']);
+    // A card upload takes the chosen type; the same card picked again (any label) is skipped, and a
+    // large file answered "already" is read to the end first (the connection is not cut).
+    const typedCard = (name, body, type = '') => fetch(`${host}${api}/shoot-upload/${typed.id}?${new URLSearchParams({ name, type })}`, {
+      method: 'POST', body, headers: { Authorization: photographer, 'Content-Type': 'application/octet-stream' },
+    }).then(async (response) => ({ status: response.status, payload: await response.json() }));
+    const bigCard = Buffer.concat([jpeg.subarray(0, 4), randomBytes(3_000_000), Buffer.from([0xff, 0xd9])]);
+    assert.equal((await typedCard('CARD_9.jpg', bigCard, 'NOPE')).status, 400);
+    assert.deepEqual((await typedCard('CARD_9.jpg', bigCard, 'SOLO CAP')).payload, { status: 'saved', name: 'CARD_9 [SOLO CAP].jpg' });
+    assert.deepEqual((await typedCard('CARD_9.jpg', bigCard)).payload, { status: 'already', name: 'CARD_9 [SOLO CAP].jpg' });
+    assert.deepEqual(await topNames(), ['CARD_9 [SOLO CAP].jpg', 'IMG_1 [SOLO CAP].jpg', 'IMG_2 [FAM].jpg', 'IMG_3 [FAM].jpg']);
+    typedGallery = await typedShots();
+    const origin = (name) => typedGallery.photos.find((photo) => photo.name === name);
+    const photographerId = (await send('/api/collections/users/auth-refresh', { method: 'POST', token: photographer })).payload.record.id;
+    assert.deepEqual([origin('CARD_9 [SOLO CAP].jpg').camera, origin('CARD_9 [SOLO CAP].jpg').by], ['card', photographerId]);
+    assert.equal(origin('IMG_3 [FAM].jpg').camera, typedCam.id, 'A type change keeps the origin.');
+    // Only the photographer who took a shot (or an admin) may delete or retype it.
+    const otherShooter = await createStaff('othershooter', 'photographer');
+    const ownShot = typedShot('IMG_2 [FAM].jpg');
+    await retag(ownShot, 'SOLO CAP', otherShooter.token, 403);
+    assert.match((await send(typedShoot + '/delete', { method: 'POST', token: otherShooter.token, status: 403, body: { photos: [ownShot] } })).payload.message,
+      /Only .* can change IMG_2\.jpg/);
+    assert.ok((await topNames()).includes('IMG_2 [FAM].jpg'), 'Untouched.');
+    typedGallery = await retag(ownShot, 'SOLO CAP', admin);
+    typedGallery = await retag(typedShot('IMG_2 [SOLO CAP].jpg'), 'FAM');
+
+    // The Chooser: one photo of each type (the limit is 2), and every package type needs its pick.
+    await typedApi('end', { registration: typed.id });
+    await shoot(typed, 'done_shooting');
+    const typedOpen = (await send(`${api}/chooser/${typed.id}/open`, { token: chooser.token, method: 'POST' })).payload;
+    assert.deepEqual(typedOpen.packageTypes, ['SOLO CAP', 'FAM']);
+    const pick = (name) => typedOpen.photos.find((photo) => photo.name === name).id;
+    assert.equal(typedOpen.photos.find((photo) => photo.name === 'IMG_2 [FAM].jpg').type, 'FAM');
+    const typedConfirm = (selected, status) => send(`${api}/chooser/${typed.id}/confirm`, {
+      token: chooser.token, method: 'POST', status, body: { version: typedOpen.version, requestId: randomUUID(), selected },
+    }).then((r) => r.payload);
+    assert.match((await typedConfirm([pick('IMG_1 [SOLO CAP].jpg'), pick('CARD_9 [SOLO CAP].jpg')], 400)).message, /only one photo of each type: Solo cap/);
+    assert.match((await typedConfirm([pick('IMG_1 [SOLO CAP].jpg')], 400)).message, /Still to choose: Our family/);
+    const typedSaved = await typedConfirm([pick('IMG_1 [SOLO CAP].jpg'), pick('IMG_3 [FAM].jpg')]);
+    assert.deepEqual(typedSaved.photos.filter((photo) => photo.selected).map((photo) => photo.name).sort(),
+      ['IMG_1 [SOLO CAP].jpg', 'IMG_3 [FAM].jpg'], 'The picks go to the selected folder with their type.');
+    await send(records('camera_stations', typedCam.id), { token: admin, method: 'DELETE', status: 204 });
+  }
+
   // Shoot gallery: the linked photographer deletes bad shots before the Chooser sees them.
   // Deleting moves the shot (and its RAW twin) into _DELETED; nothing leaves the disk.
   await drop('IMG_0004.jpg');
