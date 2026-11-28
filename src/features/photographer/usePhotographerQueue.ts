@@ -51,7 +51,8 @@ export function usePhotographerQueue() {
       }));
       const mine = (reg: Registration) => activePhotographyTasks(reg)
         .some((task) => task.status === 'completed' && task.photographerId === photographerId);
-      setRecentlyDone([...queueRes.filter(mine), ...doneRes.items.filter((reg) => admin || !activePhotographyTasks(reg).length || mine(reg))]);
+      setRecentlyDone([...queueRes.filter(mine), ...doneRes.items]);
+      setLoadError('');
       setReady(true);
     } catch (err) {
       if (request !== queueRequest.current) return;

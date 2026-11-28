@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, ImageOff, Images, RotateCcw, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, HardDriveUpload, ImageOff, Images, RotateCcw, Trash2, X } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
 import { useWorkflowData, workflowApi, workflowError } from '../../../hooks/useWorkflowData';
 import { useAuthedImage } from '../../../hooks/useAuthedImage';
@@ -9,6 +9,10 @@ import { DataFeedback } from '../../../components/common/DataFeedback';
 
 interface Shot { id: string; name: string; size: number; modified: number }
 interface ShootData { photos: Shot[]; deleted: Shot[]; canEdit: boolean; reason: string; moved?: string[] }
+
+/** Photos and the RAW formats StudioFlow keeps (they go to the client's RAW folder). */
+const cardAccept = 'image/jpeg,image/png,.jpg,.jpeg,.png,.cr2,.cr3,.crw,.dng,.nef,.nrw,.arw,.raf,.orf,.rw2,.pef,.srw';
+const photoFile = /\.(jpe?g|png|webp|gif|avif)$/i;
 
 const imageUrl = (registrationId: string, shot: Shot, deleted: boolean) =>
   `${workflowApi}/shoot/${registrationId}/image/${shot.id}?${new URLSearchParams({ name: shot.name, ...(deleted ? { deleted: '1' } : {}) })}`;
@@ -30,6 +34,52 @@ export const ShootGallery: React.FC<{ registrationId: string }> = ({ registratio
   const data = override && override.base === live.data ? override.data : live.data;
   const { refresh } = live;
   const base = live.data;
+  const cardInput = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState<{ done: number; total: number }>();
+
+  // Photos shot untethered (to the memory card): add them straight to this client, one file at a
+  // time. Files already in the client's folders (same name and size) are skipped by the server.
+  const addFromCard = async (files: File[]) => {
+    if (!files.length || uploading) return;
+    setUploading({ done: 0, total: files.length });
+    let savedPhotos = 0;
+    let savedRaw = 0;
+    let skipped = 0;
+    const failed: string[] = [];
+    for (const [index, file] of files.entries()) {
+      try {
+        const response = await fetch(pb.buildURL(`${workflowApi}/shoot-upload/${registrationId}?${new URLSearchParams({ name: file.name })}`), {
+          method: 'POST', body: file,
+          headers: { Authorization: pb.authStore.token, 'Content-Type': 'application/octet-stream' },
+        });
+        const reply = await response.json().catch(() => ({})) as { status?: string; message?: string };
+        if (!response.ok) {
+          failed.push(`${file.name}: ${reply.message || `error ${response.status}`}`);
+          // Not allowed for this client (closed, Chooser started...): the rest would fail the same way.
+          if ([401, 403, 409].includes(response.status)) break;
+        } else if (reply.status === 'saved') {
+          if (photoFile.test(file.name)) savedPhotos++; else savedRaw++;
+        } else {
+          skipped++;
+        }
+      } catch {
+        failed.push(`${file.name}: the server can't be reached`);
+      }
+      setUploading({ done: index + 1, total: files.length });
+    }
+    const shots = savedPhotos || savedRaw;
+    if (shots) {
+      try {
+        await pb.send(`${workflowApi}/shoot-upload/${registrationId}/done`, { method: 'POST', body: { count: shots }, requestKey: null });
+      } catch { /* the photos are saved; only the floor badge is missing */ }
+    }
+    setUploading(undefined);
+    refresh();
+    const added = [savedPhotos && `${savedPhotos} photo${savedPhotos === 1 ? '' : 's'}`, savedRaw && `${savedRaw} RAW`].filter(Boolean).join(' and ');
+    if (added) toast.success(`Added ${added} from the card${skipped ? ` (${skipped} already here)` : ''}.`);
+    else if (skipped && !failed.length) toast.success(`All ${skipped} files are already in this client's folder.`);
+    if (failed.length) toast.error(`${failed.length} file${failed.length === 1 ? '' : 's'} not added. ${failed[0]}`);
+  };
 
   const change = useCallback(async (action: 'delete' | 'restore', shots: Shot[]) => {
     if (busy || !shots.length) return;
@@ -61,9 +111,19 @@ export const ShootGallery: React.FC<{ registrationId: string }> = ({ registratio
         <h4 className="m-0 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-ink">
           <Images className="h-4 w-4 text-gold" /> Shots
         </h4>
-        <p className="m-0 text-[11px] font-bold text-neutral-600" role="status">
-          {photos.length} {photos.length === 1 ? 'shot' : 'shots'}{deleted.length > 0 && ` · ${deleted.length} deleted`}
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="m-0 text-[11px] font-bold text-neutral-600" role="status">
+            {photos.length} {photos.length === 1 ? 'shot' : 'shots'}{deleted.length > 0 && ` · ${deleted.length} deleted`}
+          </p>
+          <input ref={cardInput} type="file" multiple accept={cardAccept} className="sr-only" tabIndex={-1} aria-hidden="true"
+            onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFromCard(files); }} />
+          <button type="button" disabled={!!uploading} onClick={() => cardInput.current?.click()}
+            title="For shots taken untethered: pick them from the memory card (or wherever you copied them)"
+            className="btn-tactile inline-flex min-h-9 items-center gap-1.5 border border-gold px-3 text-[10px] font-black uppercase tracking-wider text-gold cursor-pointer disabled:opacity-60">
+            <HardDriveUpload className="size-3.5" aria-hidden="true" />
+            {uploading ? `Adding ${uploading.done} of ${uploading.total}…` : 'Add photos from card'}
+          </button>
+        </div>
       </div>
       <p className="m-0 mt-1 text-[11px] text-neutral-600">
         {canEdit

@@ -41,15 +41,15 @@ function linkedStation(app, record, userId) {
     { reg: record.id, user: userId })[0] || null;
 }
 
-// Why the caller can't change this shoot, or "" when they can.
+// Why the caller can't change this shoot, or "" when they can. The Photo Floor is shared: any
+// photographer (or admin) may delete and restore shots, camera linked or not, until the Chooser or
+// production starts (the same rule as adding photos from a card or a re-shoot).
 function editBlock(app, record, account) {
-  if (workflow.photographyComplete(record)) return "Photography is done. The shots can't be changed any more.";
-  if (["cancelled", "released"].includes(record.getString("status"))) return "This job order is closed.";
-  if (workflow.json(record, "photo_pending")) return "The gallery is being updated. Try again in a moment.";
-  if (account.getString("role") === "admin") return "";
+  const block = uploadBlock(record);
+  if (block) return block;
+  // An assigned session that is syncing its last shots: wait for it, so a shot isn't deleted mid-move.
   const station = linkedStation(app, record, account.id);
-  if (!station) return "Only the photographer whose camera is linked to this client can delete shots.";
-  if (station.getInt("session_finishing")) return "Mark Done was clicked. The last shots are syncing.";
+  if (station && station.getInt("session_finishing")) return "Mark Done was clicked. The last shots are syncing.";
   return "";
 }
 
@@ -227,9 +227,9 @@ function reshootBlock(record, withSessions) {
   return "";
 }
 
+// The reason is optional (photographers re-shoot freely); it is still logged when given.
 function reshoot(app, id, auth, rawReason, taskId) {
-  const reason = String(rawReason || "").trim();
-  if (!reason) throw new BadRequestError("Write why the client needs a re-shoot.");
+  const reason = String(rawReason || "").trim() || "Re-shoot";
   if (reason.length > 300) throw new BadRequestError("Keep the reason under 300 characters.");
   const photography = require(__hooks + "/studio_photography.js");
   const result = workflow.withRegistration(app, id, (tx, record) => {
@@ -241,9 +241,6 @@ function reshoot(app, id, auth, rawReason, taskId) {
       if (!taskId) throw new BadRequestError("Choose which photography session to re-shoot.");
       task = sessions.find((entry) => entry.id === String(taskId));
       if (!task) throw new NotFoundError("Photography session not found.");
-      if (account.getString("role") !== "admin" && task.photographerId !== account.id) {
-        throw new ForbiddenError("Only this session's photographer or the admin can re-shoot it.");
-      }
       if (task.status !== "completed") throw new ApiError(409, "This session isn't finished yet.");
       if (tx.findRecordsByFilter("camera_stations", "active_registration = {:reg} && session_task = {:task}", "", 1, 0,
         { reg: record.id, task: task.id }).length) {
@@ -367,4 +364,114 @@ function retake(app, id, auth, rawReason) {
   return result;
 }
 
-module.exports = { change, image, list, reshoot, retake, shotKey, trash };
+// Card upload: photos shot untethered (to the camera's memory card) are added straight to a client
+// from the Photo Floor, whichever camera is or isn't linked. Any photographer or admin, while the
+// client is paid and on the floor or done shooting, and only until the Chooser starts (like a
+// re-shoot). Files arrive one per request, streamed to disk under a dot name, size-checked, then
+// published under a free name (photos at the top of the job folder, RAW files in RAW/). A file
+// already in the client's folders with the same name and size is skipped, so a whole card can be
+// picked again and only the new shots are added.
+const maxUploadBytes = 1 << 30;
+
+function uploadBlock(record) {
+  const status = record.getString("status");
+  if (["cancelled", "released"].includes(status)) return "This job order is closed.";
+  if (!["paid", "shooting", "done_shooting"].includes(status) || !workflow.paymentEligible(record)) {
+    return "Only paid clients on the Photo Floor can receive photos.";
+  }
+  if (workflow.json(record, "photo_pending")) return "The gallery is being updated. Try again in a moment.";
+  if (!["", "none", "pending_framing"].includes(record.getString("framing_status"))) {
+    return "Production has started on this order, so photos can't be added here.";
+  }
+  if (!["", "pending_shoot", "shot_raw"].includes(record.getString("photo_status"))
+    || workflow.json(record, "photo_selection") || record.getFloat("photo_edit_until") > 0) {
+    return chooserStarted;
+  }
+  return "";
+}
+
+function upload(e) {
+  const account = workflow.staff(e.app, e.auth, ["admin", "photographer"]);
+  const record = load(e.app, e.request.pathValue("id"));
+  const block = uploadBlock(record);
+  if (block) throw new ApiError(409, block);
+  const raws = require(__hooks + "/studio_camera_import.js").rawFormats;
+  const name = String(e.request.url.query().get("name") || "").trim();
+  const ext = $filepath.ext(name).toLowerCase();
+  const photo = !!storage.formats[ext];
+  if (!storage.usableName(name) || /[\\/]/.test(name) || /^[.~$]/.test(name) || !(photo || raws.has(ext))) {
+    throw new BadRequestError("Only photo and RAW files can be added: " + name.slice(0, 120));
+  }
+  const size = e.request.contentLength;
+  if (!(size > 0)) throw new BadRequestError("The file is empty: " + name);
+  if (size > maxUploadBytes) throw new ApiError(413, "This file is too large: " + name);
+
+  let folder;
+  try {
+    folder = storage.photoFolder(e.app, record);
+    storage.provision(folder);
+  } catch (error) {
+    if (error.status === 409) throw error;
+    throw new ApiError(503, "Photo storage is temporarily unavailable.");
+  }
+  return withFolder(e.app, record, true, (root) => {
+    if (!root) throw new ApiError(503, "The client's photo folder is not available.");
+    const dir = photo ? "" : "RAW";
+    // The same shot already here (top, RAW, selection folders or _DELETED): skip it.
+    const places = [...new Set(["", "RAW", trash, trashRaw, ...Object.values(storage.photoDirectories(root, folder))])];
+    for (const place of places) {
+      const info = storage.statEntry(root, place ? place + "/" + name : name);
+      if (info && info.mode().isRegular() && info.size() === size) return { status: "already", name };
+    }
+    if (dir) root.mkdirAll(dir, 0o750);
+    const partial = (dir ? dir + "/" : "") + ".sf-card-" + $security.randomStringWithAlphabet(16, "abcdefghijklmnopqrstuvwxyz0123456789") + ".part";
+    let written = 0;
+    try {
+      // O_WRONLY | O_CREATE | O_EXCL.
+      const file = root.openFile(partial, 0x1 | 0x40 | 0x80, 0o640);
+      try {
+        written = file.readFrom(e.request.body);
+        file.sync();
+      } finally { file.close(); }
+      if (written !== size) throw new BadRequestError("The upload of " + name + " was incomplete. Try again.");
+      // A name free in the job folder and both selection folders (as the camera import does), so a
+      // later Chooser move never meets the same name.
+      const groups = photo ? ["", ...Object.values(storage.photoDirectories(root, folder))] : ["RAW"];
+      const ext0 = $filepath.ext(name);
+      const stem = name.slice(0, name.length - ext0.length);
+      let saved = "";
+      for (let n = 1; n < 10000 && !saved; n++) {
+        const candidate = n === 1 ? name : stem + "_" + n + ext0;
+        if (groups.every((group) => !storage.statEntry(root, group ? group + "/" + candidate : candidate))) saved = candidate;
+      }
+      if (!saved) throw new Error("No free file name for " + name);
+      const target = dir ? dir + "/" + saved : saved;
+      if (photo) {
+        // Check the picture itself under its real extension before it becomes visible.
+        root.link(partial, target);
+        if (!storage.photoMime(root, target, storage.statEntry(root, target))) {
+          root.remove(target);
+          throw new BadRequestError(name + " is not a readable photo.");
+        }
+      } else {
+        root.link(partial, target);
+      }
+      e.app.logger().info("Card upload", "registration", record.id, "file", target, "by", account.getString("username"));
+      return { status: "saved", name: saved };
+    } finally {
+      try { root.remove(partial); } catch (_) { /* already gone */ }
+    }
+  });
+}
+
+// After a batch: one floor badge ("Card upload · <photographer> · N shots") and a station refresh.
+function uploadDone(app, id, auth, count) {
+  const account = workflow.staff(app, auth, ["admin", "photographer"]);
+  load(app, id);
+  const shots = Number.isInteger(count) && count > 0 && count <= 10000 ? count : 0;
+  require(__hooks + "/studio_camera_import.js").recordVisit(app, id, { id: "card", name: "Card upload" }, account.id, shots);
+  require(__hooks + "/studio_station_events.js").notify(app);
+  return { recorded: shots };
+}
+
+module.exports = { change, image, list, reshoot, retake, shotKey, trash, upload, uploadDone };

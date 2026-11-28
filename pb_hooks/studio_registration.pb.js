@@ -86,7 +86,7 @@ onRecordUpdateRequest((e) => {
     "job_order_no", "queue_number", "queue_issued_at",
     "makeup_service", "makeup_services", "makeup_state", "makeup_artist", "makeup_completed_at", "makeup_version", "shoot_completed",
     "photo_folder", "photo_folder_key", "photo_edit_until", "photo_revision",
-    "photo_selection", "photo_pending", "photo_last_request", "photography", "photo_notes", "photo_reshoots",
+    "photo_selection", "photo_pending", "photo_last_request", "photography", "photo_notes", "photo_reshoots", "floor_visits",
     // Server-owned pickup tracking (see studio_production.pb.js).
     "ready_at", "pickup_notified_at", "pickup_notified_by", "pickup_notify_count",
   ];

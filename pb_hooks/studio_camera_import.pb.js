@@ -28,20 +28,25 @@ routerAdd("POST", "/api/studioflow/camera/browse", (e) => {
 routerAdd("POST", "/api/studioflow/camera/{id}/{action}", (e) => {
   const workflow = require(__hooks + "/studio_workflow.js");
   const camera = require(__hooks + "/studio_camera_import.js");
-  workflow.staff(e.app, e.auth, ["admin", "photographer"]);
+  const account = workflow.staff(e.app, e.auth, ["admin", "photographer"]);
   const id = e.request.pathValue("id");
   const body = e.requestInfo().body || {};
   const station = camera.findStation(e.app, id);
   const action = e.request.pathValue("action");
-  if (action !== "scan" && station.getString("active_registration") && station.getString("session_photographer")
-    && station.getString("session_photographer") !== e.auth.id) {
-    throw new ForbiddenError("This camera is linked to another photographer.");
-  }
+  // The Photo Floor is shared: any photographer (or admin) may link, unlink or take over any camera.
+  // Taking over another photographer's session ends it first, so its last shots still go to the
+  // client who was linked (and that visit is recorded) before the camera changes hands.
+  // Assigned photography sessions (session_task) keep their own rules (Mark Done).
+  const owner = station.getString("session_photographer");
+  const takeover = !!owner && owner !== account.id && !!station.getString("active_registration") && !station.getString("session_task");
   switch (action) {
     case "scan": camera.scan(e.app, id); break;
-    case "start": camera.startSession(e.app, id, String(body.registration || ""), e.auth.id); break;
+    case "start":
+      if (takeover) camera.endSession(e.app, id, "");
+      camera.startSession(e.app, id, String(body.registration || ""), e.auth.id);
+      break;
     case "end": camera.endSession(e.app, id, String(body.registration || "")); break;
-    case "claim-waiting": camera.claimWaiting(e.app, id, e.auth.id); break;
+    case "claim-waiting": camera.claimWaiting(e.app, id, owner || e.auth.id); break;
     default: throw new NotFoundError("Unknown camera action.");
   }
   return e.json(200, camera.status(e.app, camera.findStation(e.app, id)));
@@ -56,6 +61,8 @@ onRecordCreateRequest((e) => {
   e.record.set("watch_folder", camera.validateWatchFolder(e.app, e.record.getString("watch_folder"), ""));
   for (const field of camera.sessionFields) e.record.set(field, null);
   e.record.set("session_skip", []);
+  // The Photo Sender key is made only by /api/studioflow/camera-sender/:id/key.
+  if (e.record.collection().fields.getByName("sender_key")) e.record.set("sender_key", "");
   return e.next();
 }, "camera_stations");
 
@@ -71,6 +78,7 @@ onRecordUpdateRequest((e) => {
     const folder = camera.validateWatchFolder(tx, e.record.getString("watch_folder"), e.record.id);
     e.record.set("watch_folder", folder);
     for (const field of camera.sessionFields) e.record.set(field, before.get(field));
+    if (e.record.collection().fields.getByName("sender_key")) e.record.set("sender_key", before.getString("sender_key"));
     const changedFolder = folder.toLowerCase() !== before.getString("watch_folder").toLowerCase();
     if (changedFolder || !e.record.getBool("enabled") || e.record.getBool("import_raw") !== before.getBool("import_raw")
       || e.record.getBool("include_subfolders") !== before.getBool("include_subfolders")) {
@@ -126,6 +134,24 @@ onRecordAfterUpdateSuccess((e) => {
     }
   } catch (err) {
     console.log("StudioFlow: could not unlink the camera of a client sent to makeup:", err);
+  }
+}, "registrations");
+
+// A single-session client who is done shooting (or cancelled / released) leaves every camera still
+// linked to them: each camera first files its last shots to them, then unlinks. So no shot lands in
+// the folder while the Chooser works on it, and no camera stays tied to a finished client.
+// Assigned photography sessions (session_task) finish through Mark Done instead.
+onRecordAfterUpdateSuccess((e) => {
+  e.next();
+  const status = e.record.getString("status");
+  if (!["done_shooting", "completed", "ready_for_pickup", "released", "cancelled"].includes(status)) return;
+  try {
+    const camera = require(__hooks + "/studio_camera_import.js");
+    const linked = e.app.findRecordsByFilter("camera_stations", "active_registration = {:id} && session_task = ''",
+      "", 0, 0, { id: e.record.id });
+    for (const station of linked) camera.endSession(e.app, station.id, e.record.id);
+  } catch (err) {
+    console.log("StudioFlow: could not unlink the cameras of a finished client:", err);
   }
 }, "registrations");
 

@@ -26,7 +26,8 @@ export const ReshootModal: React.FC<{
   const [error, setError] = useState('');
 
   const submit = async () => {
-    if (!reason.trim() || busy) return;
+    // A paid retake needs the reason (and fee note); a re-shoot doesn't.
+    if ((paid && !reason.trim()) || busy) return;
     setBusy(true);
     setError('');
     try {
@@ -47,7 +48,7 @@ export const ReshootModal: React.FC<{
             className="btn-tactile min-h-10 border border-line bg-canvas px-4 text-xs font-black uppercase tracking-wider text-ink cursor-pointer disabled:opacity-50">
             Cancel
           </button>
-          <button type="button" onClick={() => void submit()} disabled={busy || !reason.trim()}
+          <button type="button" onClick={() => void submit()} disabled={busy || (paid && !reason.trim())}
             className="btn-tactile inline-flex min-h-10 items-center gap-1.5 border border-line bg-gold px-4 text-xs font-black uppercase tracking-wider text-on-gold cursor-pointer disabled:opacity-50">
             <RotateCcw className="size-4" aria-hidden="true" /> {busy ? 'Reopening…' : paid ? 'Start paid retake' : 'Re-shoot now'}
           </button>
@@ -66,7 +67,7 @@ export const ReshootModal: React.FC<{
           {' '}Their shots so far stay in their folder; new shots are added to them.
         </p>
         <label className="block">
-          <span className="text-[11px] font-black uppercase tracking-wider text-ink">{paid ? 'Reason and payment note (required)' : 'Why the re-shoot? (required)'}</span>
+          <span className="text-[11px] font-black uppercase tracking-wider text-ink">{paid ? 'Reason and payment note (required)' : 'Why the re-shoot? (optional)'}</span>
           <textarea value={reason} maxLength={REASON_MAX} rows={3} autoFocus disabled={busy}
             onChange={(event) => setReason(event.target.value)} placeholder={paid ? 'e.g. client unhappy with the shots; retake fee ₱1,000 added as other fees' : 'e.g. eyes closed in most shots, wrong attire'}
             className="mt-1 w-full resize-y border border-neutral-400 bg-canvas px-2 py-1.5 text-sm" />

@@ -19,6 +19,16 @@ routerAdd("GET", "/api/studioflow/shoot/{id}/image/{photo}", (e) => {
     });
 }, $apis.requireAuth("users"));
 
+// Card upload (photos shot untethered): one file per request, raw body, ?name=<file name>.
+routerAdd("POST", "/api/studioflow/shoot-upload/{id}", (e) => {
+  return e.json(200, require(__hooks + "/studio_shoot_review.js").upload(e));
+}, $apis.requireAuth("users"), $apis.bodyLimit(1 << 30));
+
+routerAdd("POST", "/api/studioflow/shoot-upload/{id}/done", (e) => {
+  const body = e.requestInfo().body || {};
+  return e.json(200, require(__hooks + "/studio_shoot_review.js").uploadDone(e.app, e.request.pathValue("id"), e.auth, body.count));
+}, $apis.requireAuth("users"), $apis.bodyLimit(1024));
+
 routerAdd("POST", "/api/studioflow/shoot/{id}/{action}", (e) => {
   const review = require(__hooks + "/studio_shoot_review.js");
   const action = e.request.pathValue("action");

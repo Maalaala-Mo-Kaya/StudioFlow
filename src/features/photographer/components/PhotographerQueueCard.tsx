@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Folder, Aperture, Gift, ListChecks, MousePointer2, Maximize2, Camera } from 'lucide-react';
+import { Check, Folder, Aperture, Gift, ListChecks, MousePointer2, Maximize2, Camera } from 'lucide-react';
 import type { Registration } from '../../../types';
 import { Modal } from '../../../components/common/Modal';
 import { chosenOptionLines } from '../../../utils/packageOptions';
@@ -66,7 +66,27 @@ interface PhotographerQueueCardProps {
   cameraName?: string;
   /** Queue view: name, job order, Copy Path and actions only; Full View opens the details. */
   compact?: boolean;
+  /** This device's camera already shot the client: the card is dimmed. */
+  shotHere?: boolean;
 }
+
+/** Cameras that already shot this client (solo, group...), in the order they did. */
+export const FloorVisits: React.FC<{ registration: Registration; dark?: boolean }> = ({ registration, dark = false }) => {
+  const visits = registration.floor_visits ?? [];
+  if (!visits.length) return null;
+  return (
+    <ul aria-label="Already shot at" className="m-0 flex flex-wrap gap-1.5 p-0 list-none">
+      {visits.map((visit) => (
+        <li key={visit.camera + visit.photographer}
+          className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[10px] font-bold ${dark
+            ? 'border-emerald-700 text-emerald-400' : 'border-emerald-400 bg-emerald-50 text-emerald-800'}`}>
+          <Check className="size-3 shrink-0" aria-hidden="true" />
+          {visit.cameraName}{visit.photographerName && ` · ${visit.photographerName}`} · {visit.shots} shot{visit.shots === 1 ? '' : 's'}
+        </li>
+      ))}
+    </ul>
+  );
+};
 
 export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
   registration: reg,
@@ -77,6 +97,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
   sessionActions,
   cameraName = '',
   compact = false,
+  shotHere = false,
 }) => {
   const [fullView, setFullView] = useState(false);
 
@@ -96,7 +117,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
 
   if (compact) {
     return (
-      <article className={`card-interactive min-w-0 border-2 p-3.5 flex flex-col gap-3 bg-panel text-ink border-line ${nextUp ? 'shadow-lux-gold' : 'shadow-lux'}`}>
+      <article className={`card-interactive min-w-0 border-2 p-3.5 flex flex-col gap-3 bg-panel text-ink border-line ${nextUp ? 'shadow-lux-gold' : 'shadow-lux'} ${shotHere ? 'opacity-60 hover:opacity-100 focus-within:opacity-100' : ''}`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
               <span className="font-mono text-sm font-black px-2 py-0.5 bg-obsidian text-gold">{formatQueueNumber(reg.queue_number)}</span>
@@ -114,6 +135,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
         <div className="min-w-0">
           <h3 className="text-base font-black uppercase tracking-tight leading-snug text-ink wrap-anywhere">{formatClientName(reg)}</h3>
           <p className="m-0 font-mono text-xs font-black text-red-500">{formatJobOrderNo(reg.job_order_no)}</p>
+          {shotHere && <p className="m-0 mt-1 text-[10px] font-black uppercase tracking-wider text-neutral-500">Already shot on this camera</p>}
         </div>
         <div className="mt-auto text-[10px] font-mono">
           <div className="flex items-center justify-between gap-2">
@@ -121,6 +143,7 @@ export const PhotographerQueueCard: React.FC<PhotographerQueueCardProps> = ({
             <CopyPathButton registrationId={reg.id} />
           </div>
         </div>
+        <FloorVisits registration={reg} />
         {actions}
         {fullView && (
           <Modal title={formatClientName(reg)} icon={Camera} size="md" onClose={() => setFullView(false)}

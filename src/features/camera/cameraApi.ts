@@ -24,6 +24,8 @@ export interface CameraStatus {
   };
   taskId: string;
   photographerId: string;
+  /** Name of the photographer who linked the camera's current client ('' when none). */
+  photographerName: string;
   finishing: boolean;
   sessionStarted: string;
   sessionImported: number;
@@ -48,6 +50,8 @@ export interface CameraStatus {
     /** Shots still on the laptop (not finished writing yet, or waiting for the server). */
     waiting: number | null;
     error: string;
+    /** How it sends: over the network to StudioFlow ("upload") or into a shared folder ("share"). */
+    via: 'upload' | 'share';
   };
 }
 

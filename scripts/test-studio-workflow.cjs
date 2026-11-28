@@ -1261,6 +1261,68 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   camState = await cameraApi('claim-waiting');
   assert.equal(camState.waiting, 0);
   for (const name of ['before-session.jpg', 'fresh.jpg']) assert.ok((await readdir(clientDir)).includes(name), name);
+  // The Photo Floor is shared: another photographer (a new shift on the same device) may use the
+  // waiting files, take the camera over (the old session ends first) and free it; so may an admin.
+  const nextShift = await createStaff('nextshift', 'photographer');
+  assert.equal((await cameraApi('claim-waiting', undefined, { token: nextShift.token })).client.id, onSet.id);
+  const takenOver = await cameraApi('start', { registration: onSet.id }, { token: nextShift.token });
+  assert.deepEqual([takenOver.client.id, takenOver.photographerName], [onSet.id, 'nextshift'], 'Any photographer may take over.');
+  assert.equal((await cameraApi('start', { registration: onSet.id }, { token: admin })).client.id, onSet.id, 'An admin may take over.');
+  assert.equal((await cameraApi('end', { registration: onSet.id }, { token: nextShift.token })).client, null, 'Anyone may free the camera.');
+  assert.equal((await cameraApi('start', { registration: onSet.id })).client.id, onSet.id);
+
+  // Two photographers shoot one single-session client on their own cameras. Mark Done by one
+  // finishes the client: the other camera first files its last shot to them, then unlinks.
+  const pairDirs = [join(home, 'camera-pair-1'), join(home, 'camera-pair-2')];
+  for (const dir of pairDirs) await mkdir(dir);
+  const pairCameras = [
+    await create('camera_stations', { ...booth, name: 'Pair 1', watch_folder: pairDirs[0] }, photographer),
+    await create('camera_stations', { ...booth, name: 'Pair 2', watch_folder: pairDirs[1] }, photographer),
+  ];
+  const pairApi = (cam, action, body, token) =>
+    send(`${api}/camera/${cam.id}/${action}`, { method: 'POST', token, body }).then((r) => r.payload);
+  const pair = await register(standard);
+  await pay(pair, 1000);
+  await shoot(pair, 'shooting');
+  await pairApi(pairCameras[0], 'start', { registration: pair.id }, photographer);
+  const pairSecond = await pairApi(pairCameras[1], 'start', { registration: pair.id }, nextShift.token);
+  assert.equal(pairSecond.photographerName, 'nextshift', 'The camera shows who linked it.');
+  for (const [dir, name] of [[pairDirs[0], 'SOLO_001.jpg'], [pairDirs[1], 'GROUP_001.jpg']]) {
+    await writeFile(join(dir, name), jpeg);
+    await utimes(join(dir, name), settled, settled);
+  }
+  // "Send to next camera": camera 1 frees itself, the client stays on the floor, and the visit is recorded.
+  await pairApi(pairCameras[0], 'end', { registration: pair.id }, photographer);
+  let pairRecord = (await send(records('registrations', pair.id), { token: admin })).payload;
+  assert.equal(pairRecord.status, 'shooting');
+  assert.deepEqual(pairRecord.floor_visits.map((visit) => [visit.cameraName, visit.shots]), [['Pair 1', 1]]);
+  await send(records('registrations', pair.id), { token: photographer, method: 'PATCH', body: { floor_visits: [] }, status: 403 });
+  await shoot(pair, 'done_shooting');
+  pairRecord = (await send(records('registrations', pair.id), { token: admin })).payload;
+  assert.deepEqual(pairRecord.floor_visits.map((visit) => [visit.cameraName, visit.photographerName, visit.shots]),
+    [['Pair 1', pairRecord.floor_visits[0].photographerName, 1], ['Pair 2', 'nextshift', 1]], 'Both cameras are on the client.');
+  for (const cam of pairCameras) assert.equal((await pairApi(cam, 'scan', undefined, photographer)).client, null, cam.name);
+  const pairDir = (await send(`${api}/photo-folder/${pair.id}`, { method: 'POST', token: photographer })).payload.path;
+  assert.ok((await readdir(pairDir)).includes('GROUP_001.jpg'), "The other camera's last shot reaches the finished client.");
+  for (const cam of pairCameras) await send(records('camera_stations', cam.id), { token: admin, method: 'DELETE', status: 204 });
+
+  // Shot untethered on a memory card: any photographer adds the files straight to the client (no
+  // camera linked), until the Chooser starts. A file already there (same name and size) is skipped.
+  const cardUpload = (name, body, token = nextShift.token) => fetch(`${host}${api}/shoot-upload/${pair.id}?name=${encodeURIComponent(name)}`, {
+    method: 'POST', body, headers: { Authorization: token, 'Content-Type': 'application/octet-stream' },
+  }).then(async (response) => ({ status: response.status, payload: await response.json() }));
+  assert.equal((await cardUpload('CARD_001.jpg', jpeg, cashier)).status, 403);
+  assert.equal((await cardUpload('..\\CARD.jpg', jpeg)).status, 400);
+  assert.equal((await cardUpload('CARD_BAD.jpg', Buffer.from('not a picture at all'))).status, 400);
+  assert.deepEqual((await cardUpload('CARD_001.jpg', jpeg)).payload, { status: 'saved', name: 'CARD_001.jpg' });
+  assert.equal((await cardUpload('CARD_001.jpg', jpeg)).payload.status, 'already', 'A card picked again adds only new shots.');
+  assert.equal((await cardUpload('CARD_001.CR3', Buffer.from('raw from the card'))).payload.status, 'saved');
+  assert.ok((await readdir(pairDir)).includes('CARD_001.jpg') && !(await readdir(pairDir)).includes('CARD_BAD.jpg'));
+  assert.deepEqual(await readdir(join(pairDir, 'RAW')), ['CARD_001.CR3']);
+  assert.ok((await readdir(pairDir)).every((name) => !name.startsWith('.sf-card-')));
+  await send(`${api}/shoot-upload/${pair.id}/done`, { method: 'POST', token: nextShift.token, body: { count: 1 } });
+  pairRecord = (await send(records('registrations', pair.id), { token: admin })).payload;
+  assert.deepEqual(pairRecord.floor_visits.at(-1).cameraName, 'Card upload');
 
   // Shoot gallery: the linked photographer deletes bad shots before the Chooser sees them.
   // Deleting moves the shot (and its RAW twin) into _DELETED; nothing leaves the disk.
@@ -1285,10 +1347,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   const otherPhotographer = await createStaff('shootreviewer', 'photographer');
   await shots(cashier, 403);
   await shots(chooser.token, 403);
-  assert.equal((await shots(otherPhotographer.token)).canEdit, false, 'Other photographers can look but not delete.');
+  assert.equal((await shots(otherPhotographer.token)).canEdit, true, 'The Photo Floor is shared: any photographer may delete.');
   await shootChange('delete', [bad], cashier, 403);
   await shootChange('delete', [bad], chooser.token, 403);
-  await shootChange('delete', [bad], otherPhotographer.token, 409);
+  // Allowed past the permission check (the bad id is then simply not found).
+  await shootChange('delete', [{ id: 'not-a-hash', name: bad.name }], otherPhotographer.token, 404);
   await shootChange('delete', [], photographer, 400);
   await shootChange('delete', [{ id: bad.id, name: '..\\IMG_0004.jpg' }], photographer, 404);
   await shootChange('delete', [{ id: 'not-a-hash', name: bad.name }], photographer, 404);
@@ -1331,20 +1394,17 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.equal(camState.client, null);
   assert.ok((await readdir(clientDir)).includes('last.jpg'));
   assert.equal(Buffer.compare(await readFile(join(clientDir, 'last.jpg')), large), 0);
-  // Without the camera link, the photographer can no longer delete.
-  assert.equal((await shots()).canEdit, false);
-  // After Mark Done the shots are fixed and the Chooser sees only the ones that were kept.
+  // Without a camera link, and after Mark Done, photographers can still clean up the shots: they
+  // are fixed only once the Chooser starts (checked further down).
+  assert.equal((await shots()).canEdit, true);
   await shoot(onSet, 'done_shooting');
   gallery = await shots();
-  assert.equal(gallery.canEdit, false);
-  await shootChange('delete', [shotNamed(gallery.photos, 'IMG_0001.jpg')], photographer, 409);
-  await shootChange('restore', [shotNamed(gallery.deleted, 'fresh.jpg')], admin, 409);
-  // Re-shoot: back on set before the Chooser starts, by a photographer or the admin, with a reason.
+  assert.equal(gallery.canEdit, true, gallery.reason);
+  // Re-shoot: back on set before the Chooser starts, by any photographer or the admin; the reason is optional.
   const reshoot = (token, reason, status = 200) =>
     send(`${shootApi}/reshoot`, { method: 'POST', token, status, body: { reason } }).then((r) => r.payload);
   await reshoot(cashier, 'Eyes closed', 403);
   await reshoot(chooser.token, 'Eyes closed', 403);
-  await reshoot(photographer, '   ', 400);
   assert.equal((await reshoot(photographer, 'Eyes closed in most shots')).status, 'shooting');
   await reshoot(photographer, 'Again', 409);
   let reshot = (await send(records('registrations', onSet.id), { token: admin })).payload;
@@ -1360,6 +1420,12 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   assert.deepEqual(reshot.photo_reshoots.map((entry) => [entry.reason, entry.role]),
     [['Eyes closed in most shots', 'photographer'], ['Wrong attire', 'admin']]);
   const choosing = (await send(`${api}/chooser/${onSet.id}/open`, { token: chooser.token, method: 'POST' })).payload;
+  // The Chooser has the client open: the shots are fixed now, for photographers and the admin.
+  gallery = await shots();
+  assert.equal(gallery.canEdit, false);
+  // (Refused before the photo is even looked up.)
+  await shootChange('delete', [{ id: 'any', name: 'IMG_0001.jpg' }], photographer, 409);
+  await shootChange('restore', [{ id: 'any', name: 'fresh.jpg' }], admin, 409);
   const keptForChooser = choosing.photos.map((photo) => photo.name);
   for (const name of ['IMG_0001.jpg', 'IMG_0004.jpg', 'last.jpg']) assert.equal(keptForChooser.includes(name), name !== 'IMG_0004.jpg', name);
   assert.ok(!keptForChooser.includes('fresh.jpg') && !keptForChooser.includes('IMG_0004_2.jpg'), 'Deleted shots never reach the Chooser.');
@@ -1399,13 +1465,46 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   camState = await cameraApi('scan');
   assert.equal(camState.waiting, 2, 'The status file is not a waiting photo.');
   assert.deepEqual({ ...camState.sender, seenAgo: camState.sender.seenAgo < 10, lastSentAgo: camState.sender.lastSentAgo >= 40 },
-    { host: 'BOOTH2', source: 'C:\\EOS_Out', seenAgo: true, lastSentName: 'IMG_9.JPG', lastSentAgo: true, waiting: 3, error: '' });
+    { host: 'BOOTH2', source: 'C:\\EOS_Out', seenAgo: true, lastSentName: 'IMG_9.JPG', lastSentAgo: true, waiting: 3, error: '', via: 'share' });
   const quiet = new Date(Date.now() - 5 * 60_000);
   await utimes(senderStatus, quiet, quiet);
   assert.ok((await cameraApi('scan')).sender.seenAgo >= 290, 'A sender that stopped writing shows as not heard from.');
   await writeFile(senderStatus, '{ broken');
   assert.deepEqual((await cameraApi('scan')).sender.waiting, null, 'A half-written status file is read as unknown.');
   await rm(senderStatus);
+  // Photo Sender over HTTP: the camera key (staff read, admin reset, hidden from the collection
+  // API) lets the laptop upload shots into the watch folder; retries are not saved twice.
+  const senderApi = `${api}/camera-sender/${camera.id}`;
+  await send(senderApi + '/key', { token: cashier, status: 403 });
+  const senderKey = (await send(senderApi + '/key', { token: photographer })).payload.key;
+  assert.match(senderKey, /^[A-Za-z0-9]{40}$/);
+  await send(records('camera_stations', camera.id), { token: admin, method: 'PATCH', body: { sender_key: 'x'.repeat(40) } });
+  assert.equal((await send(senderApi + '/key', { token: admin })).payload.key, senderKey, 'The key is never set through the collection API.');
+  assert.equal((await send(records('camera_stations', camera.id), { token: admin })).payload.sender_key, undefined);
+  await send(senderApi + '/key/reset', { token: photographer, method: 'POST', body: {}, status: 403 });
+  const upload = (name, key, uploadId = 'upload-0001') => fetch(`${host}${senderApi}/upload?name=${encodeURIComponent(name)}`, {
+    method: 'POST', body: png, headers: { 'X-Camera-Key': key, 'X-Upload-Id': uploadId, 'Content-Type': 'application/octet-stream' },
+  }).then(async (response) => ({ status: response.status, payload: await response.json() }));
+  assert.equal((await upload('sent.png', 'wrong-key')).status, 401);
+  assert.equal((await upload('..\\sent.png', senderKey)).status, 400);
+  assert.deepEqual((await upload('sent.png', senderKey)).payload, { status: 'saved', name: 'sent.png', size: png.length });
+  assert.deepEqual((await upload('sent.png', senderKey)).payload.status, 'already', 'A retried upload is not saved twice.');
+  assert.equal((await upload('sent.png', senderKey, 'upload-0002')).payload.name, 'sent_2.png', 'An upload never overwrites.');
+  assert.ok((await readdir(cameraDir)).every((name) => !name.startsWith('.sf-upload-')));
+  const beat = await fetch(`${host}${senderApi}/status`, {
+    method: 'POST', headers: { 'X-Camera-Key': senderKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host: 'LAPTOP1', source: 'C:\\EOS_Out', waiting: 0, lastSentName: 'sent.png', lastSentSecondsAgo: 1, error: '' }),
+  });
+  assert.equal(beat.status, 200);
+  camState = await cameraApi('scan');
+  assert.deepEqual([camState.waiting, camState.sender.host, camState.sender.via], [4, 'LAPTOP1', 'upload'],
+    'Uploaded shots wait in the folder like copied ones.');
+  const newKey = (await send(senderApi + '/key/reset', { token: admin, method: 'POST', body: {} })).payload.key;
+  assert.notEqual(newKey, senderKey);
+  assert.equal((await upload('late.png', senderKey, 'upload-0003')).status, 401, 'A reset key stops the old download.');
+  for (const name of ['sent.png', 'sent_2.png', '.studioflow-sender.json']) await rm(join(cameraDir, name));
+  await rm(join(cameraDir, '.studioflow-received'), { recursive: true });
+  assert.equal((await cameraApi('scan')).waiting, 2);
   assert.deepEqual((await send(api + '/camera/browse?path=' + encodeURIComponent(home), { token: photographer })).payload.folders
     .map((folder) => folder.name).includes('camera'), true);
   await send(records('camera_stations', camera.id), { token: photographer, method: 'DELETE', status: 404 });
@@ -1462,7 +1561,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       await shoot(student, 'done_shooting', 403);
       await act(student, second, 'start', familyTask);
       await act(student, primary, 'done', familyTask, 403);
-      await scan({ ...primary, camera: familyCamera }, 'end', 403);
+      // An assigned session ends only through Mark Done, whoever asks.
+      await scan({ ...primary, camera: familyCamera }, 'end', 409);
       const [first, last] = familyFirst ? [second, primary] : [primary, second];
       const [firstTask, lastTask] = familyFirst ? [familyTask, 'primary'] : ['primary', familyTask];
       await shootImage(first, 'SAME_001.jpg');
@@ -1517,13 +1617,13 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
           method: 'POST', token: actor.token || actor, status, body: { reason: 'Eyes closed', taskId },
         }).then((result) => result.payload);
         await reshootTask(primary, undefined, 400);
-        await reshootTask(second, 'primary', 403);
         await reshootTask(chooser, familyTask, 403);
         assert.equal((await reshootTask(second, familyTask)).status, 'shooting');
         assert.deepEqual((await read(student)).photography.tasks.map((task) => task.status), ['completed', 'pending']);
         assert.equal(await inChooser(student), 0);
         await reshootTask(second, familyTask, 409);
-        await reshootTask(admin, 'primary');
+        // The Photo Floor is shared: another photographer may reopen this session too.
+        await reshootTask(second, 'primary');
         assert.deepEqual((await read(student)).photography.tasks.map((task) => task.status), ['pending', 'pending']);
         for (const [actor, taskId] of [[second, familyTask], [primary, 'primary']]) {
           await act(student, actor, 'start', taskId);
@@ -1536,7 +1636,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
         assert.equal(await inChooser(student), 1);
         assert.equal((await readdir(dir)).filter((name) => name.endsWith('-RESHOOT_001.jpg')).length, 2);
         const log = (await send(records('registrations', student.id), { token: admin })).payload.photo_reshoots;
-        assert.deepEqual(log.map((entry) => [entry.task_name, entry.role]), [['Family Picture', 'photographer'], ['Graduation Portrait', 'admin']]);
+        assert.deepEqual(log.map((entry) => [entry.task_name, entry.role]), [['Family Picture', 'photographer'], ['Graduation Portrait', 'photographer']]);
       }
     }
 

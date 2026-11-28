@@ -371,6 +371,16 @@ export interface OrderChange {
   total_after: number;
 }
 
+/** A camera that shot a single-session client (registrations.floor_visits, server-owned). */
+export interface FloorVisit {
+  camera: string;
+  cameraName: string;
+  photographer: string;
+  photographerName: string;
+  shots: number;
+  at: string;
+}
+
 export interface PhotographyTask {
   id: string;
   name: string;
@@ -385,6 +395,8 @@ export interface PhotographyTask {
 
 export interface Registration {
   photography?: { tasks: PhotographyTask[] } | null;
+  /** Server-owned: cameras that already shot this single-session client (one entry per camera and photographer). */
+  floor_visits?: FloorVisit[] | null;
   id: string;
   job_order_no: string | null;
   pictorial_date?: string;

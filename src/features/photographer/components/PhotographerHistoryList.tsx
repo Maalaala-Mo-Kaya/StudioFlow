@@ -30,8 +30,6 @@ interface PhotographerHistoryListProps {
   busy?: boolean;
   /** Admin: opens the paid retake popup for a client who has already chosen. */
   onPaidRetake?: (reg: Registration) => void;
-  /** The signed-in photographer (their own sessions get a Re-shoot button). */
-  photographerId?: string;
   admin?: boolean;
 }
 
@@ -40,7 +38,6 @@ export const PhotographerHistoryList: React.FC<PhotographerHistoryListProps> = (
   onReshoot,
   onPaidRetake,
   busy = false,
-  photographerId,
   admin = false,
 }) => {
   const reshootButton = (onClick: () => void) => (
@@ -92,9 +89,9 @@ export const PhotographerHistoryList: React.FC<PhotographerHistoryListProps> = (
 
               <div className="flex items-center justify-between sm:justify-end gap-3 pl-11 sm:pl-0">
                 {activePhotographyTasks(reg).length ? (
-                  // One Re-shoot per finished session: the session's own photographer, or the admin.
+                  // One Re-shoot per finished session, for any photographer (the Photo Floor is shared).
                   <PhotographyProgress registration={reg} action={(task) => onReshoot && task.status === 'completed'
-                    && ['shooting', 'done_shooting'].includes(reg.status) && (admin || task.photographerId === photographerId)
+                    && ['shooting', 'done_shooting'].includes(reg.status)
                     && !chooserStarted(reg) ? reshootButton(() => onReshoot(reg, task)) : null} />
                 ) : <span className="inline-flex items-center gap-1 font-mono text-[10px] font-black uppercase tracking-wider text-ink bg-gold-wash px-2.5 py-1 border border-gold">
                   <CheckCircle2 className="w-3.5 h-3.5 text-gold-soft" /> Done Shooting

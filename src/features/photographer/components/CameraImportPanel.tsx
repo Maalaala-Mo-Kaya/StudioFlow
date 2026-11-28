@@ -175,6 +175,7 @@ const SenderStatus: React.FC<{ sender: NonNullable<CameraStatus['sender']> }> = 
           {sender.lastSentAgo === null ? 'no shot sent yet' : `last shot ${agoLabel(sender.lastSentAgo)}`}
           {sender.lastSentName && sender.lastSentAgo !== null && ` (${sender.lastSentName})`}
           {sender.waiting ? ` · ${sender.waiting} waiting on the laptop` : ' · 0 waiting'}
+          {sender.via === 'upload' ? ' · network upload' : ' · shared folder'}
         </span>
       </div>
       {sender.error && <p className="m-0 font-mono text-[11px] text-amber-800">{sender.error}</p>}
