@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { Check, ImageOff, Images, Maximize2, StickyNote, Tags, X } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Check, Columns2, ImageOff, Images, Maximize2, StickyNote, Tags } from 'lucide-react';
+import { ChooserGroupViewer } from './ChooserGroupViewer';
 import { untagged, type ShotType } from '../camera/shotTypes';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
@@ -292,13 +293,13 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
   const [gallery, setGallery] = useState(initial);
   const [selected, setSelected] = useState(() => new Set(initial.photos.filter((item) => item.selected).map((item) => item.id)));
   const [notes, setNotes] = useState<Record<string, string>>(() => notesOf(initial));
-  const [preview, setPreview] = useState<{ url: string; name: string }>();
+  // A group full screen: all side by side (index null) or one photo at a time.
+  const [viewer, setViewer] = useState<{ code: string; index: number | null }>();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [conflict, setConflict] = useState(false);
   const request = useRef<string | undefined>(undefined);
-  const dialog = useRef<HTMLDialogElement>(null);
   const path = `/chooser/${gallery.student.id}`;
   const live = useWorkflowData<Gallery>(path);
   const stale = conflict || (!!live.data && live.data.version !== gallery.version);
@@ -312,10 +313,6 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
   const savedNotes = notesOf(gallery);
   const noteCount = [...selected].filter((id) => notes[id]?.trim()).length;
   const notesChanged = [...selected].some((id) => (notes[id]?.trim() || '') !== (savedNotes[id] || ''));
-
-  useEffect(() => {
-    if (preview && !dialog.current?.open) dialog.current?.showModal();
-  }, [preview]);
 
   function setCurrent(next: Gallery) {
     setGallery(next);
@@ -412,45 +409,52 @@ function PhotoGallery({ initial, close }: { initial: Gallery; close: () => void 
         const picked = group.photos.filter((photo) => selected.has(photo.id)).length;
         return (
           <section key={group.code || 'none'} aria-label={group.name} className="space-y-2">
-            {typed && (
-              <h3 className="m-0 flex flex-wrap items-center gap-2 border-b border-line pb-1 text-xs font-black uppercase tracking-wider text-ink">
-                <Tags className="size-4 text-gold" aria-hidden="true" /> {group.name}
-                <span className="font-mono text-[10px] font-bold normal-case text-neutral-600">
-                  {group.photos.length} photo{group.photos.length === 1 ? '' : 's'}
-                  {group.code ? (group.inPackage ? ' · in the package' : ' · not in the package') : ''}
-                </span>
+            <h3 className="m-0 flex flex-wrap items-center gap-2 border-b border-line pb-1 text-xs font-black uppercase tracking-wider text-ink">
+              {typed && <><Tags className="size-4 text-gold" aria-hidden="true" /> {group.name}</>}
+              <span className="font-mono text-[10px] font-bold normal-case text-neutral-600">
+                {group.photos.length} photo{group.photos.length === 1 ? '' : 's'}
+                {group.code ? (group.inPackage ? ' · in the package' : ' · not in the package') : ''}
+              </span>
+              <span className="ml-auto flex items-center gap-2">
+                <button type="button" onClick={() => setViewer({ code: group.code, index: null })}
+                  title="All the photos of this group full screen, side by side"
+                  className="inline-flex min-h-8 items-center gap-1 border border-gold px-2 text-[10px] text-gold cursor-pointer">
+                  <Columns2 size={13} /> View all
+                </button>
                 {group.code && (
-                  <span className={`ml-auto inline-flex items-center gap-1 border px-1.5 py-0.5 text-[10px] ${picked
+                  <span className={`inline-flex items-center gap-1 border px-1.5 py-0.5 text-[10px] ${picked
                     ? 'border-emerald-600/40 text-emerald-700' : group.inPackage ? 'border-amber-500 text-amber-700' : 'border-line text-neutral-600'}`}>
                     {picked ? <><Check size={12} /> Chosen</> : group.inPackage ? 'Choose 1' : 'Optional'}
                   </span>
                 )}
-              </h3>
-            )}
+              </span>
+            </h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {group.photos.map((photo) => (
+              {group.photos.map((photo, position) => (
                 <PhotoTile key={gallery.version + photo.id} photo={photo} path={path} checked={selected.has(photo.id)}
-                  onToggle={() => toggle(photo.id)} disabled={busy || stale} onPreview={(url) => setPreview({ url, name: photo.name })}
+                  onToggle={() => toggle(photo.id)} disabled={busy || stale} onPreview={() => setViewer({ code: group.code, index: position })}
                   note={notes[photo.id] ?? ''} onNote={(text) => editNote(photo.id, text)} />
               ))}
             </div>
           </section>
         );
       })}
-      <dialog ref={dialog} onClose={() => setPreview(undefined)} className="fixed inset-0 m-auto max-h-screen max-w-screen theme-night bg-black text-white p-3 backdrop:bg-black/90">
-        {preview && (
-          <div className="flex flex-col items-center gap-2">
-            <button type="button" className={`${stationButton} self-end`} onClick={() => dialog.current?.close()}><X size={16} /> Close preview</button>
-            <img className="max-h-[85dvh] max-w-[92vw] object-contain" src={preview.url} alt={preview.name} />
-          </div>
-        )}
-      </dialog>
+      {(() => {
+        const group = viewer && groups.find((entry) => entry.code === viewer.code);
+        if (!viewer || !group?.photos.length) return null;
+        const picked = group.photos.filter((photo) => selected.has(photo.id)).length;
+        return (
+          <ChooserGroupViewer key={viewer.code} title={typed ? group.name : 'All photos'} photos={group.photos} path={path}
+            selected={selected} disabled={busy || stale} startIndex={viewer.index} onToggle={toggle} onClose={() => setViewer(undefined)}
+            summary={`${picked ? `${picked} chosen here` : group.code && group.inPackage ? 'choose 1' : 'none chosen here'} · ${selected.size}${limit ? ` of ${limit}` : ''} selected in all`} />
+        );
+      })()}
     </div>
   );
 }
 
 function PhotoTile({ photo, path, checked, disabled, onToggle, onPreview, note, onNote }: {
-  photo: Photo; path: string; checked: boolean; disabled: boolean; onToggle: () => void; onPreview: (url: string) => void;
+  photo: Photo; path: string; checked: boolean; disabled: boolean; onToggle: () => void; onPreview: () => void;
   note: string; onNote: (text: string) => void;
 }) {
   const tile = useRef<HTMLElement>(null);
@@ -473,8 +477,8 @@ function PhotoTile({ photo, path, checked, disabled, onToggle, onPreview, note, 
       </button>
       <div className="flex items-center justify-between gap-1 p-1.5">
         <span className="truncate text-xs font-mono" title={photo.name}>{untagged(photo.name)}</span>
-        <button type="button" title="Full-screen preview" aria-label={`Preview ${photo.name}`} disabled={!url || failed}
-          onClick={() => onPreview(url)} className="shrink-0 p-2 disabled:opacity-30"><Maximize2 size={15} /></button>
+        <button type="button" title="Full screen, one by one" aria-label={`Preview ${photo.name}`} disabled={!url || failed}
+          onClick={onPreview} className="shrink-0 p-2 disabled:opacity-30"><Maximize2 size={15} /></button>
       </div>
       {checked && (
         <label className="block px-1.5 pb-1.5">
