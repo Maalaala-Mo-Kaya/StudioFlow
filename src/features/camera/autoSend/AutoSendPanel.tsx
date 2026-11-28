@@ -170,7 +170,7 @@ function BrowserSetting() {
 function CopyText({ text, copied, onCopy }: { text: string; copied: boolean; onCopy: () => void }) {
   return (
     <span className="inline-flex max-w-full items-center gap-1 align-middle">
-      <code className="break-all border border-amber-300 bg-white px-1 font-mono text-[11px] text-ink">{text}</code>
+      <code className="break-all select-all border border-amber-400 bg-canvas px-1.5 py-0.5 font-mono text-xs font-bold text-ink">{text}</code>
       <button type="button" onClick={onCopy} className="inline-flex items-center gap-1 px-1 text-[10px] font-black uppercase text-amber-900 underline cursor-pointer">
         <Copy className="size-3" aria-hidden="true" /> {copied ? 'Copied' : 'Copy'}
       </button>
