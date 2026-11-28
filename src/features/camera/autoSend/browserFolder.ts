@@ -16,6 +16,20 @@ type PickerWindow = Window & { showDirectoryPicker?: (options: { id?: string; mo
 /** Folders inside the chosen one that are read too (EOS can save into dated subfolders). */
 const maxDepth = 2;
 
+/**
+ * A camera's watch folder on the server always holds StudioFlow's own working files. Sending from
+ * it would upload its photos back into itself (and then the copies again), so it is refused.
+ */
+const watchFolderMarks = new Set(['.studioflow-sender.json', '.studioflow-received', '.studioflow-importing']);
+export const WRONG_FOLDER = 'This is a StudioFlow camera folder on the server, not the folder EOS Utility saves into on this laptop. Choose the EOS folder.';
+
+export async function isCameraFolder(dir: FileSystemDirectoryHandle) {
+  for await (const handle of (dir as DirectoryHandle).values()) {
+    if (watchFolderMarks.has(handle.name)) return true;
+  }
+  return false;
+}
+
 export function folderAccessSupported() {
   return typeof window !== 'undefined' && typeof (window as PickerWindow).showDirectoryPicker === 'function';
 }
@@ -42,6 +56,7 @@ export function browserFolder(root: DirectoryHandle): SendFolder {
       const entries: FolderEntry[] = [];
       const walk = async (dir: DirectoryHandle, prefix: string, depth: number) => {
         for await (const handle of dir.values()) {
+          if (watchFolderMarks.has(handle.name)) throw new Error(WRONG_FOLDER);
           if (/^[.~$]/.test(handle.name)) continue;
           if (handle.kind === 'directory') {
             if (depth < maxDepth) await walk(handle as unknown as DirectoryHandle, `${prefix}${handle.name}/`, depth + 1);

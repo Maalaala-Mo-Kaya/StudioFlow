@@ -5,7 +5,8 @@ import type { CameraStatus } from '../cameraApi';
 import { shotTypeAt } from '../shotTypes';
 import { createEngine, UploadError, type AutoSendEngine, type EngineState } from './engine';
 import {
-  browserFolder, folderAccessSupported, folderPermission, pickFolder, rememberFolder, savedFolder, type DirectoryHandle,
+  browserFolder, folderAccessSupported, folderPermission, isCameraFolder, pickFolder, rememberFolder, savedFolder, WRONG_FOLDER,
+  type DirectoryHandle,
 } from './browserFolder';
 import { registerFlush, takeLinkStart } from './registry';
 
@@ -203,6 +204,10 @@ export function useAutoSend(camera: CameraStatus | null) {
       const folder = await pickFolder();
       if (await folderPermission(folder, true) !== 'granted') {
         setProblem('The browser did not allow access to this folder.');
+        return;
+      }
+      if (await isCameraFolder(folder)) {
+        setProblem(WRONG_FOLDER);
         return;
       }
       await rememberFolder(folder);

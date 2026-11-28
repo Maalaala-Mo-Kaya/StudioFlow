@@ -128,7 +128,9 @@ export function createEngine(options: EngineOptions) {
     try {
       entries = (await options.folder.list()).filter((entry) => isSendable(entry.name));
     } catch (error) {
-      state = { ...state, phase: 'paused', error: `The folder can't be read: ${error instanceof Error ? error.message : String(error)}` };
+      const message = error instanceof Error ? error.message : String(error);
+      // A folder the rules refuse says why on its own; anything else is a read problem.
+      state = { ...state, phase: 'paused', error: /^This is a StudioFlow camera folder/.test(message) ? message : `The folder can't be read: ${message}` };
       return state;
     }
     entries.sort((a, b) => a.lastModified - b.lastModified || (a.path < b.path ? -1 : Number(a.path > b.path)));

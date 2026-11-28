@@ -302,3 +302,13 @@ test('the folder going away pauses without losing anything', async () => {
   await engine.round();
   assert.equal(server.calls.length, 1);
 });
+
+test('the server camera folder is refused with its own message', async () => {
+  const { engine, folder, server } = await setup();
+  folder.put('A.JPG', 1000);
+  folder.list = async () => { throw new Error('This is a StudioFlow camera folder on the server, not the folder EOS Utility saves into on this laptop. Choose the EOS folder.'); };
+  const state = await engine.round();
+  assert.equal(state.phase, 'paused');
+  assert.match(state.error, /^This is a StudioFlow camera folder/);
+  assert.equal(server.calls.length, 0, 'Nothing is sent from it.');
+});
