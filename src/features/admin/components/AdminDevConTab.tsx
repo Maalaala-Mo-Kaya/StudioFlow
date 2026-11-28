@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Database, Images, Lock, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
+import { AlertTriangle, Database, Images, Lock, Palette, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
 import { useToast } from '../../../context/ToastContext';
 
@@ -10,6 +10,7 @@ interface DevConSummary {
   photoFolders: number;
   confirmPhrase: string;
   chooserUnlimited: boolean;
+  muaStationOff: boolean;
 }
 
 interface WipeResult {
@@ -33,6 +34,7 @@ const clientLabels: Record<string, string> = {
   mua_completions: 'Makeup completion logs',
   mua_assignment_events: 'MUA assignments',
   mua_payouts: 'MUA payouts',
+  shot_origins: 'Which camera took each photo',
 };
 const keptLabels: Record<string, string> = {
   packages: 'Packages',
@@ -109,6 +111,23 @@ export const AdminDevConTab: React.FC = () => {
   };
   const overrideOn = !!summary?.chooserUnlimited;
 
+  const [muaSwitching, setMuaSwitching] = useState(false);
+  const setMuaStation = async (off: boolean) => {
+    setMuaSwitching(true);
+    try {
+      const result = await pb.send<{ muaStationOff: boolean; released: number }>(api + '/mua-station', { method: 'POST', body: { off } });
+      setSummary((current) => current && { ...current, muaStationOff: off });
+      toast.success(off
+        ? `MUA station is OFF: clients with makeup go straight to the photographers.${result.released ? ` ${result.released} waiting client${result.released === 1 ? '' : 's'} sent to the Photo Floor.` : ''}`
+        : 'MUA station is ON: clients with makeup wait for an artist again.');
+    } catch (err) {
+      toast.error(errorText(err));
+    } finally {
+      setMuaSwitching(false);
+    }
+  };
+  const muaOff = !!summary?.muaStationOff;
+
   return (
     <div className="space-y-6 animate-enter">
       <div className={`bg-panel border-2 shadow-lux p-6 ${overrideOn ? 'border-amber-500' : 'border-line'}`}>
@@ -128,6 +147,29 @@ export const AdminDevConTab: React.FC = () => {
             className={`btn-tactile shrink-0 min-h-[44px] px-5 text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-40 ${
               overrideOn ? 'bg-amber-500 text-black' : 'bg-obsidian text-gold'}`}>
             {switching ? 'Saving…' : overrideOn ? 'Override ON · tap to turn off' : 'Override OFF · tap to turn on'}
+          </button>
+        </div>
+      </div>
+
+      <div className={`bg-panel border-2 shadow-lux p-6 ${muaOff ? 'border-amber-500' : 'border-line'}`}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <Palette className="w-5 h-5 text-gold shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-ink m-0">MUA Station</h3>
+              <p className="text-[11px] text-neutral-600 mt-1 mb-0">
+                While OFF, clients whose order has makeup or grooming skip the MUA queue and go straight to the photographers
+                after paying. Turning it off also sends the clients waiting for an artist to the Photo Floor (anyone an artist
+                already started stays with that artist). The MUA money is unchanged: it stays on the order, the ledger and every
+                MUA total, but no artist is credited for it. MUA Payouts shows it in the shared MUA money total.
+              </p>
+            </div>
+          </div>
+          <button type="button" role="switch" aria-checked={!muaOff} disabled={!summary || muaSwitching}
+            onClick={() => void setMuaStation(!muaOff)}
+            className={`btn-tactile shrink-0 min-h-[44px] px-5 text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-40 ${
+              muaOff ? 'bg-amber-500 text-black' : 'bg-obsidian text-gold'}`}>
+            {muaSwitching ? 'Saving…' : muaOff ? 'MUA station OFF · tap to turn on' : 'MUA station ON · tap to turn off'}
           </button>
         </div>
       </div>

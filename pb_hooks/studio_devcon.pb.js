@@ -24,6 +24,18 @@ routerAdd("POST", "/api/studioflow/devcon/chooser-override", (e) => {
   return e.json(200, { chooserUnlimited: on });
 }, $apis.requireAuth("users"));
 
+// MUA station switch: { off: true | false }. While off, clients with makeup or grooming skip the MUA
+// queue (studio_mua_station.js); turning it off also releases the clients already waiting there.
+routerAdd("POST", "/api/studioflow/devcon/mua-station", (e) => {
+  const account = require(__hooks + "/studio_workflow.js").staff(e.app, e.auth, ["admin"]);
+  const off = (e.requestInfo().body || {}).off;
+  if (typeof off !== "boolean") throw new BadRequestError("Send off: true or false.");
+  const released = require(__hooks + "/studio_mua_station.js").setStationOff(e.app, off);
+  e.app.logger().info("DEV CON: MUA station " + (off ? "OFF" : "ON"), "by", account.getString("username"), "released", released);
+  require(__hooks + "/studio_station_events.js").notify(e.app);
+  return e.json(200, { muaStationOff: off, released });
+}, $apis.requireAuth("users"));
+
 routerAdd("POST", "/api/studioflow/devcon/wipe-clients", (e) => {
   const devcon = require(__hooks + "/studio_devcon.js");
   const account = require(__hooks + "/studio_workflow.js").staff(e.app, e.auth, ["admin"]);

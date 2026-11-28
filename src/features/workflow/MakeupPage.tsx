@@ -17,6 +17,7 @@ import { requiresConfirmation, type MakeupAssignment } from './makeupAssignment'
 import { StationTabs } from './StationTabs';
 import { StationLayout, stationCard } from './StationLayout';
 import { makeupField, makeupPrimary, makeupSecondary } from './makeupStyles';
+import { useStudioSettings } from '../../hooks/useStudioSettings';
 
 type Action = 'assign' | 'claim' | 'start' | 'complete' | 'release';
 const tabs = [
@@ -39,6 +40,7 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
   const teamPath = `/makeup-team?date=${encodeURIComponent(date)}${selection === 'team' ? '&overview=1' : ''}`;
   const { data: team, error: teamError, refresh: refreshTeam } = useWorkflowData<MuaTeam>(teamPath, undefined, true);
   const admin = user?.role === 'admin';
+  const stationOff = !!useStudioSettings().settings?.mua_station_off;
   const manage = admin || !!team?.manage;
   const availableTabs = tabs.filter(({ id }) => id === 'team' ? manage : id === 'waiting' ? manage || team?.canClaim : true);
   const defaultTab = admin ? 'waiting' : 'assigned';
@@ -155,6 +157,12 @@ export function MakeupPage({ embedded = false, teamSettings }: { embedded?: bool
       liveLabel={loading || activeError ? undefined : 'Live Queue'}
       description={embedded ? undefined : manage ? 'Assign clients and track makeup and grooming services.' : 'Manage your clients and confirm completed services.'}
       refresh={refreshTables} embedded={embedded}>
+      {stationOff && (
+        <p role="status" className="m-0 border-2 border-amber-500 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
+          The MUA station is turned off (Admin → DEV CON). Clients with makeup or grooming go straight to the photographers
+          after paying, and their MUA charges count in the shared MUA money total.
+        </p>
+      )}
       {admin && teamSettings && (
         <details className="group border border-line bg-panel">
           <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2.5 px-4 py-3 text-sm font-semibold text-ink hover:bg-gold-wash focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold [&::-webkit-details-marker]:hidden">

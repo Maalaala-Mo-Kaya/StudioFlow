@@ -47,6 +47,7 @@ function summary(app) {
   return {
     clients, kept, photoRoot: storage.basePath(), photoFolders: photoEntries().length, confirmPhrase,
     chooserUnlimited: !!settings?.getBool("chooser_unlimited"),
+    muaStationOff: !!settings?.getBool("mua_station_off"),
   };
 }
 

@@ -115,6 +115,8 @@ export interface StudioSettings {
   /** Ask the preferred makeup look at the kiosk (school / walk-in clients). */
   makeup_look_school?: boolean;
   makeup_look_walkin?: boolean;
+  /** Admin → DEV CON: the MUA station is off; clients with makeup go straight to the photographers. */
+  mua_station_off?: boolean;
 }
 
 export type RevenueCategory = 'studio' | 'mua';

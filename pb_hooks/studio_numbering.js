@@ -14,6 +14,8 @@ function issueJobOrder(app, record) {
 }
 
 function handoffToPhotography(app, record, timestamp = new Date().toISOString()) {
+  // MUA station off (DEV CON): makeup or grooming is skipped and the client goes to the photographers.
+  require(__hooks + "/studio_mua_station.js").skipIfOff(app, record);
   if (record.getInt("queue_number") || !record.getString("job_order_no")
     || record.getString("status") !== "paid" || !require(__hooks + "/studio_workflow.js").paymentEligible(record)) return;
   const state = record.getString("makeup_state");

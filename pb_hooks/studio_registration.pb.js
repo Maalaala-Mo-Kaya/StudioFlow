@@ -9,7 +9,7 @@ onRecordCreateRequest((e) => {
     job_order_no: "", queue_number: 0, queue_issued_at: "", paid_amount: 0, balance: 0,
     status: "pending_payment", payment_status: "unpaid", framing_status: "",
     photo_status: "pending_shoot", claimed_by: "", released_at: "", prepared_by: "",
-    makeup_state: "", makeup_artist: "", makeup_completed_at: "", makeup_version: 0,
+    makeup_state: "", makeup_artist: "", makeup_completed_at: "", makeup_version: 0, makeup_skipped: false,
     photo_edit_until: 0, photo_revision: 0,
     photo_selection: null, photo_pending: null, photo_last_request: null, photo_notes: null, photo_reshoots: null,
     refunded_amount: 0, cancelled_at: "", cancelled_by: "", cancel_reason: "", status_before_cancel: "",
@@ -85,6 +85,7 @@ onRecordUpdateRequest((e) => {
   const fields = [
     "job_order_no", "queue_number", "queue_issued_at",
     "makeup_service", "makeup_services", "makeup_state", "makeup_artist", "makeup_completed_at", "makeup_version", "shoot_completed",
+    "makeup_skipped",
     "photo_folder", "photo_folder_key", "photo_edit_until", "photo_revision",
     "photo_selection", "photo_pending", "photo_last_request", "photography", "photo_notes", "photo_reshoots", "floor_visits",
     // Server-owned pickup tracking (see studio_production.pb.js).
@@ -192,7 +193,11 @@ onRecordUpdateRequest((e) => {
           if (workflow.activeMakeup.includes(state)) throw new ApiError(409, "Release the active MUA assignment before changing its services.");
           workflow.saveMakeupServices(e.record, services);
           e.record.set("makeup_version", current.getInt("makeup_version") + 1);
-          if (added.length && (state === "completed" || inShoot)) {
+          const station = require(__hooks + "/studio_mua_station.js");
+          if (added.length && station.stationOff(tx)) {
+            // MUA station off: the new services are skipped too; the client stays where they are.
+            e.record.set("makeup_skipped", true);
+          } else if (added.length && (state === "completed" || inShoot)) {
             // New makeup after an earlier round (or during the shoot): back to the MUA queue.
             // The artist is credited only for the new services (see studio_mua_reporting.logCompletion),
             // and the client keeps their photo queue number for when they return.

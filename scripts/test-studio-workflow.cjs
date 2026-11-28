@@ -3064,6 +3064,49 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await submit(409);
   });
 
+  // DEV CON MUA station switch: while off, clients with makeup skip the MUA queue and go straight to
+  // the photographers; the money stays on the order, credited to no artist (shared MUA money).
+  await t.test('the MUA station can be turned off: makeup is skipped, the money is kept', async () => {
+    const station = (off, token = admin, status = 200) =>
+      send(`${api}/devcon/mua-station`, { method: 'POST', token, status, body: { off } }).then((r) => r.payload);
+    await station(true, photographer, 403);
+    await station('yes', admin, 400);
+    const glam = await create('add_ons', { code: 'GLAM-OFF', name: 'Glam makeup', amount: 300, is_active: true, revenue_category: 'mua', requires_mua: true });
+    const payFull = async (student) => {
+      const total = (await registrations(student)).payload.total_amount;
+      await pay(student, total);
+    };
+    const waitingMua = await register(standard, [{ id: glam.id }]);
+    await payFull(waitingMua);
+    let record = (await registrations(waitingMua)).payload;
+    assert.deepEqual([record.makeup_state, !!record.queue_number], ['', false], 'Station on: waits for an artist.');
+    const switched = await station(true);
+    assert.ok(switched.muaStationOff && switched.released >= 1, JSON.stringify(switched));
+    record = (await registrations(waitingMua)).payload;
+    assert.deepEqual([record.makeup_state, record.makeup_skipped, record.queue_number > 0], ['completed', true, true],
+      'Turning the station off releases the clients waiting for an artist.');
+    assert.equal((await send(api + '/devcon/summary', { token: admin })).payload.muaStationOff, true);
+    await send(records('registrations', waitingMua.id), { token: admin, method: 'PATCH', body: { makeup_skipped: false }, status: 403 });
+
+    const direct = await register(standard, [{ id: glam.id }]);
+    assert.equal((await registrations(direct)).payload.makeup_skipped, false);
+    await payFull(direct);
+    record = (await registrations(direct)).payload;
+    assert.deepEqual([record.makeup_state, record.makeup_skipped, record.queue_number > 0, record.makeup_service], ['completed', true, true, 'Glam makeup']);
+    await shoot(direct, 'shooting');
+    assert.equal((await registrations(direct)).payload.total_amount, record.total_amount, 'The MUA charge stays on the order.');
+    const payouts = (await send(`${api}/mua-payouts?from=${today}&to=${today}`, { token: admin })).payload;
+    assert.ok(payouts.shared.some((line) => line.jobId === direct.id && line.item === 'Glam makeup' && line.amount === 300),
+      'The skipped service is the MUA team\'s money, not one artist\'s.');
+    assert.ok(!payouts.lines.some((line) => line.jobId === direct.id));
+
+    await station(false);
+    const normal = await register(standard, [{ id: glam.id }]);
+    await payFull(normal);
+    record = (await registrations(normal)).payload;
+    assert.deepEqual([record.makeup_state, record.makeup_skipped, !!record.queue_number], ['', false, false], 'Back on: the MUA queue again.');
+  });
+
   // Last: it wipes every client record.
   await t.test('DEV CON deletes only client records, after a backup and the admin password', async () => {
     const devcon = api + '/devcon';

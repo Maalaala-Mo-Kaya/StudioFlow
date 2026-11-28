@@ -102,7 +102,10 @@ function sharedLines(job, lookups) {
     const sources = workflow.json(log, "sources");
     for (const source of Array.isArray(sources) ? sources : []) if (source?.id) credited.add(source.source + ":" + source.id);
   }
-  const isShared = (collection, id) => !lookups.find(collection, id)?.getBool("requires_mua")
+  // MUA station off (makeup_skipped): the services were not done through the station, so no artist is
+  // credited. Their money is the MUA team's total, listed here with the shared money.
+  const skipped = job.getBool("makeup_skipped");
+  const isShared = (collection, id) => (skipped || !lookups.find(collection, id)?.getBool("requires_mua"))
     && !credited.has((collection === "packages" ? "package:" : "add_on:") + id);
   if (pkg?.revenue_category === "mua" && isShared("packages", pkg.id)) lines.push({ item: pkg.name, amount: cents(pkg.amount) });
   for (const item of savedAddOns(job)) {
