@@ -9,8 +9,6 @@
 //   designation). Empty = every active type. Written only through /api/studioflow/shot-menu.
 // - camera_stations.shot_type: the code the camera's next shots get. Server-owned session field,
 //   set through /api/studioflow/camera/:id/shot-type.
-// - shot_origins: which camera (or whose card upload) each kept photo of a client came from, so each
-//   photographer reviews only their own shots on the Photo Floor. Written by the server only.
 migrate((app) => {
   const signedIn = "@request.auth.id != '' && @request.auth.disabled = false";
   const admin = "@request.auth.role = 'admin' && @request.auth.disabled = false";
@@ -41,21 +39,15 @@ migrate((app) => {
     byName.get(key).push(item.id);
   }
   const link = (...names) => names.flatMap((name) => byName.get(name.toLowerCase()) || []);
-  // In pairs, as photographers tell them apart on set: cap or no cap, Filipiniana or glamour (women),
-  // barong or coat and tie (men), and the group pictures.
   const defaults = [
     ["With toga", "TOGA", link()],
     ["Without toga", "NO TOGA", link()],
     ["Toga with cap", "TOGA CAP", link("Toga with cap", "Toga w/ cap")],
     ["Toga w/out cap", "TOGA NO CAP", link("Toga w/out cap", "Toga without cap")],
-    ["Filipiniana", "FILIPINIANA", link("Filipiniana")],
-    ["Glamour shot", "GLAMOUR", link("Glamor shots", "Glamour shots", "Glamor shot", "Glamour shot")],
-    ["Barong", "BARONG", link("Barong")],
-    ["Coat and tie", "COAT TIE", link("Coat and Tie", "Coat & Tie")],
-    ["Family", "FAMILY", link("FAMILY PICTURE", "FREE FAMILY PICTURE")],
-    ["Barkada", "BARKADA", link("BARKADA SHOT", "BARKADA PICTURE", "FREE BARKADA, COUPLE AND GROUP SHOTS")],
-    ["Couple", "COUPLE", link("COUPLE SHOT", "FREE BARKADA, COUPLE AND GROUP SHOTS")],
     ["Group", "GROUP", link("FREE BARKADA, COUPLE AND GROUP SHOTS", "GROUP SHOT", "GROUP PICTURE")],
+    ["Family", "FAMILY", link("FAMILY PICTURE", "FREE FAMILY PICTURE")],
+    ["Couple", "COUPLE", link("COUPLE SHOT", "FREE BARKADA, COUPLE AND GROUP SHOTS")],
+    ["Barkada", "BARKADA", link("BARKADA SHOT", "BARKADA PICTURE", "FREE BARKADA, COUPLE AND GROUP SHOTS")],
   ];
   defaults.forEach(([name, code, linked], index) => {
     const record = new Record(types);
@@ -75,21 +67,7 @@ migrate((app) => {
   if (!stations.fields.getByName("shot_type")) stations.fields.add(new TextField({ name: "shot_type", max: 24 }));
   app.save(stations);
 
-  const registrations = app.findCollectionByNameOrId("registrations");
-  const origins = new Collection({ type: "base", name: "shot_origins" });
-  origins.fields.add(
-    new RelationField({ name: "registration", collectionId: registrations.id, maxSelect: 1, required: true, cascadeDelete: true }),
-    // The photo's file name without its shot type label, lower case.
-    new TextField({ name: "shot", required: true, max: 300 }),
-    // A camera_stations id, or "card" for a card upload.
-    new TextField({ name: "camera", max: 30 }),
-    new TextField({ name: "photographer", max: 30 }),
-    new AutodateField({ name: "created", onCreate: true }),
-  );
-  origins.addIndex("idx_shot_origins_shot", true, "registration, shot", "");
-  app.save(origins);
 }, (app) => {
-  app.delete(app.findCollectionByNameOrId("shot_origins"));
   const stations = app.findCollectionByNameOrId("camera_stations");
   stations.fields.removeByName("shot_type");
   app.save(stations);
