@@ -280,8 +280,10 @@ function resumeStaged(app, watch, activeId, errors, source) {
 }
 
 // One pass over a station's folder. `flush` ignores the settle delay, used when
-// a session ends so the last shots still reach the client who was on set.
-function scan(app, id, flush = false) {
+// a session ends so the last shots still reach the client who was on set. `ready`: files (lower-case
+// paths in the watch folder) known to be complete, filed without the settle delay: a shot the
+// server itself has just written from an upload (studio_camera_sender.js).
+function scan(app, id, flush = false, ready = null) {
   const started = Date.now();
   const lock = app.db().newQuery(
     "UPDATE camera_stations SET scan_lock = {:now} WHERE id = {:id} AND (scan_lock IS NULL OR scan_lock < {:stale})",
@@ -328,7 +330,7 @@ function scan(app, id, flush = false) {
         for (const file of files) {
           if (skip.has(file.key)) { waiting++; continue; }
           if (processed >= maxFilesPerScan) { backlog = true; break; }
-          if ((!flush || taskId) && (file.size <= 0 || started - file.modified < settleMs)) {
+          if (!ready?.has(file.path.toLowerCase()) && (!flush || taskId) && (file.size <= 0 || started - file.modified < settleMs)) {
             backlog = true;
             continue;
           }

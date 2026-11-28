@@ -144,6 +144,15 @@ function upload(e) {
       e.app.logger().warn("Photo Sender: could not record an upload id", "camera", station.id, "error", text(error));
     }
     if (Math.random() < 0.05) cleanReceived(watch);
+    // File it into the linked client's folder now, instead of on the next scan (a Photo Floor page
+    // scans every few seconds, after a settle delay this shot doesn't need: it was written whole and
+    // its size checked above). If another scan is running, that one or the next files it.
+    try {
+      const camera = require(__hooks + "/studio_camera_import.js");
+      for (let attempt = 0; attempt < 5 && !camera.scan(e.app, station.id, false, new Set([saved.toLowerCase()])); attempt++) sleep(40);
+    } catch (error) {
+      e.app.logger().warn("Photo Sender: filing right after the upload failed", "camera", station.id, "error", text(error));
+    }
     return e.json(200, { status: "saved", name: saved, size: written });
   } finally {
     if (partial) { try { root.remove(partial); } catch (_) { /* already gone */ } }

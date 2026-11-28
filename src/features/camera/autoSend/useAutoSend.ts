@@ -26,7 +26,9 @@ export type AutoSendStatus =
 const prefKey = 'studioflow-auto-send';
 const linksKey = 'studioflow-auto-send-links';
 const deviceKey = 'studioflow-device-id';
-const roundMs = 1_500;
+/** How often the folder is looked at; a shot goes once it is unchanged on two looks and 1.5 s old. */
+const roundMs = 1_000;
+const settleMs = 1_500;
 const heartbeatMs = 5_000;
 const uploadTimeoutMs = 180_000;
 
@@ -134,6 +136,7 @@ export function useAutoSend(camera: CameraStatus | null) {
       typeAt: shotTypeAt,
       linkedSince: () => linkedSince.current,
       deviceId: deviceId(),
+      settleMs,
     });
     setProblem('');
     setStatus('running');

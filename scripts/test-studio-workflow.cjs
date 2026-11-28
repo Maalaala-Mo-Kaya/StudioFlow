@@ -1380,7 +1380,8 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal((await browserUpload('IMG_2 [FAM].jpg', jpeg, { Authorization: cashier })).status, 403);
     assert.equal((await browserUpload('IMG_2 [FAM].jpg', jpeg, { Authorization: photographer })).payload.status, 'saved');
     assert.equal((await browserUpload('IMG_2 [FAM].jpg', jpeg, { Authorization: photographer })).payload.status, 'already');
-    await utimes(join(typedDir, 'IMG_2 [FAM].jpg'), settled, settled);
+    // An upload is filed into the client's folder at once (no wait for the next scan).
+    assert.ok(!(await readdir(typedDir)).includes('IMG_2 [FAM].jpg'), 'Already moved out of the camera folder.');
     await typedApi('scan');
     await typedApi('shot-type', { code: '' });
     await typedDrop('IMG_3.jpg');

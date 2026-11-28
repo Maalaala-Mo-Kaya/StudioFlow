@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Eye, EyeOff, HardDriveUpload, ImageOff, Images, RotateCcw, Tags, Trash2, X } from 'lucide-react';
 import { pb } from '../../../db/pocketbase';
 import { useWorkflowData, workflowApi, workflowError } from '../../../hooks/useWorkflowData';
-import { useAuthedImage } from '../../../hooks/useAuthedImage';
+import { prefetchAuthedImage, useAuthedImage } from '../../../hooks/useAuthedImage';
 import { useToast } from '../../../context/ToastContext';
 import { DataFeedback } from '../../../components/common/DataFeedback';
 import { menuTypes, typeLabel, untagged, type ShotType, type ShotTypeListing } from '../../camera/shotTypes';
@@ -26,8 +26,10 @@ const photoFile = /\.(jpe?g|png|webp|gif|avif)$/i;
 const autoViewKey = 'studioflow-auto-view';
 const menuHiddenKey = 'studioflow-viewer-menu-hidden';
 
+// `v` (the file time) makes a new shot that reuses an old file name a different address, so the
+// shared image cache never shows the old picture for it.
 const imageUrl = (registrationId: string, shot: Shot, deleted: boolean) =>
-  `${workflowApi}/shoot/${registrationId}/image/${shot.id}?${new URLSearchParams({ name: shot.name, ...(deleted ? { deleted: '1' } : {}) })}`;
+  `${workflowApi}/shoot/${registrationId}/image/${shot.id}?${new URLSearchParams({ name: shot.name, v: String(shot.modified), ...(deleted ? { deleted: '1' } : {}) })}`;
 /** The same shot before and after a type change (the change renames it, so its id changes). */
 const shotKey = (shot: Shot) => `${untagged(shot.name).toLowerCase()}|${shot.size}|${shot.modified}`;
 
@@ -117,6 +119,11 @@ export const ShootGallery: React.FC<{
     return [...photos].reverse().filter((shot) => mine(shot) && !reviewed.has(shotKey(shot)));
   }, [photos, reviewed, stationId, userId]);
   const latestPending = pending.length ? shotKey(pending[pending.length - 1]) : '';
+  // While one new shot is on screen, the next one downloads, so the review moves on without waiting.
+  const nextReview = pending[1];
+  useEffect(() => {
+    if (nextReview) prefetchAuthedImage(imageUrl(registrationId, nextReview, false));
+  }, [nextReview, registrationId]);
   // Reported when the count changes (the page's callback may be a new function on every render).
   const reportPending = useRef(onPendingChange);
   useEffect(() => { reportPending.current = onPendingChange; });
