@@ -5,10 +5,9 @@
  * Compatible with PocketBase v0.23+ / 0.41.x hook middleware pattern (e.next()).
  */
 
-onRecordEnrich((e) => {
-  e.next();
-  require(__hooks + "/studio_numbering.js").exposeNumbers(e.record);
-}, "registrations");
+// (Job orders without a number used to be sent with null numbers by an onRecordEnrich hook on every
+// listed record. That hook made a list of 2,000 job orders about four times slower, so the app does
+// it now: absentNumbersAsNull in src/db/pocketbase.ts.)
 
 onRecordCreateRequest((e) => {
   // The settlement route attaches its own immutable receipt snapshot.

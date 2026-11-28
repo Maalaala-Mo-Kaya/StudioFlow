@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
-import { mountSubscription, useRealtimeClient } from '../../hooks/useRealtimeClient';
+import { coalesce, mountSubscription, useRealtimeClient } from '../../hooks/useRealtimeClient';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { workflowApi, workflowError } from '../../hooks/useWorkflowData';
@@ -159,12 +159,15 @@ export function useCashierState() {
   const live = useRealtimeClient();
   useEffect(() => {
     void fetchRegistrations();
+    // A burst of live events (one payment sends several) reloads the list once.
+    const reload = coalesce(fetchRegistrations);
     const stopRegistrations = mountSubscription(
-      (listener) => live.collection('registrations').subscribe('*', listener), () => fetchRegistrations());
+      (listener) => live.collection('registrations').subscribe('*', listener), reload);
     const stopDeleted = mountSubscription(
-      (listener) => live.realtime.subscribe('studioflow-registration-deleted', listener), () => fetchRegistrations());
+      (listener) => live.realtime.subscribe('studioflow-registration-deleted', listener), reload);
     return () => {
       fetchGeneration.current += 1;
+      reload.cancel();
       stopRegistrations();
       stopDeleted();
     };

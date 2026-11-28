@@ -55,7 +55,20 @@ function makeLookups(app) {
       balance: balance / 100,
     };
   };
-  const completions = (jobId) => app.findRecordsByFilter("mua_completions", "job_id = {:jobId}", "", 0, 0, { jobId });
+  // Every completion, loaded once and grouped by job order: a report covers many job orders, and one
+  // query per job order made long periods (All time) slow.
+  let byJob = null;
+  const completions = (jobId) => {
+    if (!byJob) {
+      byJob = new Map();
+      for (const log of app.findRecordsByFilter("mua_completions", "", "completed_at,id", 0, 0)) {
+        const id = log.getString("job_id");
+        if (!byJob.has(id)) byJob.set(id, []);
+        byJob.get(id).push(log);
+      }
+    }
+    return byJob.get(jobId) || [];
+  };
   return { find, order, completions };
 }
 
@@ -157,9 +170,7 @@ function ordersReport(app, jobIds) {
   const lines = [];
   const shared = [];
   for (const id of jobIds) {
-    for (const log of app.findRecordsByFilter("mua_completions", "job_id = {:id}", "completed_at,id", 0, 0, { id })) {
-      lines.push(artistLine(log, lookups, payouts));
-    }
+    for (const log of lookups.completions(id)) lines.push(artistLine(log, lookups, payouts));
     const job = lookups.find("registrations", id);
     if (job) shared.push(...sharedLines(job, lookups));
   }

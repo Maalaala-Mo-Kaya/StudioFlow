@@ -40,6 +40,31 @@ export const pb = new PocketBase(getBaseUrl());
 // from navbar counters, cashier, and photographer queues never abort each other.
 pb.autoCancellation(false);
 
+/**
+ * Job orders without a number yet are stored with an empty job_order_no and queue_number 0; the
+ * screens expect null for "none" (types/index.ts). This used to be done by a server hook on every
+ * listed record, which made a list of 2,000 job orders about four times slower; the app now does it
+ * here, on every response (records, lists and their expand).
+ */
+function absentNumbersAsNull(value: unknown, depth = 0): void {
+  if (!value || typeof value !== 'object' || depth > 6) return;
+  if (Array.isArray(value)) {
+    for (const item of value) absentNumbersAsNull(item, depth + 1);
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.job_order_no === '') record.job_order_no = null;
+  if (record.queue_number === 0 && 'job_order_no' in record) record.queue_number = null;
+  for (const key of ['items', 'expand']) if (record[key]) absentNumbersAsNull(record[key], depth + 1);
+  if (record.expand && typeof record.expand === 'object') {
+    for (const nested of Object.values(record.expand as Record<string, unknown>)) absentNumbersAsNull(nested, depth + 1);
+  }
+}
+pb.afterSend = (_response, data) => {
+  absentNumbersAsNull(data);
+  return data;
+};
+
 function createRealtimeClient(token: string) {
   const auth = new BaseAuthStore();
   auth.save(token);
@@ -76,3 +101,7 @@ export function clearStudioAuth() {
  */
 export const kioskPb = new PocketBase(getBaseUrl(), new BaseAuthStore());
 kioskPb.autoCancellation(false);
+kioskPb.afterSend = (_response, data) => {
+  absentNumbersAsNull(data);
+  return data;
+};

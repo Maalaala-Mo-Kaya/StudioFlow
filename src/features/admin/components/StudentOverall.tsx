@@ -2,7 +2,7 @@ import { ClientResponseError } from 'pocketbase';
 import type { DataRequestState } from '../../../components/common/DataFeedback';
 import { useEffect, useMemo, useState } from 'react';
 import { pb } from '../../../db/pocketbase';
-import { mountSubscription, useRealtimeClient } from '../../../hooks/useRealtimeClient';
+import { coalesce, mountSubscription, useRealtimeClient } from '../../../hooks/useRealtimeClient';
 import type { Course, Level, Organization, Package, PaymentRecord, RefundRecord, Registration } from '../../../types';
 import { sumAddOnAmounts } from '../../../utils/registrationAddOns';
 import {
@@ -118,14 +118,16 @@ function usePaymentLedger() {
     }
 
     void refresh();
+    const reload = coalesce(refresh);
     const unsubscribe = mountSubscription(async (listener) => {
       const stop = await live.collection('payments').subscribe('*', listener);
       // Catch transactions recorded between the initial fetch and the subscription.
-      if (active) void refresh();
+      if (active) reload();
       return stop;
-    }, refresh);
+    }, reload);
     return () => {
       active = false;
+      reload.cancel();
       unsubscribe();
     };
   }, [attempt, live]);

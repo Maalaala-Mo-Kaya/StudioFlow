@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { pb } from '../../db/pocketbase';
 import type { RecordSubscription } from 'pocketbase';
-import { mountSubscription, useRealtimeClient } from '../../hooks/useRealtimeClient';
+import { coalesce, mountSubscription, useRealtimeClient } from '../../hooks/useRealtimeClient';
 import type { Registration } from '../../types';
 import { playStudioChime } from '../../utils/audio';
 import { useToast } from '../../context/ToastContext';
@@ -69,14 +69,21 @@ export function usePhotographerQueue() {
   const live = useRealtimeClient();
   useEffect(() => {
     void fetchLiveQueue();
+    // One reload (and one chime) per burst of live events, not one per event.
+    let chime = false;
+    const reload = coalesce(() => {
+      if (chime) playStudioChime();
+      chime = false;
+      return fetchLiveQueue();
+    });
     const stop = mountSubscription<RecordSubscription<Registration>>(
       (listener) => live.collection('registrations').subscribe('*', listener),
       (event) => {
-        if (event.action === 'create' || event.action === 'update') playStudioChime();
-        void fetchLiveQueue();
+        if (event.action === 'create' || event.action === 'update') chime = true;
+        reload();
       },
     );
-    return () => { queueRequest.current += 1; stop(); };
+    return () => { queueRequest.current += 1; reload.cancel(); stop(); };
   }, [live, fetchLiveQueue]);
 
   const startPhotography = useCallback(

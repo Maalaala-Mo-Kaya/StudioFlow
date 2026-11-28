@@ -450,10 +450,12 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
   await send(records('packages', unusedPackage.id), { token: admin, method: 'DELETE', status: 204 });
   const unusedAddOn = await create('add_ons', { code: 'TMP-ADD', name: 'Unused add-on', amount: 0, is_active: true, revenue_category: 'studio' });
   await send(records('add_ons', unusedAddOn.id), { token: admin, method: 'DELETE', status: 204 });
-  assert.deepEqual([plain.job_order_no, plain.queue_number, unpaid.job_order_no, unpaid.queue_number], [null, null, null, null]);
-  assert.deepEqual([(await registrations(plain, cashier)).payload.job_order_no, (await registrations(plain, cashier)).payload.queue_number], [null, null]);
+  // No number yet: the API sends the stored empty values; the app reads them as null (src/db/pocketbase.ts).
+  const none = (value) => (value === '' || value === 0 ? null : value);
+  assert.deepEqual([plain.job_order_no, plain.queue_number, unpaid.job_order_no, unpaid.queue_number].map(none), [null, null, null, null]);
+  assert.deepEqual([(await registrations(plain, cashier)).payload.job_order_no, (await registrations(plain, cashier)).payload.queue_number].map(none), [null, null]);
   await pay(plain, 1, 'full', 400);
-  assert.equal((await registrations(plain)).payload.job_order_no, null);
+  assert.equal(none((await registrations(plain)).payload.job_order_no), null);
   await registrations(plain, admin, { job_order_no: '12345' }, 403);
   await registrations(plain, admin, { queue_number: 123 }, 403);
   // The client folder is made at the first payment, named <job no>_<Last>_<First> (no record ID).
@@ -489,7 +491,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     await pay(student, count === 5 ? 550 : 500, 'initial');
     const paid = (await registrations(student)).payload;
     assert.match(paid.job_order_no, /^\d{5,}$/);
-    assert.equal(paid.queue_number, null);
+    assert.equal(none(paid.queue_number), null);
     if (count === 2) {
       const update = await Promise.race([
         readEvent('registrations/*', ({ record }) => record.id === student.id && record.status === 'paid'),
@@ -524,11 +526,11 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     assert.equal((await queue(other)).length, 0);
     const reloaded = { ...owner, token: (await login(owner.username)).token };
     assert.equal((await queue(reloaded))[0].state, 'claimed');
-    assert.equal((await registrations(student)).payload.queue_number, null);
+    assert.equal(none((await registrations(student)).payload.queue_number), null);
     await contest(student, owner, 'claim');
     await contest(student, other, 'start', 403);
     await contest(student, owner, 'start');
-    assert.equal((await registrations(student)).payload.queue_number, null);
+    assert.equal(none((await registrations(student)).payload.queue_number), null);
     await contest(student, owner, 'start');
     await shoot(student, 'done_shooting', 400);
     await contest(student, owner, 'complete');
@@ -944,7 +946,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
 
   const pickup = await register(standard);
   const dropped = await register(standard);
-  assert.deepEqual([dropped.queue_number, pickup.queue_number, dropped.job_order_no, pickup.job_order_no], [null, null, null, null]);
+  assert.deepEqual([dropped.queue_number, pickup.queue_number, dropped.job_order_no, pickup.job_order_no].map(none), [null, null, null, null]);
 
   // Release gate: full payment alone is not enough; production must be marked ready.
   const release = { status: 'released', framing_status: 'released', claimed_by: 'Juan', released_at: new Date().toISOString() };
@@ -1878,7 +1880,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
 
   // Concurrent registration consumes no numbers. Concurrent first payments allocate both sequences.
   const together = await Promise.all(Array.from({ length: 6 }, () => register(standard)));
-  assert.ok(together.every((student) => student.job_order_no === null && student.queue_number === null));
+  assert.ok(together.every((student) => none(student.job_order_no) === null && none(student.queue_number) === null));
   const concurrentPayments = await Promise.all(together.map((student) => pay(student, 1000)));
   const concurrentPaid = await Promise.all(together.map(async (student) => (await registrations(student)).payload));
   const numbers = concurrentPaid.map((student) => student.job_order_no);
@@ -2656,7 +2658,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     const wrong = await register(prepared, [], 200, name);
     const correct = await register(standard, [], 200, name);
     const original = (await registrations(correct)).payload;
-    assert.deepEqual([wrong.job_order_no, wrong.queue_number], [null, null]);
+    assert.deepEqual([wrong.job_order_no, wrong.queue_number].map(none), [null, null]);
     const before = await eligible();
     assert.ok(before.includes(wrong.id) && before.includes(correct.id));
     assert.equal((await list(cashier)).totalItems, 2);
@@ -2734,7 +2736,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
         method: 'POST', token: cashier, body: { percentage, reason: 'Discount correction' },
       });
     }
-    assert.equal((await registrations(discounted)).payload.job_order_no, null);
+    assert.equal(none((await registrations(discounted)).payload.job_order_no), null);
     assert.ok(!(await eligible()).includes(discounted.id));
     await remove(discounted, 409);
 
@@ -2809,7 +2811,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
     // Rejected by the standard payment hook after the proposed discount was saved inside the transaction.
     await confirm(mixed, { ...draft, payment: { ...draft.payment, amount: 574 } }, 400);
     const rolledBack = await load(mixed);
-    assert.deepEqual([rolledBack.balance, rolledBack.revenue_discount, rolledBack.job_order_no], [950, null, null]);
+    assert.deepEqual([rolledBack.balance, rolledBack.revenue_discount, none(rolledBack.job_order_no)], [950, null, null]);
     assert.equal((await entries('payments', mixed)).length, 0);
     assert.equal((await entries('cashier_confirmations', mixed)).length, 0);
 
@@ -2961,7 +2963,7 @@ test('StudioFlow staff workflow on PocketBase and real photo folders', { timeout
       add_ons: [{ id: extra.id, amount: 1 }],
     });
     assert.equal(saved.id, client.id);
-    assert.deepEqual([saved.status, saved.paid_amount, saved.job_order_no, saved.payment_status], ['pending_payment', 0, null, 'unpaid']);
+    assert.deepEqual([saved.status, saved.paid_amount, none(saved.job_order_no), saved.payment_status], ['pending_payment', 0, null, 'unpaid']);
     assert.equal(saved.package_snapshot.amount, 4600);
     assert.equal(saved.add_ons.find(({ id }) => id === extra.id).amount, 500);
     assert.ok(!saved.add_ons.some(({ id }) => id === makeup.id));

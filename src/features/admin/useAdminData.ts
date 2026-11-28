@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ClientResponseError } from 'pocketbase';
 import { pb } from '../../db/pocketbase';
-import { mountSubscription, useRealtimeClient } from '../../hooks/useRealtimeClient';
+import { coalesce, mountSubscription, useRealtimeClient } from '../../hooks/useRealtimeClient';
 import { useToast } from '../../context/ToastContext';
 import type {
   Organization, Level, Course, SchoolCourse, AssignSchoolCourse, Package, AddOn,
@@ -147,11 +147,14 @@ export function useAdminData() {
   const live = useRealtimeClient();
   useEffect(() => {
     void loadAllData();
+    // A burst of live events (one payment changes the payment and its job order) reloads once.
+    const reload = coalesce(loadAllData);
     const stops = ['registrations', 'packages', 'payments', 'refunds'].map((name) =>
-      mountSubscription((listener) => live.collection(name).subscribe('*', listener), loadAllData));
-    stops.push(mountSubscription((listener) => live.realtime.subscribe('studioflow-registration-deleted', listener), loadAllData));
+      mountSubscription((listener) => live.collection(name).subscribe('*', listener), reload));
+    stops.push(mountSubscription((listener) => live.realtime.subscribe('studioflow-registration-deleted', listener), reload));
     return () => {
       loadGeneration.current += 1;
+      reload.cancel();
       stops.forEach((stop) => stop());
     };
   }, [live, loadAllData]);
